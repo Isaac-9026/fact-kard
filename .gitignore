@@ -1,0 +1,23 @@
+# Python / Django
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+# Node / React
+node_modules/
+frontend/dist/
+
+# Entornos y secretos
+.env
+*.env.local
+
+# IDEs y Sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Backups locales
+*.backup
