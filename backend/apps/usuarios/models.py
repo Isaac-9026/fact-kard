@@ -1,3 +1,52 @@
 from django.db import models
 
-# Create your models here.
+
+class Usuario(models.Model):
+    username = models.CharField(max_length=150, unique=True)
+    email = models.EmailField(max_length=254, unique=True)
+    password_hash = models.CharField(max_length=255)
+    es_admin_global = models.BooleanField(default=False, db_default=False)
+    activo = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'usuario'
+        verbose_name = 'Usuario'
+        verbose_name_plural = 'Usuarios'
+
+    def __str__(self):
+        return self.username
+
+
+class UsuarioEmpresa(models.Model):
+    usuario = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.CASCADE,
+        db_column='usuario_id',
+        related_name='empresas_asignadas'
+    )
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='usuarios_asignados'
+    )
+    rol = models.CharField(max_length=20)
+    activo = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'usuario_empresa'
+        verbose_name = 'Usuario por Empresa'
+        verbose_name_plural = 'Usuarios por Empresa'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['usuario', 'empresa'],
+                name='uq_usuario_empresa'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(rol__in=['ADMIN', 'USUARIO']),
+                name='chk_usuario_empresa_rol'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.usuario.username} - {self.empresa.razon_social} ({self.rol})"
