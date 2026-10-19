@@ -48,7 +48,7 @@ En la raíz del repositorio crearemos el archivo `AGENTS.md` con estas reglas qu
 - [ ] **0.4.** Inicializar en `frontend/` el proyecto Vite (`react-ts`) con `axios`, `react-router-dom` y carpetas base (`api/`, `components/`, `layouts/`, `pages/`, `hooks/`, `types/`, `utils/`)[cite: 1].
 
 **En paralelo con el contador de ASESCON (Fase 0)[cite: 1, 3]:**
-- [ ] **0.5.** Entregar al contador las **3 consultas pendientes** (Formato 13.1 por establecimiento con CPP global, reparto de ND/NC con período origen cerrado, y TC en ND/NC en USD)[cite: 1, 2, 3].
+- [x] **0.5.** **3 reglas contables validadas (Fase 0 cerrada):** 1) Formato 13.1 por establecimiento con CPP global y asignación de redondeo a `establecimiento_principal_id` (registrado en `auditoria`); 2) NC/ND con período origen cerrado repartida proporcional según stock restante en inventario (porción vendida va directo a costo de ventas/gasto fuera de Kardex); 3) NC/ND en USD aplica obligatoriamente el TC del documento original (`documento_origen_id`)[cite: 1, 2, 3].
 - [ ] **0.6.** Solicitar los **10–15 casos reales** en Excel con sus resultados esperados y medir el tiempo manual actual por comprobante[cite: 1, 3].
 
 ---

@@ -824,12 +824,21 @@ CIERRE_PERIODO_DETALLE
 
 ---
 
-## 22. Pendientes contables
+## 22. Reglas contables validadas (Fase 0 cerrada)
 
 ```text
-1. Formato 13.1 por establecimiento usando CPP global.
-2. Reparto de ND/NC cuando el período origen está cerrado.
-3. Tipo de cambio aplicable a ND/NC en USD.
+1. Formato 13.1 por establecimiento:
+   - Se mantiene un único CPP global por empresa + producto.
+   - Cada establecimiento usa ese CPP global para valorizar sus cantidades físicas.
+   - Si existe microdiferencia por redondeo, se asigna a config_empresa.establecimiento_principal_id y se registra en auditoria.
+
+2. NC/ND cuando el documento origen está en un período CERRADO:
+   - El ajuste se reparte según la proporción del stock de esa compra que todavía permanece en inventario.
+   - Solo la proporción correspondiente al stock restante entra al Kardex (MOVIMIENTO tipo AJUSTE_VALOR) modificando el valor del inventario y el CPP.
+   - La proporción correspondiente a mercadería ya vendida queda fuera del Kardex (se informa para tratamiento contable directo al costo de ventas/gasto).
+
+3. NC/ND en moneda extranjera (USD):
+   - Se aplica obligatoriamente el Tipo de Cambio (monto_tc, fecha_tc, fuente_tc) del documento original (documento_origen_id), nunca el TC de la fecha de emisión de la nota.
 ```
 
-Estas respuestas cambian la lógica del motor, no esta estructura base.
+Estas reglas contables confirmadas quedan plenamente soportadas por el esquema DDL y la arquitectura de datos definida.

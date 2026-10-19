@@ -299,7 +299,7 @@ Excel sirve para comparar resultados, auditar, entregar reportes y conservar sna
 
 Debe quedar preparado para período, empresa, establecimiento, producto, tipo de existencia, unidad, método de valuación, documento, tipo de operación, entradas, salidas y saldo.
 
-La regla final por establecimiento sigue pendiente de validación contable.
+Se mantiene un único CPP global por empresa + producto; cada establecimiento usa ese CPP global para valorizar sus cantidades físicas. Si existe microdiferencia por redondeo, se asigna al establecimiento principal (config_empresa.establecimiento_principal_id) y se registra en auditoria.
 
 ## 30. Arquitectura de datos
 
@@ -371,19 +371,26 @@ Motor:
 - STOCK_ALMACEN y SALDO_CPP_ACTUAL son cachés reconstruibles.
 - DOCUMENTO conserva su propio período; una ND/NC consulta además el período del documento origen.
 
-## 33. Tres decisiones contables pendientes
+## 33. Reglas contables validadas (Fase 0 cerrada)
 
-Antes de cerrar definitivamente la lógica del motor deben validarse con el contador mediante un caso numérico:
+1. **Formato 13.1 por establecimiento:**
+   - Se mantiene un único CPP global por `empresa + producto`.
+   - Cada establecimiento usa ese CPP global para valorizar sus cantidades físicas.
+   - Si existe microdiferencia por redondeo, se asigna a `config_empresa.establecimiento_principal_id` y se registra en `auditoria`.
 
-1. Formato 13.1 por establecimiento usando CPP global y tratamiento del redondeo.
-2. Reparto exacto de una ND/NC cuando el documento origen está cerrado y parte de la mercadería ya salió.
-3. Tipo de cambio para ND/NC en USD: TC del documento origen o TC de la nota.
+2. **NC/ND cuando el documento origen está en un período CERRADO:**
+   - El ajuste se reparte según la proporción del stock de esa compra que todavía permanece en inventario.
+   - Solo la proporción correspondiente al stock restante entra al Kardex (`MOVIMIENTO` tipo `AJUSTE_VALOR`) modificando el valor del inventario y el CPP.
+   - La proporción correspondiente a mercadería ya vendida queda fuera del Kardex (se informa para tratamiento contable directo al costo de ventas/gasto).
 
-Estas decisiones afectan lógica, no obligan a rehacer la arquitectura actual.
+3. **NC/ND en moneda extranjera (USD):**
+   - Se aplica obligatoriamente el Tipo de Cambio (`monto_tc`, `fecha_tc`, `fuente_tc`) del documento original (`documento_origen_id`), nunca el TC de la fecha de emisión de la nota.
+
+Estas decisiones afectan lógica y consolidan la arquitectura actual.
 
 ## 34. Orden de construcción
 
-Fase 0: cerrar las tres reglas pendientes, obtener 10–15 casos reales y medir tiempo manual.
+Fase 0: tres reglas contables cerradas (ver sección 33), obtener 10–15 casos reales y medir tiempo manual.
 
 Fases 1–5: ERD, multiempresa, usuarios, permisos, terceros, productos, unidades, establecimientos, almacenes, catálogos, períodos, IGV, monedas y TC.
 
@@ -468,4 +475,4 @@ Ya están definidos:
 - tests desde el primer bloque del motor;
 - construcción progresiva por fases.
 
-Solo quedan pendientes las tres decisiones contables de Fase 0 y la validación del motor con casos reales.
+Las tres decisiones contables de Fase 0 están cerradas; resta la validación del motor con casos reales.

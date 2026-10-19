@@ -206,15 +206,20 @@ La regla de entradas antes que salidas debe validarse con casos reales.
 
 ---
 
-# 3. Pendientes de Fase 0
+# 3. Reglas contables validadas (Fase 0 cerrada)
 
-Antes de congelar completamente la lógica de valorización deben validarse con el contador:
+1. **Formato 13.1 por establecimiento:**
+   - Se mantiene un único CPP global por `empresa + producto`.
+   - Cada establecimiento usa ese CPP global para valorizar sus cantidades físicas.
+   - Si existe microdiferencia por redondeo, se asigna a `config_empresa.establecimiento_principal_id` y se registra en `auditoria`.
 
-1. Formato 13.1 por establecimiento con CPP global.
-2. Fórmula de reparto de ND/NC cuando el período origen está cerrado.
-3. Tipo de cambio aplicable a ND/NC en USD.
+2. **NC/ND cuando el documento origen está en un período CERRADO:**
+   - El ajuste se reparte según la proporción del stock de esa compra que todavía permanece en inventario.
+   - Solo la proporción correspondiente al stock restante entra al Kardex (`MOVIMIENTO` tipo `AJUSTE_VALOR`) modificando el valor del inventario y el CPP.
+   - La proporción correspondiente a mercadería ya vendida queda fuera del Kardex (se informa para tratamiento contable directo al costo de ventas/gasto).
 
-Estos puntos no impiden empezar las fases técnicas estables.
+3. **NC/ND en moneda extranjera (USD):**
+   - Se aplica obligatoriamente el Tipo de Cambio (`monto_tc`, `fecha_tc`, `fuente_tc`) del documento original (`documento_origen_id`), nunca el TC de la fecha de emisión de la nota.
 
 ---
 
@@ -1417,7 +1422,7 @@ Estructura preparada desde el ERD:
 - salidas.
 - saldo.
 
-Regla por establecimiento todavía pendiente de validación final.
+Regla por establecimiento validada: cada establecimiento valoriza con el CPP global único de la empresa; microdiferencias de redondeo van al establecimiento principal y se registran en auditoría.
 
 ---
 
@@ -1479,7 +1484,7 @@ test_bloqueo_cierre
 
 ## FASE 0
 
-- cerrar 3 reglas pendientes.
+- 3 reglas contables validadas y cerradas.
 - obtener 10–15 casos reales.
 - medir tiempo manual actual.
 
