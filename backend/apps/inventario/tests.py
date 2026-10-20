@@ -5,9 +5,12 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.auditoria.models import Auditoria
-from apps.catalogos.models import Moneda, TipoExistencia, UnidadMedida
-from apps.empresas.models import Empresa, Establecimiento
-from apps.inventario.models import Almacen, Tercero, Producto, ProductoUnidad
+from apps.catalogos.models import Moneda, TipoExistencia, UnidadMedida, TipoOperacion
+from apps.empresas.models import Empresa, Establecimiento, Periodo
+from apps.inventario.models import (
+    Almacen, Tercero, Producto, ProductoUnidad,
+    ProductoEquivalencia, SaldoInicial, NotaInterna, NotaInternaDetalle
+)
 from apps.usuarios.models import Usuario, UsuarioEmpresa
 
 
@@ -429,3 +432,191 @@ class InventarioApiTest(TestCase):
         self.assertEqual(get_response.status_code, 404)
         self.assertEqual(post_response.status_code, 404)
         self.assertFalse(Almacen.objects.filter(codigo='INACTIVO').exists())
+
+
+class InventarioMigracion4Test(TestCase):
+    def setUp(self):
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20555555555',
+            razon_social='TEST MIGRACION 4 S.A.C.',
+            moneda_base_codigo=self.moneda
+        )
+        self.establecimiento = Establecimiento.objects.create(
+            empresa=self.empresa,
+            codigo_sunat='0000',
+            nombre='SEDE CENTRAL'
+        )
+        self.almacen = Almacen.objects.create(
+            empresa=self.empresa,
+            establecimiento=self.establecimiento,
+            codigo='ALM-01',
+            nombre='ALMACEN GENERAL'
+        )
+        self.tipo_existencia = TipoExistencia.objects.create(
+            codigo='01',
+            descripcion='MERCADERIA'
+        )
+        self.und = UnidadMedida.objects.create(codigo='NIU', descripcion='UNIDAD')
+        self.caja = UnidadMedida.objects.create(codigo='BX', descripcion='CAJA')
+        self.producto = Producto.objects.create(
+            empresa=self.empresa,
+            codigo_interno='P-001',
+            descripcion='PRODUCTO PRUEBA',
+            tipo_existencia_codigo=self.tipo_existencia
+        )
+        self.prod_unidad = ProductoUnidad.objects.create(
+            producto=self.producto,
+            unidad_codigo=self.und,
+            factor_a_base=Decimal('1.00000000'),
+            es_base=True
+        )
+        self.tercero = Tercero.objects.create(
+            empresa=self.empresa,
+            tipo_documento='6',
+            numero_documento='20111111111',
+            razon_social='PROVEEDOR TEST',
+            es_proveedor=True
+        )
+        self.periodo = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=1,
+            orden=202601,
+            fecha_inicio='2026-01-01',
+            fecha_fin='2026-01-31'
+        )
+        self.tipo_op_interna = TipoOperacion.objects.create(
+            codigo_interno='AJUSTE_MERMA',
+            descripcion='MERMA DE INVENTARIO',
+            naturaleza='SALIDA',
+            es_interna=True,
+            afecta_kardex=True,
+            origen_requerido='NOTA_INTERNA'
+        )
+
+    def test_producto_equivalencia_constraints(self):
+        eq = ProductoEquivalencia.objects.create(
+            empresa=self.empresa,
+            tercero=self.tercero,
+            codigo_externo='EXT-999',
+            descripcion_externa='CODIGO PROVEEDOR',
+            unidad_externa_codigo=self.caja,
+            producto_unidad=self.prod_unidad,
+            factor_conversion=Decimal('12.00000000'),
+            activa=True
+        )
+        self.assertEqual(eq.factor_conversion, Decimal('12.00000000'))
+
+        # CheckConstraint: factor_conversion > 0
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                ProductoEquivalencia.objects.create(
+                    empresa=self.empresa,
+                    tercero=self.tercero,
+                    producto_unidad=self.prod_unidad,
+                    factor_conversion=Decimal('0.00000000')
+                )
+
+    def test_saldo_inicial_constraints(self):
+        si = SaldoInicial.objects.create(
+            empresa=self.empresa,
+            periodo=self.periodo,
+            almacen=self.almacen,
+            producto=self.producto,
+            cantidad=Decimal('100.00000000'),
+            valor_pen=Decimal('1500.00000000'),
+            cpp_inicial=Decimal('15.00000000'),
+            estado='BORRADOR'
+        )
+        self.assertEqual(si.estado, 'BORRADOR')
+
+        # UniqueConstraint: empresa, periodo, almacen, producto
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                SaldoInicial.objects.create(
+                    empresa=self.empresa,
+                    periodo=self.periodo,
+                    almacen=self.almacen,
+                    producto=self.producto,
+                    cantidad=Decimal('50.00000000'),
+                    valor_pen=Decimal('750.00000000')
+                )
+
+        # CheckConstraint: cantidad >= 0
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                SaldoInicial.objects.create(
+                    empresa=self.empresa,
+                    periodo=self.periodo,
+                    almacen=self.almacen,
+                    producto=Producto.objects.create(
+                        empresa=self.empresa,
+                        codigo_interno='P-NEG',
+                        descripcion='PRODUCTO NEG',
+                        tipo_existencia_codigo=self.tipo_existencia
+                    ),
+                    cantidad=Decimal('-1.00000000'),
+                    valor_pen=Decimal('100.00000000')
+                )
+
+        # CheckConstraint: estado IN ('BORRADOR', 'CONFIRMADO')
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                SaldoInicial.objects.create(
+                    empresa=self.empresa,
+                    periodo=self.periodo,
+                    almacen=self.almacen,
+                    producto=Producto.objects.create(
+                        empresa=self.empresa,
+                        codigo_interno='P-INV',
+                        descripcion='PRODUCTO ESTADO INVALIDO',
+                        tipo_existencia_codigo=self.tipo_existencia
+                    ),
+                    cantidad=Decimal('10.00000000'),
+                    valor_pen=Decimal('100.00000000'),
+                    estado='ANULADO'
+                )
+
+    def test_nota_interna_y_detalle_constraints(self):
+        ni = NotaInterna.objects.create(
+            empresa=self.empresa,
+            almacen=self.almacen,
+            periodo=self.periodo,
+            tipo_operacion=self.tipo_op_interna,
+            fecha='2026-01-15',
+            motivo='Merma de prueba en almacén',
+            estado='BORRADOR'
+        )
+        detalle = NotaInternaDetalle.objects.create(
+            nota_interna=ni,
+            producto=self.producto,
+            cantidad_base=Decimal('5.00000000'),
+            costo_unitario_pen=Decimal('15.00000000'),
+            valor_ajuste_pen=Decimal('75.00000000')
+        )
+        self.assertEqual(ni.detalles.count(), 1)
+        self.assertEqual(detalle.cantidad_base, Decimal('5.00000000'))
+
+        # CheckConstraint: estado IN ('BORRADOR', 'CONFIRMADO', 'ANULADO')
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                NotaInterna.objects.create(
+                    empresa=self.empresa,
+                    almacen=self.almacen,
+                    periodo=self.periodo,
+                    tipo_operacion=self.tipo_op_interna,
+                    fecha='2026-01-15',
+                    motivo='Test estado invalido',
+                    estado='PENDIENTE'
+                )
+
+        # CheckConstraint: cantidad_base >= 0
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                NotaInternaDetalle.objects.create(
+                    nota_interna=ni,
+                    producto=self.producto,
+                    cantidad_base=Decimal('-0.50000000')
+                )
+

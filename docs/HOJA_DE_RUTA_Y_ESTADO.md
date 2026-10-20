@@ -71,7 +71,7 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 ---
 
 ### 📝 BLOQUE 3: Registro Manual de Compras, Ventas y Notas Internas
-- [ ] **Ventana de Migración 4 (1 sola persona en `develop`):** Agregar las 5 tablas (`documento`, `documento_detalle`, `saldo_inicial`, `nota_interna`, `nota_interna_detalle`).
+- [x] **Ventana de Migración 4 (1 sola persona en `develop`):** Agregar las 5 tablas (`documento`, `documento_detalle`, `saldo_inicial`, `nota_interna`, `nota_interna_detalle` + `producto_equivalencia`).
 - [ ] **Carril DEV A:** `apps/documentos/` (Borradores, revisión, duplicados, copia histórica de TC/IGV) + Formulario de Compras/Ventas en React.
 - [ ] **Carril DEV B:** `apps/inventario/` (Saldo Inicial y Notas Internas: mermas, desmedros, ajustes) + Pantallas en React.
 

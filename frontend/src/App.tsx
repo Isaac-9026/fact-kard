@@ -8,6 +8,8 @@ import { AuditoriaPage } from './pages/auditoria/AuditoriaPage';
 import { CatalogosPage } from './pages/catalogos/CatalogosPage';
 import { PeriodosPage } from './pages/periodos/PeriodosPage';
 import { MaestrosInventarioPage } from './pages/inventario/MaestrosInventarioPage';
+import { DocumentosPage } from './pages/documentos/DocumentosPage';
+import { OperacionesInternasPage } from './pages/operaciones/OperacionesInternasPage';
 
 export const App: React.FC = () => {
   return (
@@ -25,6 +27,8 @@ export const App: React.FC = () => {
             <Route path="catalogos" element={<CatalogosPage />} />
             <Route path="periodos" element={<PeriodosPage />} />
             <Route path="inventario" element={<MaestrosInventarioPage />} />
+            <Route path="documentos" element={<DocumentosPage />} />
+            <Route path="operaciones-internas" element={<OperacionesInternasPage />} />
           </Route>
 
           {/* Redirección wildcard */}

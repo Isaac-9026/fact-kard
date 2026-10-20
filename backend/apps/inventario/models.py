@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone
@@ -152,3 +153,212 @@ class ProductoUnidad(models.Model):
 
     def __str__(self):
         return f"{self.producto.codigo_interno} en {self.unidad_codigo_id} (Factor: {self.factor_a_base}, Base: {self.es_base})"
+
+
+class ProductoEquivalencia(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='equivalencias'
+    )
+    tercero = models.ForeignKey(
+        'inventario.Tercero',
+        on_delete=models.CASCADE,
+        db_column='tercero_id',
+        related_name='equivalencias'
+    )
+    codigo_externo = models.CharField(max_length=100, null=True, blank=True)
+    descripcion_externa = models.CharField(max_length=300, null=True, blank=True)
+    unidad_externa_codigo = models.ForeignKey(
+        'catalogos.UnidadMedida',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='unidad_externa_codigo',
+        related_name='equivalencias'
+    )
+    producto_unidad = models.ForeignKey(
+        'inventario.ProductoUnidad',
+        on_delete=models.CASCADE,
+        db_column='producto_unidad_id',
+        related_name='equivalencias'
+    )
+    factor_conversion = models.DecimalField(max_digits=20, decimal_places=8)
+    confirmado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='confirmado_por',
+        related_name='+'
+    )
+    confirmado_en = models.DateTimeField(null=True, blank=True)
+    activa = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'producto_equivalencia'
+        verbose_name = 'Equivalencia de Producto'
+        verbose_name_plural = 'Equivalencias de Producto'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(factor_conversion__gt=0),
+                name='chk_producto_equivalencia_factor'
+            )
+        ]
+
+    def __str__(self):
+        return f"Equivalencia Tercero {self.tercero_id}: {self.codigo_externo} -> {self.producto_unidad_id}"
+
+
+class SaldoInicial(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='saldos_iniciales'
+    )
+    periodo = models.ForeignKey(
+        'empresas.Periodo',
+        on_delete=models.CASCADE,
+        db_column='periodo_id',
+        related_name='saldos_iniciales'
+    )
+    almacen = models.ForeignKey(
+        'inventario.Almacen',
+        on_delete=models.CASCADE,
+        db_column='almacen_id',
+        related_name='saldos_iniciales'
+    )
+    producto = models.ForeignKey(
+        'inventario.Producto',
+        on_delete=models.CASCADE,
+        db_column='producto_id',
+        related_name='saldos_iniciales'
+    )
+    cantidad = models.DecimalField(max_digits=20, decimal_places=8)
+    valor_pen = models.DecimalField(max_digits=20, decimal_places=8)
+    cpp_inicial = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    estado = models.CharField(max_length=20, default='BORRADOR', db_default='BORRADOR')
+    creado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='creado_por',
+        related_name='+'
+    )
+
+    class Meta:
+        db_table = 'saldo_inicial'
+        verbose_name = 'Saldo Inicial'
+        verbose_name_plural = 'Saldos Iniciales'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'periodo', 'almacen', 'producto'],
+                name='uq_saldo_inicial_empresa_periodo_almacen_producto'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(estado__in=['BORRADOR', 'CONFIRMADO']),
+                name='chk_saldo_inicial_estado'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(cantidad__gte=0),
+                name='chk_saldo_inicial_cantidad'
+            )
+        ]
+
+    def __str__(self):
+        return f"Saldo Inicial {self.producto_id} ({self.almacen_id}) - {self.cantidad}"
+
+
+class NotaInterna(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='notas_internas'
+    )
+    almacen = models.ForeignKey(
+        'inventario.Almacen',
+        on_delete=models.CASCADE,
+        db_column='almacen_id',
+        related_name='notas_internas'
+    )
+    periodo = models.ForeignKey(
+        'empresas.Periodo',
+        on_delete=models.CASCADE,
+        db_column='periodo_id',
+        related_name='notas_internas'
+    )
+    tipo_operacion = models.ForeignKey(
+        'catalogos.TipoOperacion',
+        on_delete=models.RESTRICT,
+        db_column='tipo_operacion_id',
+        related_name='notas_internas'
+    )
+    fecha = models.DateField()
+    motivo = models.CharField(max_length=500)
+    responsable = models.CharField(max_length=200, null=True, blank=True)
+    observacion = models.TextField(null=True, blank=True)
+    archivo_sustento = models.CharField(max_length=500, null=True, blank=True)
+    estado = models.CharField(max_length=20, default='BORRADOR', db_default='BORRADOR')
+    creado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='creado_por',
+        related_name='+'
+    )
+
+    class Meta:
+        db_table = 'nota_interna'
+        verbose_name = 'Nota Interna'
+        verbose_name_plural = 'Notas Internas'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(estado__in=['BORRADOR', 'CONFIRMADO', 'ANULADO']),
+                name='chk_nota_interna_estado'
+            )
+        ]
+
+    def __str__(self):
+        return f"Nota Interna #{self.id} ({self.tipo_operacion_id}) - {self.estado}"
+
+
+class NotaInternaDetalle(models.Model):
+    nota_interna = models.ForeignKey(
+        'inventario.NotaInterna',
+        on_delete=models.CASCADE,
+        db_column='nota_interna_id',
+        related_name='detalles'
+    )
+    producto = models.ForeignKey(
+        'inventario.Producto',
+        on_delete=models.CASCADE,
+        db_column='producto_id',
+        related_name='notas_internas_detalles'
+    )
+    cantidad_base = models.DecimalField(
+        max_digits=20,
+        decimal_places=8,
+        default=Decimal('0.00000000'),
+        db_default=Decimal('0.00000000')
+    )
+    costo_unitario_pen = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    valor_ajuste_pen = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+
+    class Meta:
+        db_table = 'nota_interna_detalle'
+        verbose_name = 'Detalle de Nota Interna'
+        verbose_name_plural = 'Detalles de Nota Interna'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad_base__gte=0),
+                name='chk_nota_interna_detalle_cantidad'
+            )
+        ]
+
+    def __str__(self):
+        return f"Detalle Nota {self.nota_interna_id} - Producto {self.producto_id}: {self.cantidad_base}"

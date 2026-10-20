@@ -16,6 +16,12 @@ export const MainLayout: React.FC = () => {
 
   // Helper to determine the section title for the topbar breadcrumb
   const getCurrentSection = (path: string) => {
+    if (path.startsWith('/documentos')) {
+      return { section: 'OPERACIONES', title: 'Documentos Comerciales', icon: '📑' };
+    }
+    if (path.startsWith('/operaciones-internas')) {
+      return { section: 'OPERACIONES', title: 'Operaciones Internas', icon: '📝' };
+    }
     if (path.startsWith('/inventario')) {
       return { section: 'MAESTROS Y FISCAL', title: 'Inventario y Terceros', icon: '📦' };
     }
@@ -61,6 +67,41 @@ export const MainLayout: React.FC = () => {
 
         {/* Navegación Vertical por Secciones */}
         <nav style={styles.sidebarNav}>
+          {/* SECCIÓN: OPERACIONES */}
+          <div style={styles.navGroup}>
+            {!collapsed ? (
+              <span style={styles.groupHeader}>OPERACIONES</span>
+            ) : (
+              <div style={styles.groupDivider} />
+            )}
+
+            <NavLink
+              to="/documentos"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Documentos Comerciales"
+            >
+              <span style={styles.navIcon}>📑</span>
+              {!collapsed && <span style={styles.navText}>Documentos Comerciales</span>}
+            </NavLink>
+
+            <NavLink
+              to="/operaciones-internas"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Operaciones Internas"
+            >
+              <span style={styles.navIcon}>📝</span>
+              {!collapsed && <span style={styles.navText}>Operaciones Internas</span>}
+            </NavLink>
+          </div>
+
           {/* SECCIÓN: MAESTROS Y FISCAL */}
           <div style={styles.navGroup}>
             {!collapsed ? (
