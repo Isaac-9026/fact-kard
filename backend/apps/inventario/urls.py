@@ -4,6 +4,7 @@ from apps.inventario.views import (
     AlmacenDetailView,
     AlmacenListCreateView,
     NotaInternaAnularView,
+    NotaInternaConfirmarView,
     NotaInternaDetailView,
     NotaInternaListCreateView,
     ProductoDetailView,
@@ -11,10 +12,14 @@ from apps.inventario.views import (
     ProductoUnidadDetailView,
     ProductoUnidadListCreateView,
     SaldoInicialDetailView,
+    SaldoInicialConfirmarView,
     SaldoInicialListCreateView,
     TerceroDetailView,
     TerceroListCreateView,
     TipoExistenciaListView,
+    TransferenciaConfirmarView,
+    TransferenciaDetailView,
+    TransferenciaListCreateView,
     UnidadMedidaListView,
 )
 
@@ -57,6 +62,11 @@ urlpatterns = [
         name='saldo-inicial-detail',
     ),
     path(
+        'saldos-iniciales/<int:pk>/confirmar/',
+        SaldoInicialConfirmarView.as_view(),
+        name='saldo-inicial-confirmar',
+    ),
+    path(
         'notas-internas/',
         NotaInternaListCreateView.as_view(),
         name='nota-interna-list-create',
@@ -70,5 +80,25 @@ urlpatterns = [
         'notas-internas/<int:pk>/anular/',
         NotaInternaAnularView.as_view(),
         name='nota-interna-anular',
+    ),
+    path(
+        'notas-internas/<int:pk>/confirmar/',
+        NotaInternaConfirmarView.as_view(),
+        name='nota-interna-confirmar',
+    ),
+    path(
+        'transferencias/',
+        TransferenciaListCreateView.as_view(),
+        name='transferencia-list-create',
+    ),
+    path(
+        'transferencias/<int:pk>/',
+        TransferenciaDetailView.as_view(),
+        name='transferencia-detail',
+    ),
+    path(
+        'transferencias/<int:pk>/confirmar/',
+        TransferenciaConfirmarView.as_view(),
+        name='transferencia-confirmar',
     ),
 ]

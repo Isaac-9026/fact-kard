@@ -14,6 +14,8 @@ from apps.inventario.models import (
     ProductoUnidad,
     SaldoInicial,
     Tercero,
+    Transferencia,
+    TransferenciaDetalle,
 )
 
 
@@ -548,5 +550,97 @@ class NotaInternaSerializer(serializers.ModelSerializer):
             NotaInternaDetalle.objects.bulk_create([
                 NotaInternaDetalle(nota_interna=instance, **detalle)
                 for detalle in detalles
+            ])
+        return instance
+
+
+class TransferenciaDetalleSerializer(serializers.ModelSerializer):
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.none())
+    producto_codigo = serializers.CharField(source='producto.codigo_interno', read_only=True)
+    producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
+
+    class Meta:
+        model = TransferenciaDetalle
+        fields = ('id', 'producto', 'producto_codigo', 'producto_descripcion', 'cantidad_base')
+        read_only_fields = ('id',)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id is not None:
+            self.fields['producto'].queryset = Producto.objects.filter(empresa_id=empresa_id)
+
+    def validate_cantidad_base(self, value):
+        if value <= DECIMAL_CERO:
+            raise serializers.ValidationError('La cantidad debe ser mayor que cero.')
+        return value
+
+
+class TransferenciaSerializer(serializers.ModelSerializer):
+    almacen_origen = serializers.PrimaryKeyRelatedField(queryset=Almacen.objects.none())
+    almacen_destino = serializers.PrimaryKeyRelatedField(queryset=Almacen.objects.none())
+    detalles = TransferenciaDetalleSerializer(many=True)
+    almacen_origen_nombre = serializers.CharField(source='almacen_origen.nombre', read_only=True)
+    almacen_destino_nombre = serializers.CharField(source='almacen_destino.nombre', read_only=True)
+    numero_lineas = serializers.IntegerField(source='detalles.count', read_only=True)
+
+    class Meta:
+        model = Transferencia
+        fields = (
+            'id', 'empresa', 'almacen_origen', 'almacen_origen_nombre',
+            'almacen_destino', 'almacen_destino_nombre', 'fecha', 'estado',
+            'creado_por', 'numero_lineas', 'detalles',
+        )
+        read_only_fields = ('id', 'empresa', 'estado', 'creado_por', 'numero_lineas')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id is not None:
+            almacenes = Almacen.objects.filter(empresa_id=empresa_id)
+            self.fields['almacen_origen'].queryset = almacenes
+            self.fields['almacen_destino'].queryset = almacenes
+            self.fields['detalles'].child.fields['producto'].queryset = Producto.objects.filter(
+                empresa_id=empresa_id,
+            )
+
+    def validate(self, attrs):
+        if self.instance is not None and self.instance.estado != 'BORRADOR':
+            raise serializers.ValidationError('Una transferencia confirmada o anulada no puede editarse.')
+        origen = attrs.get('almacen_origen', getattr(self.instance, 'almacen_origen', None))
+        destino = attrs.get('almacen_destino', getattr(self.instance, 'almacen_destino', None))
+        fecha = attrs.get('fecha', getattr(self.instance, 'fecha', None))
+        detalles = attrs.get('detalles')
+        if origen == destino:
+            raise serializers.ValidationError({'almacen_destino': 'Debe ser distinto del almacén origen.'})
+        if self.instance is None and not detalles:
+            raise serializers.ValidationError({'detalles': 'Debe registrar al menos una línea.'})
+        if detalles is not None and not detalles:
+            raise serializers.ValidationError({'detalles': 'Debe registrar al menos una línea.'})
+        empresa_id = _empresa_id(self)
+        if fecha and not Periodo.objects.filter(
+            empresa_id=empresa_id, estado='ABIERTO',
+            fecha_inicio__lte=fecha, fecha_fin__gte=fecha,
+        ).exists():
+            raise serializers.ValidationError({'fecha': 'Debe existir un período ABIERTO para la fecha.'})
+        return attrs
+
+    def create(self, validated_data):
+        detalles = validated_data.pop('detalles')
+        transferencia = Transferencia.objects.create(estado='BORRADOR', **validated_data)
+        TransferenciaDetalle.objects.bulk_create([
+            TransferenciaDetalle(transferencia=transferencia, **detalle) for detalle in detalles
+        ])
+        return transferencia
+
+    def update(self, instance, validated_data):
+        detalles = validated_data.pop('detalles', None)
+        for campo, valor in validated_data.items():
+            setattr(instance, campo, valor)
+        instance.save()
+        if detalles is not None:
+            instance.detalles.all().delete()
+            TransferenciaDetalle.objects.bulk_create([
+                TransferenciaDetalle(transferencia=instance, **detalle) for detalle in detalles
             ])
         return instance
