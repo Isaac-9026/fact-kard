@@ -1,11 +1,31 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
+from django.db import models
 from rest_framework import serializers
 from django.utils import timezone
 
-from apps.catalogos.models import TipoExistencia, UnidadMedida
-from apps.empresas.models import Establecimiento
-from apps.inventario.models import Almacen, Producto, ProductoUnidad, Tercero
+from apps.catalogos.models import TipoExistencia, TipoOperacion, UnidadMedida
+from apps.empresas.models import Establecimiento, Periodo
+from apps.inventario.models import (
+    Almacen,
+    NotaInterna,
+    NotaInternaDetalle,
+    Producto,
+    ProductoUnidad,
+    SaldoInicial,
+    Tercero,
+)
+
+
+DECIMAL_CERO = Decimal('0.00000000')
+DECIMAL_OPERATIVO = Decimal('0.000001')
+TIPOS_NOTA_ESTANDAR = {
+    'MERMA', 'DESMEDRO', 'CONSUMO_INTERNO', 'RETIRO',
+}
+TIPOS_NOTA_ADMIN = {
+    'AJUSTE_INGRESO', 'AJUSTE_SALIDA', 'AJUSTE_VALOR_MANUAL',
+}
+TIPOS_NOTA_PERMITIDOS = TIPOS_NOTA_ESTANDAR | TIPOS_NOTA_ADMIN
 
 
 def _empresa_id(serializer):
@@ -274,3 +294,259 @@ class UnidadMedidaSerializer(serializers.ModelSerializer):
         model = UnidadMedida
         fields = ('codigo', 'descripcion')
         read_only_fields = fields
+
+
+class SaldoInicialSerializer(serializers.ModelSerializer):
+    periodo = serializers.PrimaryKeyRelatedField(queryset=Periodo.objects.none())
+    almacen = serializers.PrimaryKeyRelatedField(queryset=Almacen.objects.none())
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.none())
+    cantidad = serializers.DecimalField(max_digits=20, decimal_places=8)
+    valor_pen = serializers.DecimalField(max_digits=20, decimal_places=8)
+    cpp_inicial = serializers.DecimalField(
+        max_digits=20, decimal_places=8, read_only=True,
+    )
+    periodo_descripcion = serializers.SerializerMethodField()
+    almacen_codigo = serializers.CharField(source='almacen.codigo', read_only=True)
+    almacen_nombre = serializers.CharField(source='almacen.nombre', read_only=True)
+    producto_codigo = serializers.CharField(source='producto.codigo_interno', read_only=True)
+    producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
+    unidad_base_codigo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SaldoInicial
+        fields = (
+            'id', 'empresa', 'periodo', 'periodo_descripcion', 'almacen',
+            'almacen_codigo', 'almacen_nombre', 'producto', 'producto_codigo',
+            'producto_descripcion', 'unidad_base_codigo', 'cantidad',
+            'valor_pen', 'cpp_inicial', 'estado', 'creado_por',
+        )
+        read_only_fields = ('id', 'empresa', 'cpp_inicial', 'estado', 'creado_por')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id is not None:
+            self.fields['periodo'].queryset = Periodo.objects.filter(empresa_id=empresa_id)
+            self.fields['almacen'].queryset = Almacen.objects.filter(empresa_id=empresa_id)
+            self.fields['producto'].queryset = Producto.objects.filter(empresa_id=empresa_id)
+
+    def get_periodo_descripcion(self, obj):
+        return f'{obj.periodo.anio}-{obj.periodo.mes:02d}'
+
+    def get_unidad_base_codigo(self, obj):
+        unidad = next((item for item in obj.producto.unidades.all() if item.es_base), None)
+        return unidad.unidad_codigo_id if unidad else None
+
+    def validate(self, attrs):
+        empresa_id = _empresa_id(self)
+        if self.instance is not None and self.instance.estado == 'CONFIRMADO':
+            raise serializers.ValidationError(
+                'Un saldo inicial CONFIRMADO no puede modificarse.'
+            )
+        estado_solicitado = self.initial_data.get('estado')
+        if estado_solicitado not in (None, 'BORRADOR'):
+            raise serializers.ValidationError({
+                'estado': 'En este bloque solo se permite el estado BORRADOR.'
+            })
+
+        periodo = attrs.get('periodo', getattr(self.instance, 'periodo', None))
+        almacen = attrs.get('almacen', getattr(self.instance, 'almacen', None))
+        producto = attrs.get('producto', getattr(self.instance, 'producto', None))
+        cantidad = attrs.get('cantidad', getattr(self.instance, 'cantidad', None))
+
+        if periodo and periodo.estado != 'ABIERTO':
+            raise serializers.ValidationError({'periodo': 'El período debe estar ABIERTO.'})
+        if cantidad is not None and cantidad < DECIMAL_CERO:
+            raise serializers.ValidationError({'cantidad': 'La cantidad debe ser mayor o igual a cero.'})
+
+        duplicado = SaldoInicial.objects.filter(
+            empresa_id=empresa_id,
+            periodo=periodo,
+            almacen=almacen,
+            producto=producto,
+        )
+        if self.instance is not None:
+            duplicado = duplicado.exclude(pk=self.instance.pk)
+        if duplicado.exists():
+            raise serializers.ValidationError(
+                'Ya existe un saldo inicial para este período, almacén y producto.'
+            )
+        return attrs
+
+    @staticmethod
+    def calcular_cpp(cantidad, valor_pen):
+        if cantidad == DECIMAL_CERO:
+            return DECIMAL_CERO
+        return (valor_pen / cantidad).quantize(DECIMAL_OPERATIVO, rounding=ROUND_HALF_UP)
+
+    def create(self, validated_data):
+        validated_data['estado'] = 'BORRADOR'
+        validated_data['cpp_inicial'] = self.calcular_cpp(
+            validated_data['cantidad'], validated_data['valor_pen'],
+        )
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        cantidad = validated_data.get('cantidad', instance.cantidad)
+        valor_pen = validated_data.get('valor_pen', instance.valor_pen)
+        validated_data['cpp_inicial'] = self.calcular_cpp(cantidad, valor_pen)
+        validated_data['estado'] = 'BORRADOR'
+        return super().update(instance, validated_data)
+
+
+class NotaInternaDetalleSerializer(serializers.ModelSerializer):
+    producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.none())
+    cantidad_base = serializers.DecimalField(max_digits=20, decimal_places=8)
+    costo_unitario_pen = serializers.DecimalField(
+        max_digits=20, decimal_places=8, allow_null=True, required=False,
+    )
+    valor_ajuste_pen = serializers.DecimalField(
+        max_digits=20, decimal_places=8, allow_null=True, required=False,
+    )
+    producto_codigo = serializers.CharField(source='producto.codigo_interno', read_only=True)
+    producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
+    unidad_base_codigo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NotaInternaDetalle
+        fields = (
+            'id', 'producto', 'producto_codigo', 'producto_descripcion',
+            'unidad_base_codigo', 'cantidad_base', 'costo_unitario_pen',
+            'valor_ajuste_pen',
+        )
+        read_only_fields = ('id',)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id is not None:
+            self.fields['producto'].queryset = Producto.objects.filter(empresa_id=empresa_id)
+
+    def get_unidad_base_codigo(self, obj):
+        unidad = next((item for item in obj.producto.unidades.all() if item.es_base), None)
+        return unidad.unidad_codigo_id if unidad else None
+
+    def validate_cantidad_base(self, value):
+        if value < DECIMAL_CERO:
+            raise serializers.ValidationError('La cantidad base debe ser mayor o igual a cero.')
+        return value
+
+
+class NotaInternaSerializer(serializers.ModelSerializer):
+    almacen = serializers.PrimaryKeyRelatedField(queryset=Almacen.objects.none())
+    periodo = serializers.PrimaryKeyRelatedField(queryset=Periodo.objects.none())
+    tipo_operacion = serializers.PrimaryKeyRelatedField(queryset=TipoOperacion.objects.none())
+    detalles = NotaInternaDetalleSerializer(many=True, required=False)
+    periodo_descripcion = serializers.SerializerMethodField()
+    almacen_codigo = serializers.CharField(source='almacen.codigo', read_only=True)
+    almacen_nombre = serializers.CharField(source='almacen.nombre', read_only=True)
+    tipo_operacion_codigo = serializers.CharField(
+        source='tipo_operacion.codigo_interno', read_only=True,
+    )
+    tipo_operacion_descripcion = serializers.CharField(
+        source='tipo_operacion.descripcion', read_only=True,
+    )
+    numero_lineas = serializers.IntegerField(source='detalles.count', read_only=True)
+
+    class Meta:
+        model = NotaInterna
+        fields = (
+            'id', 'empresa', 'almacen', 'almacen_codigo', 'almacen_nombre',
+            'periodo', 'periodo_descripcion', 'tipo_operacion',
+            'tipo_operacion_codigo', 'tipo_operacion_descripcion', 'fecha',
+            'motivo', 'responsable', 'observacion', 'archivo_sustento',
+            'estado', 'creado_por', 'numero_lineas', 'detalles',
+        )
+        read_only_fields = ('id', 'empresa', 'estado', 'creado_por', 'numero_lineas')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id is not None:
+            self.fields['almacen'].queryset = Almacen.objects.filter(empresa_id=empresa_id)
+            self.fields['periodo'].queryset = Periodo.objects.filter(empresa_id=empresa_id)
+            self.fields['tipo_operacion'].queryset = TipoOperacion.objects.filter(
+                codigo_interno__in=TIPOS_NOTA_PERMITIDOS,
+                es_interna=True,
+                origen_requerido='NOTA_INTERNA',
+                activo=True,
+            )
+            self.fields['detalles'].child.fields['producto'].queryset = (
+                Producto.objects.filter(empresa_id=empresa_id)
+            )
+
+    def get_periodo_descripcion(self, obj):
+        return f'{obj.periodo.anio}-{obj.periodo.mes:02d}'
+
+    def validate(self, attrs):
+        if self.instance is not None and self.instance.estado in ('CONFIRMADO', 'ANULADO'):
+            raise serializers.ValidationError(
+                f'Una nota {self.instance.estado} no puede modificarse.'
+            )
+        estado_solicitado = self.initial_data.get('estado')
+        if estado_solicitado not in (None, 'BORRADOR'):
+            raise serializers.ValidationError({
+                'estado': 'Las notas solo se crean o editan en estado BORRADOR.'
+            })
+
+        periodo = attrs.get('periodo', getattr(self.instance, 'periodo', None))
+        fecha = attrs.get('fecha', getattr(self.instance, 'fecha', None))
+        detalles = attrs.get('detalles')
+        if self.instance is None and not detalles:
+            raise serializers.ValidationError({'detalles': 'Debe registrar al menos una línea.'})
+        if detalles is not None and len(detalles) == 0:
+            raise serializers.ValidationError({'detalles': 'Debe registrar al menos una línea.'})
+        if periodo and periodo.estado != 'ABIERTO':
+            raise serializers.ValidationError({'periodo': 'El período debe estar ABIERTO.'})
+        if periodo and fecha and not (periodo.fecha_inicio <= fecha <= periodo.fecha_fin):
+            raise serializers.ValidationError({
+                'fecha': 'La fecha debe estar dentro del rango del período.'
+            })
+        return attrs
+
+    def requiere_admin(self):
+        datos_validados = getattr(self, '_validated_data', {})
+        tipo_nuevo = datos_validados.get('tipo_operacion')
+        tipo_actual = self.instance.tipo_operacion if self.instance is not None else None
+        if tipo_nuevo and tipo_nuevo.codigo_interno in TIPOS_NOTA_ADMIN:
+            return True
+        if tipo_actual and tipo_actual.codigo_interno in TIPOS_NOTA_ADMIN:
+            return True
+
+        detalles_nuevos = datos_validados.get('detalles')
+        if detalles_nuevos is not None:
+            return any(
+                detalle.get('costo_unitario_pen') is not None
+                or detalle.get('valor_ajuste_pen') is not None
+                for detalle in detalles_nuevos
+            )
+        if self.instance is not None:
+            return self.instance.detalles.filter(
+                models.Q(costo_unitario_pen__isnull=False)
+                | models.Q(valor_ajuste_pen__isnull=False)
+            ).exists()
+        return False
+
+    def create(self, validated_data):
+        detalles = validated_data.pop('detalles')
+        validated_data['estado'] = 'BORRADOR'
+        nota = NotaInterna.objects.create(**validated_data)
+        NotaInternaDetalle.objects.bulk_create([
+            NotaInternaDetalle(nota_interna=nota, **detalle)
+            for detalle in detalles
+        ])
+        return nota
+
+    def update(self, instance, validated_data):
+        detalles = validated_data.pop('detalles', None)
+        validated_data['estado'] = 'BORRADOR'
+        for campo, valor in validated_data.items():
+            setattr(instance, campo, valor)
+        instance.save()
+        if detalles is not None:
+            instance.detalles.all().delete()
+            NotaInternaDetalle.objects.bulk_create([
+                NotaInternaDetalle(nota_interna=instance, **detalle)
+                for detalle in detalles
+            ])
+        return instance

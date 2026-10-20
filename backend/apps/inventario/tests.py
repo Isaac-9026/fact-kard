@@ -620,3 +620,426 @@ class InventarioMigracion4Test(TestCase):
                     cantidad_base=Decimal('-0.50000000')
                 )
 
+
+class OperacionesInternasApiTest(TestCase):
+    def setUp(self):
+        moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        tipo_existencia = TipoExistencia.objects.create(
+            codigo='01', descripcion='MERCADERÍA'
+        )
+        unidad = UnidadMedida.objects.create(codigo='NIU', descripcion='UNIDAD')
+        self.empresa_a = Empresa.objects.create(
+            ruc='20610000001', razon_social='OPERACIONES A', moneda_base_codigo=moneda,
+        )
+        self.empresa_b = Empresa.objects.create(
+            ruc='20610000002', razon_social='OPERACIONES B', moneda_base_codigo=moneda,
+        )
+        establecimiento_a = Establecimiento.objects.create(
+            empresa=self.empresa_a, codigo_sunat='0001', nombre='SEDE A',
+        )
+        establecimiento_b = Establecimiento.objects.create(
+            empresa=self.empresa_b, codigo_sunat='0001', nombre='SEDE B',
+        )
+        self.almacen_a = Almacen.objects.create(
+            empresa=self.empresa_a, establecimiento=establecimiento_a,
+            codigo='A01', nombre='ALMACÉN A',
+        )
+        self.almacen_b = Almacen.objects.create(
+            empresa=self.empresa_b, establecimiento=establecimiento_b,
+            codigo='B01', nombre='ALMACÉN B',
+        )
+        self.producto_a = Producto.objects.create(
+            empresa=self.empresa_a, codigo_interno='PA', descripcion='PRODUCTO A',
+            tipo_existencia_codigo=tipo_existencia,
+        )
+        self.producto_a2 = Producto.objects.create(
+            empresa=self.empresa_a, codigo_interno='PA2', descripcion='PRODUCTO A2',
+            tipo_existencia_codigo=tipo_existencia,
+        )
+        self.producto_b = Producto.objects.create(
+            empresa=self.empresa_b, codigo_interno='PB', descripcion='PRODUCTO B',
+            tipo_existencia_codigo=tipo_existencia,
+        )
+        for producto in (self.producto_a, self.producto_a2, self.producto_b):
+            ProductoUnidad.objects.create(
+                producto=producto, unidad_codigo=unidad,
+                factor_a_base=Decimal('1.00000000'), es_base=True,
+            )
+        self.periodo_a = Periodo.objects.create(
+            empresa=self.empresa_a, anio=2026, mes=1, orden=202601,
+            fecha_inicio='2026-01-01', fecha_fin='2026-01-31', estado='ABIERTO',
+        )
+        self.periodo_cerrado = Periodo.objects.create(
+            empresa=self.empresa_a, anio=2026, mes=2, orden=202602,
+            fecha_inicio='2026-02-01', fecha_fin='2026-02-28', estado='CERRADO',
+        )
+        self.periodo_b = Periodo.objects.create(
+            empresa=self.empresa_b, anio=2026, mes=1, orden=202601,
+            fecha_inicio='2026-01-01', fecha_fin='2026-01-31', estado='ABIERTO',
+        )
+        self.tipos = {}
+        configuracion_tipos = {
+            'MERMA': 'SALIDA',
+            'DESMEDRO': 'SALIDA',
+            'CONSUMO_INTERNO': 'SALIDA',
+            'RETIRO': 'SALIDA',
+            'AJUSTE_INGRESO': 'ENTRADA',
+            'AJUSTE_SALIDA': 'SALIDA',
+            'AJUSTE_VALOR_MANUAL': 'AJUSTE_VALOR',
+        }
+        for codigo, naturaleza in configuracion_tipos.items():
+            self.tipos[codigo] = TipoOperacion.objects.create(
+                codigo_interno=codigo, descripcion=codigo.replace('_', ' '),
+                naturaleza=naturaleza, es_interna=True,
+                origen_requerido='NOTA_INTERNA', activo=True,
+            )
+        self.tipo_no_interno = TipoOperacion.objects.create(
+            codigo_interno='NO_INTERNO', descripcion='NO INTERNO',
+            naturaleza='SALIDA', es_interna=False,
+            origen_requerido='NOTA_INTERNA', activo=True,
+        )
+        self.tipo_otro_origen = TipoOperacion.objects.create(
+            codigo_interno='OTRO_ORIGEN', descripcion='OTRO ORIGEN',
+            naturaleza='SALIDA', es_interna=True,
+            origen_requerido='DOCUMENTO', activo=True,
+        )
+        self.admin = Usuario.objects.create(
+            username='admin_ops', email='admin_ops@factkard.pe', password_hash='hash',
+        )
+        self.usuario = Usuario.objects.create(
+            username='usuario_ops', email='usuario_ops@factkard.pe', password_hash='hash',
+        )
+        UsuarioEmpresa.objects.create(
+            usuario=self.admin, empresa=self.empresa_a, rol='ADMIN',
+        )
+        UsuarioEmpresa.objects.create(
+            usuario=self.usuario, empresa=self.empresa_a, rol='USUARIO',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def headers(self):
+        return {'HTTP_X_EMPRESA_ID': str(self.empresa_a.id)}
+
+    def saldo_payload(self, **cambios):
+        payload = {
+            'periodo': self.periodo_a.id,
+            'almacen': self.almacen_a.id,
+            'producto': self.producto_a.id,
+            'cantidad': '3.00000000',
+            'valor_pen': '10.00000000',
+        }
+        payload.update(cambios)
+        return payload
+
+    def nota_payload(self, tipo='MERMA', detalles=None, **cambios):
+        payload = {
+            'almacen': self.almacen_a.id,
+            'periodo': self.periodo_a.id,
+            'tipo_operacion': self.tipos[tipo].id,
+            'fecha': '2026-01-15',
+            'motivo': 'Regularización interna',
+            'responsable': 'Jefe de almacén',
+            'observacion': 'Conteo físico',
+            'archivo_sustento': 'sustentos/nota-001.pdf',
+            'detalles': detalles or [{
+                'producto': self.producto_a.id,
+                'cantidad_base': '2.00000000',
+                'costo_unitario_pen': None,
+                'valor_ajuste_pen': None,
+            }],
+        }
+        payload.update(cambios)
+        return payload
+
+    def crear_nota_modelo(self, estado='BORRADOR', tipo='MERMA', costo=None):
+        nota = NotaInterna.objects.create(
+            empresa=self.empresa_a, almacen=self.almacen_a,
+            periodo=self.periodo_a, tipo_operacion=self.tipos[tipo],
+            fecha='2026-01-15', motivo='Nota existente', estado=estado,
+            creado_por=self.admin,
+        )
+        NotaInternaDetalle.objects.create(
+            nota_interna=nota, producto=self.producto_a,
+            cantidad_base=Decimal('1.00000000'), costo_unitario_pen=costo,
+        )
+        return nota
+
+    def test_crear_saldo_inicial_correctamente(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'), self.saldo_payload(),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        saldo = SaldoInicial.objects.get(pk=response.data['id'])
+        self.assertEqual(saldo.empresa, self.empresa_a)
+        self.assertEqual(saldo.estado, 'BORRADOR')
+        self.assertEqual(saldo.creado_por, self.admin)
+        self.assertTrue(Auditoria.objects.filter(
+            entidad='SALDO_INICIAL', registro_id=saldo.id,
+        ).exists())
+
+    def test_cpp_inicial_decimal_exacto(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'), self.saldo_payload(),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            SaldoInicial.objects.get(pk=response.data['id']).cpp_inicial,
+            Decimal('3.33333300'),
+        )
+
+    def test_cpp_inicial_cantidad_cero(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'),
+            self.saldo_payload(cantidad='0.00000000'),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Decimal(response.data['cpp_inicial']), Decimal('0.00000000'))
+
+    def test_saldo_inicial_duplicado_rechazado(self):
+        url = reverse('saldo-inicial-list-create')
+        self.client.post(url, self.saldo_payload(), format='json', **self.headers())
+        response = self.client.post(
+            url, self.saldo_payload(), format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_saldo_inicial_periodo_cerrado_rechazado(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'),
+            self.saldo_payload(periodo=self.periodo_cerrado.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_saldo_inicial_producto_otra_empresa_rechazado(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'),
+            self.saldo_payload(producto=self.producto_b.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_saldo_inicial_almacen_otra_empresa_rechazado(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'),
+            self.saldo_payload(almacen=self.almacen_b.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_saldo_inicial_periodo_otra_empresa_rechazado(self):
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'),
+            self.saldo_payload(periodo=self.periodo_b.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_saldo_inicial_confirmado_no_puede_editarse(self):
+        saldo = SaldoInicial.objects.create(
+            empresa=self.empresa_a, periodo=self.periodo_a, almacen=self.almacen_a,
+            producto=self.producto_a, cantidad=Decimal('1'), valor_pen=Decimal('5'),
+            cpp_inicial=Decimal('5'), estado='CONFIRMADO', creado_por=self.admin,
+        )
+        response = self.client.patch(
+            reverse('saldo-inicial-detail', args=[saldo.id]),
+            {'valor_pen': '8.00000000'}, format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_usuario_no_puede_escribir_saldo_inicial(self):
+        self.client.force_authenticate(user=self.usuario)
+        response = self.client.post(
+            reverse('saldo-inicial-list-create'), self.saldo_payload(),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_crea_merma_sin_costos_manuales(self):
+        self.client.force_authenticate(user=self.usuario)
+        response = self.client.post(
+            reverse('nota-interna-list-create'), self.nota_payload(),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['estado'], 'BORRADOR')
+
+    def test_nota_interna_crea_multiples_detalles(self):
+        detalles = [
+            {'producto': self.producto_a.id, 'cantidad_base': '2.00000000'},
+            {'producto': self.producto_a2.id, 'cantidad_base': '4.00000000'},
+        ]
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(detalles=detalles), format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(NotaInternaDetalle.objects.filter(
+            nota_interna_id=response.data['id'],
+        ).count(), 2)
+
+    def test_usuario_con_costo_manual_recibe_403(self):
+        self.client.force_authenticate(user=self.usuario)
+        payload = self.nota_payload(detalles=[{
+            'producto': self.producto_a.id, 'cantidad_base': '1.00000000',
+            'costo_unitario_pen': '12.50000000', 'valor_ajuste_pen': None,
+        }])
+        response = self.client.post(
+            reverse('nota-interna-list-create'), payload,
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_con_valor_ajuste_manual_recibe_403(self):
+        self.client.force_authenticate(user=self.usuario)
+        payload = self.nota_payload(detalles=[{
+            'producto': self.producto_a.id, 'cantidad_base': '0.00000000',
+            'costo_unitario_pen': None, 'valor_ajuste_pen': '25.00000000',
+        }])
+        response = self.client.post(
+            reverse('nota-interna-list-create'), payload,
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_ajuste_ingreso_recibe_403(self):
+        self.client.force_authenticate(user=self.usuario)
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(tipo='AJUSTE_INGRESO'),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_ajuste_valor_manual_recibe_403(self):
+        self.client.force_authenticate(user=self.usuario)
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(tipo='AJUSTE_VALOR_MANUAL'),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_puede_crear_ajuste_manual(self):
+        payload = self.nota_payload(
+            tipo='AJUSTE_VALOR_MANUAL',
+            detalles=[{
+                'producto': self.producto_a.id,
+                'cantidad_base': '0.00000000',
+                'valor_ajuste_pen': '30.00000000',
+            }],
+        )
+        response = self.client.post(
+            reverse('nota-interna-list-create'), payload,
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+
+    def test_nota_producto_otra_empresa_rechazado(self):
+        payload = self.nota_payload(detalles=[{
+            'producto': self.producto_b.id, 'cantidad_base': '1.00000000',
+        }])
+        response = self.client.post(
+            reverse('nota-interna-list-create'), payload,
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_almacen_otra_empresa_rechazado(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(almacen=self.almacen_b.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_periodo_otra_empresa_rechazado(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(periodo=self.periodo_b.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_periodo_cerrado_rechazado(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(periodo=self.periodo_cerrado.id, fecha='2026-02-15'),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_fecha_fuera_del_periodo_rechazada(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(fecha='2026-02-01'),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_sin_detalles_rechazada(self):
+        payload = self.nota_payload()
+        payload['detalles'] = []
+        response = self.client.post(
+            reverse('nota-interna-list-create'), payload,
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_tipo_operacion_no_interno_rechazado(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(tipo_operacion=self.tipo_no_interno.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_tipo_operacion_otro_origen_rechazado(self):
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(tipo_operacion=self.tipo_otro_origen.id),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nota_borrador_puede_anularse(self):
+        nota = self.crear_nota_modelo()
+        response = self.client.post(
+            reverse('nota-interna-anular', args=[nota.id]), {},
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        nota.refresh_from_db()
+        self.assertEqual(nota.estado, 'ANULADO')
+
+    def test_nota_confirmada_no_puede_anularse(self):
+        nota = self.crear_nota_modelo(estado='CONFIRMADO')
+        response = self.client.post(
+            reverse('nota-interna-anular', args=[nota.id]), {},
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_auditoria_creacion_y_anulacion_nota(self):
+        crear = self.client.post(
+            reverse('nota-interna-list-create'), self.nota_payload(),
+            format='json', **self.headers(),
+        )
+        self.assertEqual(crear.status_code, 201)
+        anular = self.client.post(
+            reverse('nota-interna-anular', args=[crear.data['id']]), {},
+            format='json', **self.headers(),
+        )
+        self.assertEqual(anular.status_code, 200)
+        auditorias = Auditoria.objects.filter(
+            entidad='NOTA_INTERNA', registro_id=crear.data['id'],
+        )
+        self.assertEqual(auditorias.count(), 2)
+        anulacion = auditorias.get(accion='ANULAR_NOTA_INTERNA')
+        self.assertEqual(anulacion.valor_anterior['estado'], 'BORRADOR')
+        self.assertEqual(anulacion.valor_nuevo['estado'], 'ANULADO')
+

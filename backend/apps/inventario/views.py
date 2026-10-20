@@ -2,17 +2,26 @@ from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoExistencia, UnidadMedida
 from apps.empresas.models import Empresa
-from apps.inventario.models import Almacen, Producto, ProductoUnidad, Tercero
+from apps.inventario.models import (
+    Almacen,
+    NotaInterna,
+    Producto,
+    ProductoUnidad,
+    SaldoInicial,
+    Tercero,
+)
 from apps.inventario.serializers import (
     AlmacenSerializer,
+    NotaInternaSerializer,
     ProductoSerializer,
     ProductoUnidadSerializer,
+    SaldoInicialSerializer,
     TerceroSerializer,
     TipoExistenciaSerializer,
     UnidadMedidaSerializer,
@@ -25,10 +34,11 @@ class EmpresaActivaMixin:
     authentication_classes = (UsuarioTokenAuthentication,)
     permission_classes = (TieneEmpresaActiva,)
     http_method_names = ('get', 'post', 'patch', 'head', 'options')
+    admin_write_required = True
 
     def get_permissions(self):
         permisos = [TieneEmpresaActiva()]
-        if self.request.method in ('POST', 'PATCH'):
+        if self.admin_write_required and self.request.method in ('POST', 'PATCH'):
             permisos.append(EsAdminEmpresa())
         return permisos
 
@@ -241,3 +251,145 @@ class TipoExistenciaListView(EmpresaActivaMixin, generics.ListAPIView):
 class UnidadMedidaListView(EmpresaActivaMixin, generics.ListAPIView):
     serializer_class = UnidadMedidaSerializer
     queryset = UnidadMedida.objects.all().order_by('codigo')
+
+
+def _filtrar_id(queryset, request, parametro, campo):
+    valor = request.query_params.get(parametro)
+    if not valor:
+        return queryset
+    try:
+        return queryset.filter(**{campo: int(valor)})
+    except (TypeError, ValueError):
+        raise ValidationError({parametro: 'Debe ser un identificador numérico válido.'})
+
+
+class SaldoInicialListCreateView(
+    AuditoriaMixin, EmpresaActivaMixin, generics.ListCreateAPIView,
+):
+    serializer_class = SaldoInicialSerializer
+    entidad_auditoria = 'SALDO_INICIAL'
+
+    def get_queryset(self):
+        queryset = (
+            SaldoInicial.objects.filter(empresa_id=self.request.empresa_id)
+            .select_related('periodo', 'almacen', 'producto')
+            .prefetch_related('producto__unidades')
+        )
+        queryset = _filtrar_id(queryset, self.request, 'periodo_id', 'periodo_id')
+        queryset = _filtrar_id(queryset, self.request, 'almacen_id', 'almacen_id')
+        queryset = _filtrar_id(queryset, self.request, 'producto_id', 'producto_id')
+        estado = self.request.query_params.get('estado')
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        return queryset.order_by('-periodo__orden', 'almacen__codigo', 'producto__codigo_interno')
+
+    def perform_create(self, serializer):
+        serializer.save(
+            empresa_id=self.request.empresa_id,
+            creado_por=self.request.user,
+        )
+
+
+class SaldoInicialDetailView(
+    AuditoriaMixin, EmpresaActivaMixin, generics.RetrieveUpdateAPIView,
+):
+    serializer_class = SaldoInicialSerializer
+    entidad_auditoria = 'SALDO_INICIAL'
+
+    def get_queryset(self):
+        return (
+            SaldoInicial.objects.filter(empresa_id=self.request.empresa_id)
+            .select_related('periodo', 'almacen', 'producto')
+            .prefetch_related('producto__unidades')
+        )
+
+
+class NotaInternaMixin(AuditoriaMixin, EmpresaActivaMixin):
+    serializer_class = NotaInternaSerializer
+    entidad_auditoria = 'NOTA_INTERNA'
+    admin_write_required = False
+
+    def get_queryset(self):
+        return (
+            NotaInterna.objects.filter(empresa_id=self.request.empresa_id)
+            .select_related('periodo', 'almacen', 'tipo_operacion')
+            .prefetch_related('detalles__producto__unidades')
+        )
+
+    def exigir_admin_si_corresponde(self, serializer):
+        if serializer.requiere_admin():
+            EsAdminEmpresa().has_permission(self.request, self)
+
+
+class NotaInternaListCreateView(NotaInternaMixin, generics.ListCreateAPIView):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        queryset = _filtrar_id(queryset, self.request, 'periodo_id', 'periodo_id')
+        queryset = _filtrar_id(queryset, self.request, 'almacen_id', 'almacen_id')
+        tipo_operacion = self.request.query_params.get('tipo_operacion')
+        if tipo_operacion:
+            queryset = queryset.filter(tipo_operacion__codigo_interno=tipo_operacion)
+        estado = self.request.query_params.get('estado')
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(motivo__icontains=search) | Q(responsable__icontains=search)
+            )
+        return queryset.order_by('-fecha', '-id')
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.exigir_admin_si_corresponde(serializer)
+        with transaction.atomic():
+            nota = serializer.save(
+                empresa_id=request.empresa_id,
+                creado_por=request.user,
+            )
+            nota = self.get_queryset().get(pk=nota.pk)
+            nuevo = dict(self.get_serializer(nota).data)
+            self._registrar('CREAR_NOTA_INTERNA', nota, None, nuevo)
+        return Response(nuevo, status=status.HTTP_201_CREATED)
+
+
+class NotaInternaDetailView(NotaInternaMixin, generics.RetrieveUpdateAPIView):
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        anterior = dict(self.get_serializer(instance).data)
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.exigir_admin_si_corresponde(serializer)
+        with transaction.atomic():
+            nota = serializer.save()
+            nota = self.get_queryset().get(pk=nota.pk)
+            nuevo = dict(self.get_serializer(nota).data)
+            self._registrar('ACTUALIZAR_NOTA_INTERNA', nota, anterior, nuevo)
+        return Response(nuevo)
+
+
+class NotaInternaAnularView(NotaInternaMixin, generics.GenericAPIView):
+    def post(self, request, *args, **kwargs):
+        with transaction.atomic():
+            nota = get_object_or_404(
+                self.get_queryset().select_for_update(),
+                pk=self.kwargs['pk'],
+            )
+            if nota.estado != 'BORRADOR':
+                raise ValidationError({
+                    'estado': 'Solo una nota BORRADOR puede anularse en este bloque.'
+                })
+            serializer_permiso = self.get_serializer(nota)
+            self.exigir_admin_si_corresponde(serializer_permiso)
+            anterior = dict(self.get_serializer(nota).data)
+            nota.estado = 'ANULADO'
+            nota.save(update_fields=['estado'])
+            nuevo = dict(self.get_serializer(nota).data)
+            self._registrar(
+                'ANULAR_NOTA_INTERNA',
+                nota,
+                anterior,
+                nuevo,
+            )
+        return Response(nuevo)
