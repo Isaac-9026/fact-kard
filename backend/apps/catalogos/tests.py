@@ -99,3 +99,85 @@ class CatalogosModelTest(TestCase):
 
         um = UnidadMedida.objects.create(codigo='NIU', descripcion='UNIDADES')
         self.assertEqual(str(um), 'NIU - UNIDADES')
+
+
+class TipoCambioResolverApiTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.client = APIClient()
+        self.moneda_usd = Moneda.objects.create(codigo='USD', nombre='Dólares Americanos')
+        self.moneda_pen = Moneda.objects.create(codigo='PEN', nombre='Soles')
+
+        # Publicación del viernes 16 de Octubre
+        self.tc_viernes = TipoCambio.objects.create(
+            moneda_codigo=self.moneda_usd,
+            fecha_publicacion=date(2026, 10, 16),
+            compra=Decimal('3.74200000'),
+            venta=Decimal('3.75100000'),
+            fuente='SBS'
+        )
+
+    def test_resolucion_fecha_exacta(self):
+        response = self.client.get(
+            '/api/catalogos/tipo-cambio/resolver/',
+            {'moneda': 'USD', 'fecha': '2026-10-16'}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['moneda_codigo'], 'USD')
+        self.assertEqual(response.data['fecha_publicacion'], '2026-10-16')
+        self.assertEqual(response.data['fecha_consultada'], '2026-10-16')
+        self.assertTrue(response.data['es_fecha_exacta'])
+        self.assertEqual(Decimal(response.data['compra']), Decimal('3.74200000'))
+        self.assertEqual(Decimal(response.data['venta']), Decimal('3.75100000'))
+
+    def test_resolucion_fin_de_semana_o_feriado_toma_ultimo_tc_anterior(self):
+        # Sábado 17 de Octubre (no hay publicación oficial, toma el del viernes 16)
+        response_sabado = self.client.get(
+            '/api/catalogos/tipo-cambio/resolver/',
+            {'moneda': 'USD', 'fecha': '2026-10-17'}
+        )
+        self.assertEqual(response_sabado.status_code, 200)
+        self.assertEqual(response_sabado.data['fecha_publicacion'], '2026-10-16')
+        self.assertEqual(response_sabado.data['fecha_consultada'], '2026-10-17')
+        self.assertFalse(response_sabado.data['es_fecha_exacta'])
+        self.assertEqual(Decimal(response_sabado.data['compra']), Decimal('3.74200000'))
+        self.assertEqual(Decimal(response_sabado.data['venta']), Decimal('3.75100000'))
+
+        # Domingo 18 de Octubre (sigue tomando el del viernes 16)
+        response_domingo = self.client.get(
+            '/api/catalogos/tipo-cambio/resolver/',
+            {'moneda': 'USD', 'fecha': '2026-10-18'}
+        )
+        self.assertEqual(response_domingo.status_code, 200)
+        self.assertEqual(response_domingo.data['fecha_publicacion'], '2026-10-16')
+        self.assertEqual(response_domingo.data['fecha_consultada'], '2026-10-18')
+        self.assertFalse(response_domingo.data['es_fecha_exacta'])
+
+    def test_resolucion_fecha_anterior_a_todo_registro_retorna_404(self):
+        response = self.client.get(
+            '/api/catalogos/tipo-cambio/resolver/',
+            {'moneda': 'USD', 'fecha': '2026-10-15'}
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_resolucion_parametros_invalidos(self):
+        # Falta fecha
+        res_no_fecha = self.client.get('/api/catalogos/tipo-cambio/resolver/', {'moneda': 'USD'})
+        self.assertEqual(res_no_fecha.status_code, 400)
+
+        # Formato de fecha inválido
+        res_bad_fecha = self.client.get('/api/catalogos/tipo-cambio/resolver/', {'moneda': 'USD', 'fecha': '17-10-2026'})
+        self.assertEqual(res_bad_fecha.status_code, 400)
+
+    def test_post_tipo_cambio_crea_con_decimal(self):
+        payload = {
+            'moneda_codigo': 'USD',
+            'fecha_publicacion': '2026-10-19',
+            'compra': '3.74800000',
+            'venta': '3.75600000',
+            'fuente': 'SBS',
+        }
+        response = self.client.post('/api/catalogos/tipos-cambio/', payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Decimal(response.data['compra']), Decimal('3.74800000'))
+        self.assertEqual(Decimal(response.data['venta']), Decimal('3.75600000'))

@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.catalogos.models import Moneda
-from apps.empresas.models import ConfigEmpresa, Empresa, Establecimiento
+from apps.empresas.models import ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
@@ -87,3 +87,134 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
             'establecimiento_principal', 'regla_redondeo', 'metodo_valuacion',
         ))
         return instance
+
+
+class ConfigIgvPeriodoSerializer(serializers.ModelSerializer):
+    periodo = serializers.PrimaryKeyRelatedField(
+        queryset=Periodo.objects.all(),
+        required=False,
+    )
+    porcentaje_recuperable = serializers.DecimalField(
+        max_digits=7,
+        decimal_places=4,
+        required=False,
+        allow_null=True,
+        coerce_to_string=True,
+    )
+
+    class Meta:
+        model = ConfigIgvPeriodo
+        fields = (
+            'id', 'empresa', 'periodo', 'metodo',
+            'porcentaje_recuperable', 'creado_por', 'creado_en',
+        )
+        read_only_fields = ('id', 'empresa', 'creado_por', 'creado_en')
+
+    def validate(self, attrs):
+        metodo = attrs.get('metodo')
+        if not metodo and self.instance:
+            metodo = self.instance.metodo
+
+        if metodo == 'TOTAL':
+            attrs['porcentaje_recuperable'] = Decimal('100.0000')
+        elif metodo == 'NULO':
+            attrs['porcentaje_recuperable'] = Decimal('0.0000')
+        elif metodo == 'PRORRATA':
+            porcentaje = attrs.get('porcentaje_recuperable')
+            if porcentaje is None and self.instance:
+                porcentaje = self.instance.porcentaje_recuperable
+            if porcentaje is None:
+                raise serializers.ValidationError(
+                    {'porcentaje_recuperable': 'El porcentaje recuperable es obligatorio para el método PRORRATA.'}
+                )
+            if not isinstance(porcentaje, Decimal):
+                porcentaje = Decimal(str(porcentaje))
+            if not (Decimal('0.0000') <= porcentaje <= Decimal('100.0000')):
+                raise serializers.ValidationError(
+                    {'porcentaje_recuperable': 'El porcentaje recuperable debe estar entre 0.0000 y 100.0000.'}
+                )
+            attrs['porcentaje_recuperable'] = porcentaje
+        elif metodo is not None:
+            raise serializers.ValidationError(
+                {'metodo': f"Método '{metodo}' no válido. Opciones: TOTAL, NULO, PRORRATA."}
+            )
+
+        return attrs
+
+
+class PeriodoSerializer(serializers.ModelSerializer):
+    config_igv = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Periodo
+        fields = (
+            'id', 'empresa', 'anio', 'mes', 'orden',
+            'fecha_inicio', 'fecha_fin', 'estado',
+            'motivo_desactualizado', 'cerrado_por', 'cerrado_en',
+            'reabierto_por', 'reabierto_en', 'motivo_reapertura',
+            'config_igv',
+        )
+        read_only_fields = (
+            'id', 'empresa', 'orden', 'estado',
+            'motivo_desactualizado', 'cerrado_por', 'cerrado_en',
+            'reabierto_por', 'reabierto_en', 'motivo_reapertura',
+            'config_igv',
+        )
+
+    def get_config_igv(self, obj):
+        cfg = obj.configs_igv.first()
+        if cfg:
+            return {
+                'id': cfg.id,
+                'metodo': cfg.metodo,
+                'porcentaje_recuperable': str(cfg.porcentaje_recuperable),
+                'creado_en': cfg.creado_en.isoformat() if cfg.creado_en else None,
+            }
+        return None
+
+
+class PeriodoCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Periodo
+        fields = ('id', 'anio', 'mes', 'fecha_inicio', 'fecha_fin')
+        read_only_fields = ('id',)
+
+    def validate_mes(self, value):
+        if not 1 <= value <= 12:
+            raise serializers.ValidationError('El mes debe estar comprendido entre 1 y 12.')
+        return value
+
+    def validate(self, attrs):
+        fecha_inicio = attrs.get('fecha_inicio')
+        fecha_fin = attrs.get('fecha_fin')
+        if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            raise serializers.ValidationError(
+                {'fecha_fin': 'La fecha de fin debe ser posterior o igual a la fecha de inicio.'}
+            )
+
+        empresa_id = self.context.get('empresa_id')
+        anio = attrs.get('anio')
+        mes = attrs.get('mes')
+        if empresa_id and anio and mes:
+            if Periodo.objects.filter(empresa_id=empresa_id, anio=anio, mes=mes).exists():
+                raise serializers.ValidationError(
+                    {'non_field_errors': [f'Ya existe un período registrado para {anio}-{mes:02d}.']}
+                )
+
+        return attrs
+
+    def create(self, validated_data):
+        empresa_id = self.context['empresa_id']
+        validated_data['empresa_id'] = empresa_id
+        validated_data['orden'] = validated_data['anio'] * 100 + validated_data['mes']
+        validated_data['estado'] = 'ABIERTO'
+        return super().create(validated_data)
+
+
+class ReabrirPeriodoSerializer(serializers.Serializer):
+    motivo_reapertura = serializers.CharField(
+        min_length=3,
+        max_length=500,
+        required=True,
+        error_messages={'required': 'El motivo de reapertura es obligatorio.'}
+    )
