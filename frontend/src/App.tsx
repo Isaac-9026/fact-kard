@@ -10,6 +10,8 @@ import { PeriodosPage } from './pages/periodos/PeriodosPage';
 import { MaestrosInventarioPage } from './pages/inventario/MaestrosInventarioPage';
 import { DocumentosPage } from './pages/documentos/DocumentosPage';
 import { OperacionesInternasPage } from './pages/operaciones/OperacionesInternasPage';
+import { TransferenciasPage } from './pages/transferencias/TransferenciasPage';
+import { IncidenciasPage } from './pages/incidencias/IncidenciasPage';
 
 export const App: React.FC = () => {
   return (
@@ -29,6 +31,8 @@ export const App: React.FC = () => {
             <Route path="inventario" element={<MaestrosInventarioPage />} />
             <Route path="documentos" element={<DocumentosPage />} />
             <Route path="operaciones-internas" element={<OperacionesInternasPage />} />
+            <Route path="transferencias" element={<TransferenciasPage />} />
+            <Route path="incidencias" element={<IncidenciasPage />} />
           </Route>
 
           {/* Redirección wildcard */}

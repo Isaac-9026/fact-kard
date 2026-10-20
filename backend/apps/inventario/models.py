@@ -362,3 +362,83 @@ class NotaInternaDetalle(models.Model):
 
     def __str__(self):
         return f"Detalle Nota {self.nota_interna_id} - Producto {self.producto_id}: {self.cantidad_base}"
+
+
+class Transferencia(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='transferencias'
+    )
+    almacen_origen = models.ForeignKey(
+        'inventario.Almacen',
+        on_delete=models.RESTRICT,
+        db_column='almacen_origen_id',
+        related_name='transferencias_origen'
+    )
+    almacen_destino = models.ForeignKey(
+        'inventario.Almacen',
+        on_delete=models.RESTRICT,
+        db_column='almacen_destino_id',
+        related_name='transferencias_destino'
+    )
+    fecha = models.DateField()
+    estado = models.CharField(max_length=20, default='BORRADOR', db_default='BORRADOR')
+    creado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='creado_por',
+        related_name='+'
+    )
+
+    class Meta:
+        db_table = 'transferencia'
+        verbose_name = 'Transferencia entre Almacenes'
+        verbose_name_plural = 'Transferencias entre Almacenes'
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(almacen_origen=models.F('almacen_destino')),
+                name='chk_transferencia_almacenes_distintos'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(estado__in=['BORRADOR', 'CONFIRMADO', 'ANULADO']),
+                name='chk_transferencia_estado'
+            )
+        ]
+
+    def __str__(self):
+        return f"Transferencia #{self.id} ({self.almacen_origen_id} -> {self.almacen_destino_id}) - {self.estado}"
+
+
+class TransferenciaDetalle(models.Model):
+    transferencia = models.ForeignKey(
+        'inventario.Transferencia',
+        on_delete=models.CASCADE,
+        db_column='transferencia_id',
+        related_name='detalles'
+    )
+    producto = models.ForeignKey(
+        'inventario.Producto',
+        on_delete=models.RESTRICT,
+        db_column='producto_id',
+        related_name='transferencias_detalles'
+    )
+    cantidad_base = models.DecimalField(max_digits=20, decimal_places=8)
+
+    class Meta:
+        db_table = 'transferencia_detalle'
+        verbose_name = 'Detalle de Transferencia'
+        verbose_name_plural = 'Detalles de Transferencia'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad_base__gt=0),
+                name='chk_transferencia_detalle_cantidad'
+            )
+        ]
+
+    def __str__(self):
+        return f"Detalle Transferencia #{self.transferencia_id} - Producto {self.producto_id}: {self.cantidad_base}"
+

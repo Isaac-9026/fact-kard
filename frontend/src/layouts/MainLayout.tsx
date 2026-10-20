@@ -22,6 +22,12 @@ export const MainLayout: React.FC = () => {
     if (path.startsWith('/operaciones-internas')) {
       return { section: 'OPERACIONES', title: 'Operaciones Internas', icon: '📝' };
     }
+    if (path.startsWith('/transferencias')) {
+      return { section: 'OPERACIONES', title: 'Transferencias entre Almacenes', icon: '🔄' };
+    }
+    if (path.startsWith('/incidencias')) {
+      return { section: 'OPERACIONES', title: 'Incidencias y Recálculos', icon: '⚠️' };
+    }
     if (path.startsWith('/inventario')) {
       return { section: 'MAESTROS Y FISCAL', title: 'Inventario y Terceros', icon: '📦' };
     }
@@ -99,6 +105,32 @@ export const MainLayout: React.FC = () => {
             >
               <span style={styles.navIcon}>📝</span>
               {!collapsed && <span style={styles.navText}>Operaciones Internas</span>}
+            </NavLink>
+
+            <NavLink
+              to="/transferencias"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Transferencias entre Almacenes"
+            >
+              <span style={styles.navIcon}>🔄</span>
+              {!collapsed && <span style={styles.navText}>Transferencias</span>}
+            </NavLink>
+
+            <NavLink
+              to="/incidencias"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Bandeja de Incidencias y Recálculos"
+            >
+              <span style={styles.navIcon}>⚠️</span>
+              {!collapsed && <span style={styles.navText}>Incidencias</span>}
             </NavLink>
           </div>
 

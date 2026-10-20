@@ -73,12 +73,12 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 ### 📝 BLOQUE 3: Registro Manual de Compras, Ventas y Notas Internas
 - [x] **Ventana de Migración 4 (1 sola persona en `develop`):** Agregar las 5 tablas (`documento`, `documento_detalle`, `saldo_inicial`, `nota_interna`, `nota_interna_detalle` + `producto_equivalencia`).
 - [x] **Carril DEV A:** `apps/documentos/` (Borradores, revisión, duplicados, copia histórica de TC/IGV) + Formulario de Compras/Ventas en React.
-- [ ] **Carril DEV B:** `apps/inventario/` (Saldo Inicial y Notas Internas: mermas, desmedros, ajustes) + Pantallas en React.
+- [x] **Carril DEV B:** `apps/inventario/` (Saldo Inicial y Notas Internas: mermas, desmedros, ajustes) + Pantallas en React.
 
 ---
 
 ### ⚙️ BLOQUE 4: El Motor Kardex Valorizado (M1 a M6)
-- [ ] **Ventana de Migración 5 (1 sola persona en `develop`):** Agregar las 9 tablas del motor (`movimiento` con trigger de inmutabilidad, `valorizacion_movimiento`, cachés, `recalculo`, `incidencia`, `transferencia`).
+- [x] **Ventana de Migración 5 (1 sola persona en `develop`):** Agregar las 9 tablas del motor (`movimiento` con trigger de inmutabilidad, `valorizacion_movimiento`, cachés, `recalculo`, `incidencia`, `transferencia`).
 - [ ] **Ejecución TDD cruzada (M1 a M6):** Alternarnos programación del motor y batería de tests con los casos reales del contador.
 
 ---
