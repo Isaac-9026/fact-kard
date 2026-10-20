@@ -79,7 +79,7 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 
 ### ⚙️ BLOQUE 4: El Motor Kardex Valorizado (M1 a M6)
 - [x] **Ventana de Migración 5 (1 sola persona en `develop`):** Agregar las 9 tablas del motor (`movimiento` con trigger de inmutabilidad, `valorizacion_movimiento`, cachés, `recalculo`, `incidencia`, `transferencia`).
-- [ ] **Ejecución TDD cruzada (M1 a M6):** Alternarnos programación del motor y batería de tests con los casos reales del contador.
+- [x] **Ejecución TDD cruzada (M1 a M6):** Alternarnos programación del motor y batería de tests con los casos reales del contador.
 
 ---
 
