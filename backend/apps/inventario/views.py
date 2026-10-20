@@ -15,6 +15,7 @@ from apps.inventario.models import (
     ProductoUnidad,
     SaldoInicial,
     Tercero,
+    Transferencia,
 )
 from apps.inventario.serializers import (
     AlmacenSerializer,
@@ -24,7 +25,13 @@ from apps.inventario.serializers import (
     SaldoInicialSerializer,
     TerceroSerializer,
     TipoExistenciaSerializer,
+    TransferenciaSerializer,
     UnidadMedidaSerializer,
+)
+from apps.inventario.services import (
+    confirmar_nota_interna,
+    confirmar_saldo_inicial,
+    confirmar_transferencia,
 )
 from apps.usuarios.authentication import UsuarioTokenAuthentication
 from apps.usuarios.permissions import EsAdminEmpresa, TieneEmpresaActiva
@@ -393,3 +400,57 @@ class NotaInternaAnularView(NotaInternaMixin, generics.GenericAPIView):
                 nuevo,
             )
         return Response(nuevo)
+
+
+class SaldoInicialConfirmarView(EmpresaActivaMixin, generics.GenericAPIView):
+    serializer_class = SaldoInicialSerializer
+
+    def post(self, request, *args, **kwargs):
+        saldo = confirmar_saldo_inicial(
+            saldo_id=self.kwargs['pk'], empresa_id=request.empresa_id, usuario=request.user,
+        )
+        return Response(self.get_serializer(saldo).data)
+
+
+class NotaInternaConfirmarView(NotaInternaMixin, generics.GenericAPIView):
+    def post(self, request, *args, **kwargs):
+        nota = get_object_or_404(self.get_queryset(), pk=self.kwargs['pk'])
+        self.exigir_admin_si_corresponde(self.get_serializer(nota))
+        nota = confirmar_nota_interna(
+            nota_id=nota.pk, empresa_id=request.empresa_id, usuario=request.user,
+        )
+        return Response(self.get_serializer(nota).data)
+
+
+class TransferenciaMixin(AuditoriaMixin, EmpresaActivaMixin):
+    serializer_class = TransferenciaSerializer
+    entidad_auditoria = 'TRANSFERENCIA'
+
+    def get_queryset(self):
+        return (
+            Transferencia.objects.filter(empresa_id=self.request.empresa_id)
+            .select_related('almacen_origen', 'almacen_destino')
+            .prefetch_related('detalles__producto')
+        )
+
+
+class TransferenciaListCreateView(TransferenciaMixin, generics.ListCreateAPIView):
+    def get_queryset(self):
+        return super().get_queryset().order_by('-fecha', '-id')
+
+    def perform_create(self, serializer):
+        serializer.save(empresa_id=self.request.empresa_id, creado_por=self.request.user)
+
+
+class TransferenciaDetailView(TransferenciaMixin, generics.RetrieveUpdateAPIView):
+    pass
+
+
+class TransferenciaConfirmarView(TransferenciaMixin, generics.GenericAPIView):
+    def post(self, request, *args, **kwargs):
+        transferencia = confirmar_transferencia(
+            transferencia_id=self.kwargs['pk'], empresa_id=request.empresa_id,
+            usuario=request.user,
+        )
+        transferencia = self.get_queryset().get(pk=transferencia.pk)
+        return Response(self.get_serializer(transferencia).data)

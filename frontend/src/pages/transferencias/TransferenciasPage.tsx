@@ -1,210 +1,85 @@
-import React from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import axios from 'axios';
+import { getAlmacenes, getProductos, type Almacen, type Producto } from '../../api/inventario';
+import { confirmarTransferencia, createTransferencia, getTransferencias, type Transferencia } from '../../api/transferencias';
 import { useAuth } from '../../context/AuthContext';
 
-export const TransferenciasPage: React.FC = () => {
+const lineaVacia = () => ({ producto: '', cantidad_base: '' });
+const errorApi = (error: unknown) => {
+  if (!axios.isAxiosError(error)) return 'No se pudo completar la operación.';
+  const data = error.response?.data;
+  if (typeof data === 'string') return data;
+  return data && typeof data === 'object' ? Object.values(data).flat().join(' ') : 'No se pudo completar la operación.';
+};
+
+export const TransferenciasPage = () => {
   const { empresaActiva } = useAuth();
+  const [transferencias, setTransferencias] = useState<Transferencia[]>([]);
+  const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [form, setForm] = useState({ almacen_origen: '', almacen_destino: '', fecha: '', detalles: [lineaVacia()] });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  return (
-    <div style={styles.container}>
-      {/* Encabezado */}
-      <header style={styles.header}>
-        <div>
-          <div style={styles.badgeRow}>
-            <span style={styles.badge}>MÓDULO EN PREPARACIÓN</span>
-            <span style={styles.versionBadge}>Bloque 4 · Fase 7</span>
-          </div>
-          <h1 style={styles.title}>Transferencias entre Almacenes</h1>
-          <p style={styles.subtitle}>
-            Traslados atómicos de existencias entre almacenes ({empresaActiva?.razon_social || 'Empresa Activa'})
-          </p>
-        </div>
-      </header>
+  const cargar = useCallback(async () => {
+    if (!empresaActiva) return;
+    setLoading(true);
+    try {
+      const [lista, nuevosAlmacenes, nuevosProductos] = await Promise.all([getTransferencias(), getAlmacenes(), getProductos()]);
+      setTransferencias(lista); setAlmacenes(nuevosAlmacenes); setProductos(nuevosProductos);
+    } catch (err) { setError(errorApi(err)); }
+    finally { setLoading(false); }
+  }, [empresaActiva?.id]);
 
-      {/* Tarjeta Informativa / Placeholder */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <div style={styles.iconCircle}>
-            <span>🔄</span>
-          </div>
-          <div>
-            <h2 style={styles.cardTitle}>Motor de Traslado Interno (M5)</h2>
-            <p style={styles.cardDesc}>
-              Regla contable: salida en almacén origen y entrada en almacén destino sin alteración del CPP global.
-            </p>
-          </div>
-        </div>
+  useEffect(() => { void cargar(); }, [cargar]);
 
-        <div style={styles.grid}>
-          <div style={styles.infoBox}>
-            <div style={styles.infoBoxIcon}>📦</div>
-            <div style={styles.infoBoxTitle}>Almacenes Distintos</div>
-            <div style={styles.infoBoxText}>
-              Validación estricta a nivel base de datos: el origen y destino deben pertenecer a la misma empresa y ser distintos.
-            </div>
-          </div>
+  const guardar = async (event: FormEvent) => {
+    event.preventDefault(); setError(''); setSuccess('');
+    if (form.almacen_origen === form.almacen_destino) { setError('El almacén destino debe ser distinto del origen.'); return; }
+    setSaving(true);
+    try {
+      await createTransferencia({
+        almacen_origen: Number(form.almacen_origen), almacen_destino: Number(form.almacen_destino), fecha: form.fecha,
+        detalles: form.detalles.map((linea) => ({ producto: Number(linea.producto), cantidad_base: linea.cantidad_base })),
+      });
+      setForm({ almacen_origen: '', almacen_destino: '', fecha: '', detalles: [lineaVacia()] });
+      setSuccess('Transferencia creada en BORRADOR.'); await cargar();
+    } catch (err) { setError(errorApi(err)); }
+    finally { setSaving(false); }
+  };
 
-          <div style={styles.infoBox}>
-            <div style={styles.infoBoxIcon}>⚡</div>
-            <div style={styles.infoBoxTitle}>Movimientos en Par</div>
-            <div style={styles.infoBoxText}>
-              Generación de dos movimientos atómicos con prioridad 2 en el motor de Kardex valorizado.
-            </div>
-          </div>
+  const confirmar = async (transferencia: Transferencia) => {
+    if (!window.confirm(`¿Confirmar traslado #${transferencia.id}?`)) return;
+    setSaving(true); setError(''); setSuccess('');
+    try { await confirmarTransferencia(transferencia.id); setSuccess('Traslado confirmado.'); await cargar(); }
+    catch (err) { setError(errorApi(err)); }
+    finally { setSaving(false); }
+  };
 
-          <div style={styles.infoBox}>
-            <div style={styles.infoBoxIcon}>🛡️</div>
-            <div style={styles.infoBoxTitle}>Inmutabilidad Garantizada</div>
-            <div style={styles.infoBoxText}>
-              Protección mediante trigger PostgreSQL. Todo ajuste o corrección se realiza vía extorno.
-            </div>
-          </div>
-        </div>
+  const actualizarLinea = (indice: number, campo: 'producto' | 'cantidad_base', valor: string) => setForm((actual) => ({
+    ...actual, detalles: actual.detalles.map((linea, posicion) => posicion === indice ? { ...linea, [campo]: valor } : linea),
+  }));
 
-        <div style={styles.emptyState}>
-          <div style={styles.emptyIcon}>🚚</div>
-          <h3 style={styles.emptyTitle}>Bandeja de Transferencias Lista para Implementación</h3>
-          <p style={styles.emptyText}>
-            Los modelos <code>Transferencia</code> y <code>TransferenciaDetalle</code> ya están sincronizados en PostgreSQL.
-          </p>
-        </div>
+  return <div style={styles.container}>
+    <header><h1 style={styles.title}>Transferencias entre almacenes</h1><p style={styles.muted}>Traslados atómicos sin alterar el CPP global de {empresaActiva?.razon_social ?? 'la empresa activa'}.</p></header>
+    {error && <div role="alert" style={styles.error}>{error}</div>}{success && <div role="status" style={styles.success}>{success}</div>}
+    <form onSubmit={guardar} style={styles.card}><h2 style={styles.subtitle}>Nueva transferencia</h2>
+      <div style={styles.grid}>
+        <label>Origen<select required value={form.almacen_origen} onChange={(e) => setForm({ ...form, almacen_origen: e.target.value })}><option value="">Seleccionar</option>{almacenes.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}</select></label>
+        <label>Destino<select required value={form.almacen_destino} onChange={(e) => setForm({ ...form, almacen_destino: e.target.value })}><option value="">Seleccionar</option>{almacenes.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}</select></label>
+        <label>Fecha<input required type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></label>
       </div>
-    </div>
-  );
+      {form.detalles.map((linea, indice) => <div key={indice} style={styles.linea}><select required value={linea.producto} onChange={(e) => actualizarLinea(indice, 'producto', e.target.value)}><option value="">Producto</option>{productos.map((p) => <option key={p.id} value={p.id}>{p.codigo_interno} · {p.descripcion}</option>)}</select><input required inputMode="decimal" pattern="^\d+(\.\d{1,8})?$" placeholder="Cantidad" value={linea.cantidad_base} onChange={(e) => actualizarLinea(indice, 'cantidad_base', e.target.value)} />{form.detalles.length > 1 && <button type="button" onClick={() => setForm({ ...form, detalles: form.detalles.filter((_, posicion) => posicion !== indice) })}>Quitar</button>}</div>)}
+      <div style={styles.actions}><button type="button" onClick={() => setForm({ ...form, detalles: [...form.detalles, lineaVacia()] })}>Agregar producto</button><button disabled={saving}>{saving ? 'Guardando…' : 'Crear transferencia'}</button></div>
+    </form>
+    <section style={styles.card}><h2 style={styles.subtitle}>Transferencias ({transferencias.length})</h2>{loading ? <p>Cargando…</p> : <div style={styles.tableWrap}><table style={styles.table}><thead><tr><th>ID</th><th>Fecha</th><th>Origen</th><th>Destino</th><th>Ítems</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{transferencias.map((t) => <tr key={t.id}><td>#{t.id}</td><td>{t.fecha}</td><td>{t.almacen_origen_nombre}</td><td>{t.almacen_destino_nombre}</td><td>{t.numero_lineas}</td><td>{t.estado}</td><td>{t.estado === 'BORRADOR' ? <button disabled={saving} onClick={() => void confirmar(t)}>Confirmar Traslado</button> : '—'}</td></tr>)}</tbody></table></div>}</section>
+  </div>;
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '24px',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    flexWrap: 'wrap',
-    gap: '16px',
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '8px',
-  },
-  badge: {
-    fontSize: '11px',
-    fontWeight: 700,
-    letterSpacing: '0.05em',
-    color: '#0284c7',
-    backgroundColor: '#e0f2fe',
-    padding: '3px 8px',
-    borderRadius: '6px',
-    textTransform: 'uppercase',
-  },
-  versionBadge: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#475569',
-    backgroundColor: '#f1f5f9',
-    padding: '3px 8px',
-    borderRadius: '6px',
-  },
-  title: {
-    margin: 0,
-    fontSize: '24px',
-    fontWeight: 800,
-    color: '#0f172a',
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    margin: '4px 0 0 0',
-    fontSize: '14px',
-    color: '#64748b',
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: '12px',
-    border: '1px solid #e2e8f0',
-    padding: '28px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
-  },
-  cardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    paddingBottom: '20px',
-    borderBottom: '1px solid #f1f5f9',
-  },
-  iconCircle: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '12px',
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '22px',
-  },
-  cardTitle: {
-    margin: 0,
-    fontSize: '17px',
-    fontWeight: 700,
-    color: '#1e293b',
-  },
-  cardDesc: {
-    margin: '4px 0 0 0',
-    fontSize: '13px',
-    color: '#64748b',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-    gap: '16px',
-    margin: '24px 0',
-  },
-  infoBox: {
-    backgroundColor: '#f8fafc',
-    borderRadius: '10px',
-    border: '1px solid #e2e8f0',
-    padding: '18px',
-  },
-  infoBoxIcon: {
-    fontSize: '24px',
-    marginBottom: '10px',
-  },
-  infoBoxTitle: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: '#1e293b',
-    marginBottom: '6px',
-  },
-  infoBoxText: {
-    fontSize: '12.5px',
-    color: '#64748b',
-    lineHeight: '1.5',
-  },
-  emptyState: {
-    padding: '40px 20px',
-    textAlign: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: '10px',
-    border: '1px dashed #cbd5e1',
-  },
-  emptyIcon: {
-    fontSize: '36px',
-    marginBottom: '12px',
-  },
-  emptyTitle: {
-    margin: 0,
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#334155',
-  },
-  emptyText: {
-    margin: '6px 0 0 0',
-    fontSize: '13px',
-    color: '#64748b',
-  },
+  container: { display: 'flex', flexDirection: 'column', gap: '1.25rem' }, title: { margin: 0, color: 'var(--text-primary)' }, subtitle: { margin: 0, color: 'var(--text-primary)' }, muted: { color: 'var(--text-muted)' }, card: { display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem', border: '1px solid var(--border-color)', borderRadius: 10, background: 'var(--bg-secondary)' }, grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: '1rem' }, linea: { display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '.75rem' }, actions: { display: 'flex', gap: '.75rem', justifyContent: 'space-between' }, tableWrap: { overflowX: 'auto' }, table: { width: '100%', textAlign: 'left', borderCollapse: 'collapse' }, error: { padding: '.75rem', color: '#fecaca', background: 'rgba(220,38,38,.18)' }, success: { padding: '.75rem', color: '#bbf7d0', background: 'rgba(22,163,74,.18)' },
 };
 
 export default TransferenciasPage;

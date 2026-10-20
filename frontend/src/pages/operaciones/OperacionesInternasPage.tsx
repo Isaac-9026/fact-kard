@@ -6,6 +6,8 @@ import { obtenerTiposOperacion, type TipoOperacion } from '../../api/catalogos';
 import { getAlmacenes, getProductos, type Almacen, type Producto } from '../../api/inventario';
 import {
   anularNotaInterna,
+  confirmarNotaInterna,
+  confirmarSaldoInicial,
   createNotaInterna,
   createSaldoInicial,
   getNotaInterna,
@@ -355,6 +357,24 @@ export const OperacionesInternasPage = () => {
     if (guardado) await refrescar();
   };
 
+  const confirmarSaldo = async (saldo: SaldoInicial) => {
+    if (!window.confirm(`¿Confirmar el saldo inicial de ${saldo.producto_codigo}?`)) return;
+    const guardado = await ejecutar(
+      async () => { await confirmarSaldoInicial(saldo.id); },
+      'Saldo inicial confirmado y aplicado al Kardex.',
+    );
+    if (guardado) await refrescar();
+  };
+
+  const confirmarNota = async (nota: NotaInterna) => {
+    if (!window.confirm(`¿Confirmar la nota interna #${nota.id}?`)) return;
+    const guardado = await ejecutar(
+      async () => { await confirmarNotaInterna(nota.id); },
+      `Nota interna #${nota.id} confirmada y aplicada al Kardex.`,
+    );
+    if (guardado) await refrescar();
+  };
+
   const seleccionarPeriodoNota = (periodoId: string) => {
     const periodo = periodos.find((item) => String(item.id) === periodoId);
     setNotaForm((actual) => ({
@@ -404,7 +424,7 @@ export const OperacionesInternasPage = () => {
         </div>
       </div>
       <div className={`oi-workspace ${saldoFormVisible ? 'oi-workspace--editing' : ''}`}>
-        <TablaSaldos saldos={saldos} loading={loading} esAdmin={Boolean(esAdmin)} onEditar={(saldo) => void editarSaldo(saldo)} onNuevo={puedeCrear ? abrirNuevo : undefined} />
+        <TablaSaldos saldos={saldos} loading={loading} esAdmin={Boolean(esAdmin)} onEditar={(saldo) => void editarSaldo(saldo)} onConfirmar={(saldo) => void confirmarSaldo(saldo)} onNuevo={puedeCrear ? abrirNuevo : undefined} />
         {saldoFormVisible && <aside ref={editorRef} className="oi-editor" aria-label={saldoEditando ? 'Editar saldo inicial' : 'Crear saldo inicial'}>
           <EditorHeader titulo={saldoEditando ? 'Editar saldo inicial' : 'Nuevo saldo inicial'} detalle="El backend calculará y conservará el CPP definitivo." onClose={cerrarSaldo} />
           <form className="oi-form" onSubmit={guardarSaldo}>
@@ -431,7 +451,7 @@ export const OperacionesInternasPage = () => {
         </div>
       </div>
       <div className={`oi-workspace ${notaFormVisible ? 'oi-workspace--note-editing' : ''}`}>
-        <TablaNotas notas={notas} loading={loading} esAdmin={Boolean(esAdmin)} onEditar={(nota) => void editarNota(nota)} onAnular={(nota) => void anularNota(nota)} requiereAdmin={notaRequiereAdmin} onNuevo={puedeCrear ? abrirNuevo : undefined} />
+        <TablaNotas notas={notas} loading={loading} esAdmin={Boolean(esAdmin)} onEditar={(nota) => void editarNota(nota)} onAnular={(nota) => void anularNota(nota)} onConfirmar={(nota) => void confirmarNota(nota)} requiereAdmin={notaRequiereAdmin} onNuevo={puedeCrear ? abrirNuevo : undefined} />
         {notaFormVisible && <aside ref={editorRef} className="oi-editor oi-editor--wide" aria-label={notaEditando ? 'Editar nota interna' : 'Crear nota interna'}>
           <EditorHeader titulo={notaEditando ? `Editar nota #${notaEditando.id}` : 'Nueva nota interna'} detalle={esAdmin ? 'Operaciones estándar y ajustes manuales.' : 'Solo operaciones estándar sin costos manuales.'} onClose={cerrarNota} />
           <form className="oi-form" onSubmit={guardarNota}>
@@ -469,8 +489,8 @@ const FormActions = ({ saving, label, onCancel }: { saving: boolean; label: stri
 
 const EmptyState = ({ title, detail, onNuevo }: { title: string; detail: string; onNuevo?: () => void }) => <div className="oi-empty"><div className="oi-empty__line" /><h2>{title}</h2><p>{detail}</p>{onNuevo && <button type="button" className="oi-button oi-button--secondary" onClick={onNuevo}>Crear registro</button>}</div>;
 
-const TablaSaldos = ({ saldos, loading, esAdmin, onEditar, onNuevo }: { saldos: SaldoInicial[]; loading: boolean; esAdmin: boolean; onEditar: (saldo: SaldoInicial) => void; onNuevo?: () => void }) => <div className="oi-table-shell">{loading ? <div className="oi-loading" role="status">Cargando saldos iniciales…</div> : <><table className="oi-table oi-table--saldos"><thead><tr><th>Período</th><th>Almacén</th><th>Producto</th><th>Unidad base</th><th className="oi-number">Cantidad</th><th className="oi-number">Valor total PEN</th><th className="oi-number">CPP inicial</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{saldos.map((saldo) => <tr key={saldo.id}><td>{saldo.periodo_descripcion}</td><td><strong>{saldo.almacen_codigo}</strong><small>{saldo.almacen_nombre}</small></td><td><strong>{saldo.producto_codigo}</strong><small>{saldo.producto_descripcion}</small></td><td>{saldo.unidad_base_codigo ?? '—'}</td><td className="oi-number">{saldo.cantidad}</td><td className="oi-number">S/ {saldo.valor_pen}</td><td className="oi-number">S/ {saldo.cpp_inicial}</td><td><BadgeEstado estado={saldo.estado} /></td><td>{esAdmin && saldo.estado === 'BORRADOR' ? <button type="button" className="oi-link" onClick={() => onEditar(saldo)}>Editar</button> : <span className="oi-muted">—</span>}</td></tr>)}</tbody></table>{!saldos.length && <EmptyState title="Sin saldos iniciales" detail="No hay registros que coincidan con los filtros actuales." onNuevo={onNuevo} />}</>}</div>;
+const TablaSaldos = ({ saldos, loading, esAdmin, onEditar, onConfirmar, onNuevo }: { saldos: SaldoInicial[]; loading: boolean; esAdmin: boolean; onEditar: (saldo: SaldoInicial) => void; onConfirmar: (saldo: SaldoInicial) => void; onNuevo?: () => void }) => <div className="oi-table-shell">{loading ? <div className="oi-loading" role="status">Cargando saldos iniciales…</div> : <><table className="oi-table oi-table--saldos"><thead><tr><th>Período</th><th>Almacén</th><th>Producto</th><th>Unidad base</th><th className="oi-number">Cantidad</th><th className="oi-number">Valor total PEN</th><th className="oi-number">CPP inicial</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{saldos.map((saldo) => <tr key={saldo.id}><td>{saldo.periodo_descripcion}</td><td><strong>{saldo.almacen_codigo}</strong><small>{saldo.almacen_nombre}</small></td><td><strong>{saldo.producto_codigo}</strong><small>{saldo.producto_descripcion}</small></td><td>{saldo.unidad_base_codigo ?? '—'}</td><td className="oi-number">{saldo.cantidad}</td><td className="oi-number">S/ {saldo.valor_pen}</td><td className="oi-number">S/ {saldo.cpp_inicial}</td><td><BadgeEstado estado={saldo.estado} /></td><td className="oi-actions">{esAdmin && saldo.estado === 'BORRADOR' ? <><button type="button" className="oi-link" onClick={() => onEditar(saldo)}>Editar</button><button type="button" className="oi-link" onClick={() => onConfirmar(saldo)}>Confirmar Saldo Inicial</button></> : <span className="oi-muted">—</span>}</td></tr>)}</tbody></table>{!saldos.length && <EmptyState title="Sin saldos iniciales" detail="No hay registros que coincidan con los filtros actuales." onNuevo={onNuevo} />}</>}</div>;
 
-const TablaNotas = ({ notas, loading, esAdmin, onEditar, onAnular, requiereAdmin, onNuevo }: { notas: NotaInterna[]; loading: boolean; esAdmin: boolean; onEditar: (nota: NotaInterna) => void; onAnular: (nota: NotaInterna) => void; requiereAdmin: (nota: NotaInterna) => boolean; onNuevo?: () => void }) => <div className="oi-table-shell">{loading ? <div className="oi-loading" role="status">Cargando notas internas…</div> : <><table className="oi-table oi-table--notas"><thead><tr><th>ID</th><th>Fecha</th><th>Período</th><th>Almacén</th><th>Tipo</th><th>Motivo</th><th>Responsable</th><th>Estado</th><th className="oi-number">Líneas</th><th>Acciones</th></tr></thead><tbody>{notas.map((nota) => { const puedeGestionar = nota.estado === 'BORRADOR' && (esAdmin || !requiereAdmin(nota)); return <tr key={nota.id}><td className="oi-code">#{nota.id}</td><td>{nota.fecha}</td><td>{nota.periodo_descripcion}</td><td><strong>{nota.almacen_codigo}</strong><small>{nota.almacen_nombre}</small></td><td><span className="oi-code">{nota.tipo_operacion_codigo}</span><small>{nota.tipo_operacion_descripcion}</small></td><td className="oi-table__main">{nota.motivo}</td><td>{nota.responsable || '—'}</td><td><BadgeEstado estado={nota.estado} /></td><td className="oi-number">{nota.numero_lineas}</td><td className="oi-actions">{puedeGestionar ? <><button type="button" className="oi-link" onClick={() => onEditar(nota)}>Editar</button><button type="button" className="oi-link oi-link--danger" onClick={() => onAnular(nota)}>Anular</button></> : <span className="oi-muted">—</span>}</td></tr>; })}</tbody></table>{!notas.length && <EmptyState title="Sin notas internas" detail="Registra una merma, consumo, retiro o ajuste en estado borrador." onNuevo={onNuevo} />}</>}</div>;
+const TablaNotas = ({ notas, loading, esAdmin, onEditar, onAnular, onConfirmar, requiereAdmin, onNuevo }: { notas: NotaInterna[]; loading: boolean; esAdmin: boolean; onEditar: (nota: NotaInterna) => void; onAnular: (nota: NotaInterna) => void; onConfirmar: (nota: NotaInterna) => void; requiereAdmin: (nota: NotaInterna) => boolean; onNuevo?: () => void }) => <div className="oi-table-shell">{loading ? <div className="oi-loading" role="status">Cargando notas internas…</div> : <><table className="oi-table oi-table--notas"><thead><tr><th>ID</th><th>Fecha</th><th>Período</th><th>Almacén</th><th>Tipo</th><th>Motivo</th><th>Responsable</th><th>Estado</th><th className="oi-number">Líneas</th><th>Acciones</th></tr></thead><tbody>{notas.map((nota) => { const puedeGestionar = nota.estado === 'BORRADOR' && (esAdmin || !requiereAdmin(nota)); return <tr key={nota.id}><td className="oi-code">#{nota.id}</td><td>{nota.fecha}</td><td>{nota.periodo_descripcion}</td><td><strong>{nota.almacen_codigo}</strong><small>{nota.almacen_nombre}</small></td><td><span className="oi-code">{nota.tipo_operacion_codigo}</span><small>{nota.tipo_operacion_descripcion}</small></td><td className="oi-table__main">{nota.motivo}</td><td>{nota.responsable || '—'}</td><td><BadgeEstado estado={nota.estado} /></td><td className="oi-number">{nota.numero_lineas}</td><td className="oi-actions">{puedeGestionar ? <><button type="button" className="oi-link" onClick={() => onEditar(nota)}>Editar</button><button type="button" className="oi-link" onClick={() => onConfirmar(nota)}>Confirmar Nota Interna</button><button type="button" className="oi-link oi-link--danger" onClick={() => onAnular(nota)}>Anular</button></> : <span className="oi-muted">—</span>}</td></tr>; })}</tbody></table>{!notas.length && <EmptyState title="Sin notas internas" detail="Registra una merma, consumo, retiro o ajuste en estado borrador." onNuevo={onNuevo} />}</>}</div>;
 
 export default OperacionesInternasPage;

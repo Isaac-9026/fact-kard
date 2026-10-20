@@ -116,6 +116,9 @@ export const updateSaldoInicial = async (
 ): Promise<SaldoInicial> =>
   (await apiClient.patch<SaldoInicial>(`/inventario/saldos-iniciales/${id}/`, payload)).data;
 
+export const confirmarSaldoInicial = async (id: number): Promise<SaldoInicial> =>
+  (await apiClient.post<SaldoInicial>(`/inventario/saldos-iniciales/${id}/confirmar/`)).data;
+
 export const getNotasInternas = async (
   filtros?: NotaInternaFiltros,
 ): Promise<NotaInterna[]> =>
@@ -137,3 +140,6 @@ export const updateNotaInterna = async (
 
 export const anularNotaInterna = async (id: number): Promise<NotaInterna> =>
   (await apiClient.post<NotaInterna>(`/inventario/notas-internas/${id}/anular/`)).data;
+
+export const confirmarNotaInterna = async (id: number): Promise<NotaInterna> =>
+  (await apiClient.post<NotaInterna>(`/inventario/notas-internas/${id}/confirmar/`)).data;
