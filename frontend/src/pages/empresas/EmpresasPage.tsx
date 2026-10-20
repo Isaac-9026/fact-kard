@@ -17,7 +17,7 @@ const mensajeError = (error: unknown) => {
 };
 
 export const EmpresasPage: React.FC = () => {
-  const { empresaActiva, seleccionarEmpresa } = useAuth();
+  const { empresaActiva, registrarEmpresaDisponible, seleccionarEmpresa } = useAuth();
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [monedas, setMonedas] = useState<Moneda[]>([]);
   const [establecimientos, setEstablecimientos] = useState<Establecimiento[]>([]);
@@ -65,6 +65,7 @@ export const EmpresasPage: React.FC = () => {
     void ejecutar(async () => {
       const nueva = await crearEmpresa(empresaForm);
       setEmpresas((actuales) => [...actuales, nueva]);
+      registrarEmpresaDisponible(nueva);
       setEmpresaForm({ ruc: '', razon_social: '', nombre_comercial: '', direccion: '', moneda_base_codigo: 'PEN' });
       setMostrarEmpresa(false);
     }, 'Empresa creada y configurada correctamente.');

@@ -79,6 +79,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem('empresa_activa');
   };
 
+  const registrarEmpresaDisponible = (empresa: EmpresaAsociada) => {
+    setEmpresasDisponibles((actuales) => {
+      const existe = actuales.some((disponible) => disponible.id === empresa.id);
+      const actualizadas = existe
+        ? actuales.map((disponible) => disponible.id === empresa.id ? empresa : disponible)
+        : [...actuales, empresa];
+
+      localStorage.setItem('empresas_disponibles', JSON.stringify(actualizadas));
+      return actualizadas;
+    });
+  };
+
   const seleccionarEmpresa = (empresaId: number) => {
     const encontrada = empresasDisponibles.find((e) => e.id === empresaId);
     if (encontrada) {
@@ -105,6 +117,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthenticated: !!token,
         login,
         logout,
+        registrarEmpresaDisponible,
         seleccionarEmpresa,
       }}
     >
