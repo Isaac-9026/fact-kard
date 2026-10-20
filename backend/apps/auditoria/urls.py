@@ -1,3 +1,8 @@
 from django.urls import path
+from apps.auditoria.views import AuditoriaListView
 
-urlpatterns = []
+app_name = 'auditoria'
+
+urlpatterns = [
+    path('', AuditoriaListView.as_view(), name='auditoria-list'),
+]
