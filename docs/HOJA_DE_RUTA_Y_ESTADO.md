@@ -38,7 +38,7 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 ### 🚀 BLOQUE 1 (ACTUAL): Seguridad, Multiempresa y Auditoría
 
 #### Paso 1.0 — Puente Base de Frontend (Hacer 1 sola vez en `develop` antes de abrir ramas)
-- [ ] Crear en `develop` el cliente Axios base (`frontend/src/api/http.ts`), el contexto de sesión/empresa (`frontend/src/context/AuthContext.tsx`) y dejar declaradas las rutas vacías en `frontend/src/App.tsx` para que ningún agente choque en `App.tsx`.
+- [x] Crear en `develop` el cliente Axios base (`frontend/src/api/http.ts`), el contexto de sesión/empresa (`frontend/src/context/AuthContext.tsx`) y dejar declaradas las rutas vacías en `frontend/src/App.tsx` para que ningún agente choque en `App.tsx`.
 
 #### Paso 1.1 — Trabajo en Paralelo (Cada uno en su propia rama)
 
