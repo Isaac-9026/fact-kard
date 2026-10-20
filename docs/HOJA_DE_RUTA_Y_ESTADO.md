@@ -65,8 +65,8 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 
 ### 📦 BLOQUE 2 (SIGUIENTE): Maestros, Catálogos SUNAT y Períodos
 - [x] **Ventana de Migración 2 y 3 (1 sola persona en `develop`):** Agregar las 11 tablas de Maestros, Catálogos SUNAT, Tipo de Cambio, Períodos e IGV.
-- [ ] **Carril DEV A:** `apps/catalogos/` (Seed Tablas SUNAT + Tipo de Cambio) y Períodos/IGV + sus pantallas en React.
-- [ ] **Carril DEV B:** `apps/inventario/` (Terceros, Almacenes, Productos y Unidades de medida con 1 unidad base) + sus pantallas en React.
+- [x] **Carril DEV A:** `apps/catalogos/` (Seed Tablas SUNAT + Tipo de Cambio) y Períodos/IGV + sus pantallas en React.
+- [x] **Carril DEV B:** `apps/inventario/` (Terceros, Almacenes, Productos y Unidades de medida con 1 unidad base) + sus pantallas en React.
 
 ---
 

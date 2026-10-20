@@ -251,3 +251,236 @@ class PeriodoModelTest(TestCase):
                     metodo='METODO_INVALIDO',
                     porcentaje_recuperable=Decimal('50.0000')
                 )
+
+
+class PeriodosYConfigIgvApiTest(TestCase):
+    def setUp(self):
+        from datetime import date
+        from apps.auditoria.models import Auditoria
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+
+        self.empresa_a = Empresa.objects.create(
+            ruc='20100070971',
+            razon_social='EMPRESA A S.A.C.',
+            moneda_base_codigo=self.moneda,
+        )
+        self.empresa_b = Empresa.objects.create(
+            ruc='20100070972',
+            razon_social='EMPRESA B S.A.C.',
+            moneda_base_codigo=self.moneda,
+        )
+
+        self.admin_user = Usuario.objects.create(
+            username='admin_a',
+            email='admin_a@test.pe',
+            password_hash='hash',
+        )
+        self.normal_user = Usuario.objects.create(
+            username='user_a',
+            email='user_a@test.pe',
+            password_hash='hash',
+        )
+
+        UsuarioEmpresa.objects.create(usuario=self.admin_user, empresa=self.empresa_a, rol='ADMIN')
+        UsuarioEmpresa.objects.create(usuario=self.normal_user, empresa=self.empresa_a, rol='USUARIO')
+
+        self.client = APIClient()
+
+    def test_crear_periodo_calcula_orden_y_valida_fechas(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Fecha fin menor que fecha inicio debe fallar (400)
+        res_bad = self.client.post(
+            reverse('periodo-list-create'),
+            {
+                'anio': 2026,
+                'mes': 4,
+                'fecha_inicio': '2026-04-30',
+                'fecha_fin': '2026-04-01',
+            },
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_bad.status_code, 400)
+        self.assertIn('fecha_fin', res_bad.data)
+
+        # Creación válida
+        res_ok = self.client.post(
+            reverse('periodo-list-create'),
+            {
+                'anio': 2026,
+                'mes': 4,
+                'fecha_inicio': '2026-04-01',
+                'fecha_fin': '2026-04-30',
+            },
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_ok.status_code, 201)
+        self.assertEqual(res_ok.data['orden'], 202604)
+        self.assertEqual(res_ok.data['estado'], 'ABIERTO')
+
+    def test_aislamiento_multiempresa_periodos(self):
+        from datetime import date
+        from apps.empresas.models import Periodo
+        # Período en empresa A
+        p_a = Periodo.objects.create(
+            empresa=self.empresa_a,
+            anio=2026,
+            mes=1,
+            orden=202601,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_fin=date(2026, 1, 31),
+        )
+        # Período en empresa B
+        p_b = Periodo.objects.create(
+            empresa=self.empresa_b,
+            anio=2026,
+            mes=1,
+            orden=202601,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_fin=date(2026, 1, 31),
+        )
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(
+            reverse('periodo-list-create'),
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        ids = [item['id'] for item in response.data]
+        self.assertIn(p_a.id, ids)
+        self.assertNotIn(p_b.id, ids)
+
+    def test_config_igv_total_nulo_y_prorrata(self):
+        from datetime import date
+        from apps.auditoria.models import Auditoria
+        self.client.force_authenticate(user=self.admin_user)
+        periodo = Periodo.objects.create(
+            empresa=self.empresa_a,
+            anio=2026,
+            mes=5,
+            orden=202605,
+            fecha_inicio=date(2026, 5, 1),
+            fecha_fin=date(2026, 5, 31),
+        )
+
+        # 1. Configurar TOTAL -> porcentaje_recuperable debe ser 100.0000
+        res_total = self.client.post(
+            reverse('periodo-config-igv', args=[periodo.id]),
+            {'metodo': 'TOTAL'},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_total.status_code, 201)
+        self.assertEqual(Decimal(res_total.data['porcentaje_recuperable']), Decimal('100.0000'))
+
+        # Comprobar auditoría
+        audit_entry = Auditoria.objects.filter(
+            empresa_id=self.empresa_a.id,
+            entidad='config_igv_periodo',
+            registro_id=res_total.data['id']
+        ).first()
+        self.assertIsNotNone(audit_entry)
+        self.assertEqual(audit_entry.accion, 'CREAR')
+
+        # 2. Modificar a NULO -> porcentaje_recuperable debe ser 0.0000
+        res_nulo = self.client.patch(
+            reverse('periodo-config-igv', args=[periodo.id]),
+            {'metodo': 'NULO'},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_nulo.status_code, 200)
+        self.assertEqual(Decimal(res_nulo.data['porcentaje_recuperable']), Decimal('0.0000'))
+
+        # 3. Modificar a PRORRATA con valor específico
+        res_prorrata = self.client.patch(
+            reverse('periodo-config-igv', args=[periodo.id]),
+            {'metodo': 'PRORRATA', 'porcentaje_recuperable': '75.5000'},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_prorrata.status_code, 200)
+        self.assertEqual(Decimal(res_prorrata.data['porcentaje_recuperable']), Decimal('75.5000'))
+
+        # 4. PRORRATA con valor fuera de rango debe fallar
+        res_invalido = self.client.patch(
+            reverse('periodo-config-igv', args=[periodo.id]),
+            {'metodo': 'PRORRATA', 'porcentaje_recuperable': '120.0000'},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_invalido.status_code, 400)
+
+    def test_reapertura_periodo_marca_posteriores_cerrados_como_desactualizado(self):
+        from datetime import date
+        from apps.auditoria.models import Auditoria
+        # Crear 3 períodos cerrados
+        p1 = Periodo.objects.create(
+            empresa=self.empresa_a, anio=2026, mes=1, orden=202601,
+            fecha_inicio=date(2026, 1, 1), fecha_fin=date(2026, 1, 31),
+            estado='CERRADO'
+        )
+        p2 = Periodo.objects.create(
+            empresa=self.empresa_a, anio=2026, mes=2, orden=202602,
+            fecha_inicio=date(2026, 2, 1), fecha_fin=date(2026, 2, 28),
+            estado='CERRADO'
+        )
+        p3 = Periodo.objects.create(
+            empresa=self.empresa_a, anio=2026, mes=3, orden=202603,
+            fecha_inicio=date(2026, 3, 1), fecha_fin=date(2026, 3, 31),
+            estado='CERRADO'
+        )
+
+        # Usuario normal no puede reabrir
+        self.client.force_authenticate(user=self.normal_user)
+        res_forbidden = self.client.post(
+            reverse('periodo-reabrir', args=[p1.id]),
+            {'motivo_reapertura': 'Intento no autorizado'},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_forbidden.status_code, 403)
+
+        # Admin reabre período 1
+        self.client.force_authenticate(user=self.admin_user)
+        motivo = 'Factura de compra recibida fuera de plazo'
+        res_ok = self.client.post(
+            reverse('periodo-reabrir', args=[p1.id]),
+            {'motivo_reapertura': motivo},
+            format='json',
+            HTTP_X_EMPRESA_ID=str(self.empresa_a.id),
+        )
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertEqual(res_ok.data['periodos_desactualizados'], 2)
+
+        # Comprobar estado en base de datos
+        p1.refresh_from_db()
+        p2.refresh_from_db()
+        p3.refresh_from_db()
+
+        self.assertEqual(p1.estado, 'ABIERTO')
+        self.assertEqual(p1.motivo_reapertura, motivo)
+        self.assertEqual(p1.reabierto_por, self.admin_user)
+
+        self.assertEqual(p2.estado, 'DESACTUALIZADO')
+        self.assertIn(motivo, p2.motivo_desactualizado)
+
+        self.assertEqual(p3.estado, 'DESACTUALIZADO')
+        self.assertIn(motivo, p3.motivo_desactualizado)
+
+        # Comprobar auditorías registradas
+        reabrir_audits = Auditoria.objects.filter(
+            empresa_id=self.empresa_a.id,
+            entidad='periodo',
+            accion='REABRIR',
+            registro_id=p1.id
+        )
+        self.assertTrue(reabrir_audits.exists())
+
+        desactualizar_audits = Auditoria.objects.filter(
+            empresa_id=self.empresa_a.id,
+            entidad='periodo',
+            accion='DESACTUALIZAR'
+        )
+        self.assertEqual(desactualizar_audits.count(), 2)

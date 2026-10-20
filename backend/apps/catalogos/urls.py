@@ -1,8 +1,22 @@
 from django.urls import path
 
-from apps.catalogos.views import MonedaListView
+from apps.catalogos.views import (
+    MonedaListView,
+    TipoComprobanteListView,
+    TipoOperacionListView,
+    TipoExistenciaListView,
+    UnidadMedidaListView,
+    TipoCambioListCreateView,
+    TipoCambioResolverView,
+)
 
 
 urlpatterns = [
     path('monedas/', MonedaListView.as_view(), name='moneda-list'),
+    path('tipos-comprobante/', TipoComprobanteListView.as_view(), name='tipo-comprobante-list'),
+    path('tipos-operacion/', TipoOperacionListView.as_view(), name='tipo-operacion-list'),
+    path('tipos-existencia/', TipoExistenciaListView.as_view(), name='tipo-existencia-list'),
+    path('unidades-medida/', UnidadMedidaListView.as_view(), name='unidad-medida-list'),
+    path('tipos-cambio/', TipoCambioListCreateView.as_view(), name='tipo-cambio-list-create'),
+    path('tipo-cambio/resolver/', TipoCambioResolverView.as_view(), name='tipo-cambio-resolver'),
 ]
