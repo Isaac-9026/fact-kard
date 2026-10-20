@@ -16,6 +16,22 @@ class Usuario(models.Model):
     def __str__(self):
         return self.username
 
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
+    def set_password(self, raw_password):
+        from django.contrib.auth.hashers import make_password
+        self.password_hash = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        from django.contrib.auth.hashers import check_password
+        return check_password(raw_password, self.password_hash)
+
 
 class UsuarioEmpresa(models.Model):
     usuario = models.ForeignKey(
