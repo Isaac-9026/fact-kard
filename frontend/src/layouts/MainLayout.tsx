@@ -41,6 +41,33 @@ export const MainLayout: React.FC = () => {
           >
             📋 Auditoría
           </NavLink>
+          <NavLink
+            to="/catalogos"
+            style={({ isActive }) => ({
+              ...styles.navLink,
+              ...(isActive ? styles.navLinkActive : {}),
+            })}
+          >
+            🌐 Catálogos
+          </NavLink>
+          <NavLink
+            to="/periodos"
+            style={({ isActive }) => ({
+              ...styles.navLink,
+              ...(isActive ? styles.navLinkActive : {}),
+            })}
+          >
+            📅 Períodos
+          </NavLink>
+          <NavLink
+            to="/inventario"
+            style={({ isActive }) => ({
+              ...styles.navLink,
+              ...(isActive ? styles.navLinkActive : {}),
+            })}
+          >
+            📦 Inventario
+          </NavLink>
         </nav>
 
         <div style={styles.rightSection}>

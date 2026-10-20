@@ -5,6 +5,9 @@ import { MainLayout } from './layouts/MainLayout';
 import { LoginPage } from './pages/auth/LoginPage';
 import { EmpresasPage } from './pages/empresas/EmpresasPage';
 import { AuditoriaPage } from './pages/auditoria/AuditoriaPage';
+import { CatalogosPage } from './pages/catalogos/CatalogosPage';
+import { PeriodosPage } from './pages/periodos/PeriodosPage';
+import { MaestrosInventarioPage } from './pages/inventario/MaestrosInventarioPage';
 
 export const App: React.FC = () => {
   return (
@@ -19,6 +22,9 @@ export const App: React.FC = () => {
             <Route index element={<Navigate to="/empresas" replace />} />
             <Route path="empresas" element={<EmpresasPage />} />
             <Route path="auditoria" element={<AuditoriaPage />} />
+            <Route path="catalogos" element={<CatalogosPage />} />
+            <Route path="periodos" element={<PeriodosPage />} />
+            <Route path="inventario" element={<MaestrosInventarioPage />} />
           </Route>
 
           {/* Redirección wildcard */}

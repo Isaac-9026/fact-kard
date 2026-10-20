@@ -1,10 +1,10 @@
 from decimal import Decimal
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 from apps.catalogos.models import Moneda
-from apps.empresas.models import Empresa, Establecimiento, ConfigEmpresa
+from apps.empresas.models import Empresa, Establecimiento, ConfigEmpresa, Periodo, ConfigIgvPeriodo
 from apps.usuarios.models import Usuario, UsuarioEmpresa
 
 
@@ -161,3 +161,93 @@ class EmpresasApiTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class PeriodoModelTest(TestCase):
+    def setUp(self):
+        from datetime import date
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20100070970',
+            razon_social='EMPRESA MODELO S.A.C.',
+            moneda_base_codigo=self.moneda
+        )
+
+    def test_crear_periodo_y_unique_constraint(self):
+        from datetime import date
+        p = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=1,
+            orden=202601,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_fin=date(2026, 1, 31),
+            estado='ABIERTO'
+        )
+        self.assertEqual(p.estado, 'ABIERTO')
+
+        # Duplicado en empresa, año y mes debe fallar
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                Periodo.objects.create(
+                    empresa=self.empresa,
+                    anio=2026,
+                    mes=1,
+                    orden=202601,
+                    fecha_inicio=date(2026, 1, 1),
+                    fecha_fin=date(2026, 1, 31)
+                )
+
+    def test_periodo_mes_invalido_check_constraint(self):
+        from datetime import date
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                Periodo.objects.create(
+                    empresa=self.empresa,
+                    anio=2026,
+                    mes=13,  # Mes inválido
+                    orden=202613,
+                    fecha_inicio=date(2026, 1, 1),
+                    fecha_fin=date(2026, 1, 31)
+                )
+
+    def test_periodo_fechas_incoherentes_check_constraint(self):
+        from datetime import date
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                Periodo.objects.create(
+                    empresa=self.empresa,
+                    anio=2026,
+                    mes=2,
+                    orden=202602,
+                    fecha_inicio=date(2026, 2, 28),
+                    fecha_fin=date(2026, 2, 1)  # fecha_fin < fecha_inicio
+                )
+
+    def test_config_igv_periodo_constraints(self):
+        from datetime import date
+        p = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=3,
+            orden=202603,
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31)
+        )
+        cfg = ConfigIgvPeriodo.objects.create(
+            empresa=self.empresa,
+            periodo=p,
+            metodo='TOTAL',
+            porcentaje_recuperable=Decimal('100.0000')
+        )
+        self.assertEqual(cfg.metodo, 'TOTAL')
+
+        # Método inválido
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                ConfigIgvPeriodo.objects.create(
+                    empresa=self.empresa,
+                    periodo=p,
+                    metodo='METODO_INVALIDO',
+                    porcentaje_recuperable=Decimal('50.0000')
+                )

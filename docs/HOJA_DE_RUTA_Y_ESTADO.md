@@ -44,27 +44,27 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 
 **👨‍💻 Carril DEV A — Rama: `feat/usuarios-auditoria`**
 *Carpetas exclusivas:* `backend/apps/usuarios/`, `backend/apps/auditoria/`, `frontend/src/pages/auth/`, `frontend/src/pages/auditoria/`
-- [ ] **Backend (`auditoria`):** Función `registrar_auditoria()` en `apps/auditoria/services.py` y endpoint `GET /api/auditoria/` filtrado por `X-Empresa-Id`.
-- [ ] **Backend (`usuarios`):** Endpoints `POST /api/usuarios/login/`, `GET /api/usuarios/me/` y permisos reutilizables (`TieneEmpresaActiva` leyendo header `X-Empresa-Id` y `EsAdminEmpresa`).
-- [ ] **Tests (`usuarios` y `auditoria`):** Test automático que compruebe que un usuario de `Empresa A` recibe error `403` si intenta consultar `Empresa B`.
-- [ ] **Frontend (`pages/auth/` y `pages/auditoria/`):** Pantalla de Login funcional y vista de tabla de Auditoría.
-- [ ] Subir Pull Request a `develop`.
+- [x] **Backend (`auditoria`):** Función `registrar_auditoria()` en `apps/auditoria/services.py` y endpoint `GET /api/auditoria/` filtrado por `X-Empresa-Id`.
+- [x] **Backend (`usuarios`):** Endpoints `POST /api/usuarios/login/`, `GET /api/usuarios/me/` y permisos reutilizables (`TieneEmpresaActiva` leyendo header `X-Empresa-Id` y `EsAdminEmpresa`).
+- [x] **Tests (`usuarios` y `auditoria`):** Test automático que compruebe que un usuario de `Empresa A` recibe error `403` si intenta consultar `Empresa B`.
+- [x] **Frontend (`pages/auth/` y `pages/auditoria/`):** Pantalla de Login funcional y vista de tabla de Auditoría.
+- [x] Subir Pull Request a `develop`.
 
 **👨‍💻 Carril DEV B — Rama: `feat/empresas-config`**
 *Carpetas exclusivas:* `backend/apps/empresas/`, `backend/apps/catalogos/`, `frontend/src/layouts/`, `frontend/src/pages/empresas/`
-- [ ] **Backend (`catalogos`):** Carga inicial (*seed*) de monedas `PEN` y `USD` en la tabla `moneda`.
-- [ ] **Backend (`empresas`):** CRUD de `Empresa` (creando automáticamente su `ConfigEmpresa` 1:1 con `Decimal('0.05')`), actualización de `ConfigEmpresa` y CRUD de `Establecimiento` filtrando por `X-Empresa-Id`.
-- [ ] **Tests (`empresas`):** Test de creación de empresa + configuración automática.
-- [ ] **Frontend (`layouts/` y `pages/empresas/`):** Layout principal con barra superior, Selector de Empresa Activa (que guarda el ID para el header `X-Empresa-Id`) y pantalla de gestión de Empresas/Establecimientos/Configuración.
-- [ ] Subir Pull Request a `develop`.
+- [x] **Backend (`catalogos`):** Carga inicial (*seed*) de monedas `PEN` y `USD` en la tabla `moneda`.
+- [x] **Backend (`empresas`):** CRUD de `Empresa` (creando automáticamente su `ConfigEmpresa` 1:1 con `Decimal('0.05')`), actualización de `ConfigEmpresa` y CRUD de `Establecimiento` filtrando por `X-Empresa-Id`.
+- [x] **Tests (`empresas`):** Test de creación de empresa + configuración automática.
+- [x] **Frontend (`layouts/` y `pages/empresas/`):** Layout principal con barra superior, Selector de Empresa Activa (que guarda el ID para el header `X-Empresa-Id`) y pantalla de gestión de Empresas/Establecimientos/Configuración.
+- [x] Subir Pull Request a `develop`.
 
 #### Paso 1.2 — Cierre del Bloque 1
-- [ ] Revisar ambos Pull Requests, unir a `develop` y probar en pantalla: Login $\rightarrow$ Elegir Empresa A $\rightarrow$ Ver que no se mezclan datos con Empresa B.
+- [x] Revisar ambos Pull Requests, unir a `develop` y probar en pantalla: Login $\rightarrow$ Elegir Empresa A $\rightarrow$ Ver que no se mezclan datos con Empresa B.
 
 ---
 
 ### 📦 BLOQUE 2 (SIGUIENTE): Maestros, Catálogos SUNAT y Períodos
-- [ ] **Ventana de Migración 2 y 3 (1 sola persona en `develop`):** Agregar las 11 tablas de Maestros, Catálogos SUNAT, Tipo de Cambio, Períodos e IGV.
+- [x] **Ventana de Migración 2 y 3 (1 sola persona en `develop`):** Agregar las 11 tablas de Maestros, Catálogos SUNAT, Tipo de Cambio, Períodos e IGV.
 - [ ] **Carril DEV A:** `apps/catalogos/` (Seed Tablas SUNAT + Tipo de Cambio) y Períodos/IGV + sus pantallas en React.
 - [ ] **Carril DEV B:** `apps/inventario/` (Terceros, Almacenes, Productos y Unidades de medida con 1 unidad base) + sus pantallas en React.
 

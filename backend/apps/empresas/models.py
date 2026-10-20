@@ -97,3 +97,112 @@ class ConfigEmpresa(models.Model):
 
     def __str__(self):
         return f"Configuración de {self.empresa.razon_social}"
+
+
+class Periodo(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='periodos'
+    )
+    anio = models.SmallIntegerField()
+    mes = models.SmallIntegerField()
+    orden = models.IntegerField()
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    estado = models.CharField(max_length=20, default='ABIERTO', db_default='ABIERTO')
+    motivo_desactualizado = models.CharField(max_length=500, null=True, blank=True)
+    cerrado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='cerrado_por',
+        related_name='+'
+    )
+    cerrado_en = models.DateTimeField(null=True, blank=True)
+    reabierto_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='reabierto_por',
+        related_name='+'
+    )
+    reabierto_en = models.DateTimeField(null=True, blank=True)
+    motivo_reapertura = models.CharField(max_length=500, null=True, blank=True)
+
+    class Meta:
+        db_table = 'periodo'
+        verbose_name = 'Período'
+        verbose_name_plural = 'Períodos'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'anio', 'mes'],
+                name='uq_periodo_empresa_anio_mes'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(mes__range=(1, 12)),
+                name='chk_periodo_mes'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(estado__in=['ABIERTO', 'CERRADO', 'DESACTUALIZADO']),
+                name='chk_periodo_estado'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(fecha_fin__gte=models.F('fecha_inicio')),
+                name='chk_periodo_fechas'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.empresa.razon_social} - {self.anio}/{self.mes:02d} ({self.estado})"
+
+
+class ConfigIgvPeriodo(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='configs_igv'
+    )
+    periodo = models.ForeignKey(
+        'empresas.Periodo',
+        on_delete=models.CASCADE,
+        db_column='periodo_id',
+        related_name='configs_igv'
+    )
+    metodo = models.CharField(max_length=20)
+    porcentaje_recuperable = models.DecimalField(max_digits=7, decimal_places=4)
+    creado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='creado_por',
+        related_name='+'
+    )
+    creado_en = models.DateTimeField(default=timezone.now, db_default=Now())
+
+    class Meta:
+        db_table = 'config_igv_periodo'
+        verbose_name = 'Configuración IGV de Período'
+        verbose_name_plural = 'Configuraciones IGV de Período'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'periodo'],
+                name='uq_config_igv_periodo_empresa_periodo'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(metodo__in=['TOTAL', 'NULO', 'PRORRATA']),
+                name='chk_config_igv_periodo_metodo'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(porcentaje_recuperable__range=(Decimal('0'), Decimal('100'))),
+                name='chk_config_igv_periodo_porcentaje'
+            )
+        ]
+
+    def __str__(self):
+        return f"IGV {self.empresa.razon_social} - Periodo {self.periodo_id} ({self.metodo} - {self.porcentaje_recuperable}%)"
