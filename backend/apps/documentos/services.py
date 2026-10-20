@@ -518,40 +518,10 @@ def confirmar_documento_validacion(
     - Estado de revisión DEBE ser 'REVISADO'.
     - Estado documental DEBE ser 'BORRADOR'.
     """
-    try:
-        doc = Documento.objects.get(id=documento_id, empresa_id=empresa_id)
-    except Documento.DoesNotExist:
-        raise ValidationError({'detail': 'El documento no existe o no pertenece a la empresa activa.'})
-
-    if doc.periodo.estado == 'CERRADO':
-        raise ValidationError({'periodo': 'No se puede confirmar un documento en un período CERRADO.'})
-
-    if doc.estado_revision != 'REVISADO':
-        raise ValidationError(
-            {'estado_revision': f"El documento no puede confirmarse porque su estado de revisión es '{doc.estado_revision}'. Debe estar en 'REVISADO'."}
-        )
-
-    if doc.estado != 'BORRADOR':
-        raise ValidationError({'estado': f"Solo se pueden confirmar documentos en estado BORRADOR (actual: '{doc.estado}')."})
-
-    estado_anterior = doc.estado
-    doc.estado = 'CONFIRMADO'
-    doc.confirmado_por_id = usuario_id
-    doc.confirmado_en = timezone.now()
-    doc.save(update_fields=['estado', 'confirmado_por', 'confirmado_en'])
-
-    registrar_auditoria(
-        empresa_id=empresa_id,
-        usuario_id=usuario_id,
-        accion='CONFIRMAR',
-        entidad='DOCUMENTO',
-        registro_id=doc.id,
-        valor_anterior={'estado': estado_anterior},
-        valor_nuevo={'estado': 'CONFIRMADO'},
-        motivo="Confirmación de documento comercial validado"
+    from apps.kardex.services import confirmar_documento_motor
+    return confirmar_documento_motor(
+        documento_id=documento_id, empresa_id=empresa_id, usuario_id=usuario_id,
     )
-
-    return doc
 
 
 @transaction.atomic
@@ -562,27 +532,8 @@ def anular_documento(
     motivo: str
 ) -> Documento:
     """Anula un documento en borrador o confirmado."""
-    try:
-        doc = Documento.objects.get(id=documento_id, empresa_id=empresa_id)
-    except Documento.DoesNotExist:
-        raise ValidationError({'detail': 'El documento no existe o no pertenece a la empresa activa.'})
-
-    if doc.periodo.estado == 'CERRADO':
-        raise ValidationError({'periodo': 'No se puede anular un documento en un período CERRADO.'})
-
-    estado_anterior = doc.estado
-    doc.estado = 'ANULADO'
-    doc.save(update_fields=['estado'])
-
-    registrar_auditoria(
-        empresa_id=empresa_id,
-        usuario_id=usuario_id,
-        accion='ANULAR',
-        entidad='DOCUMENTO',
-        registro_id=doc.id,
-        valor_anterior={'estado': estado_anterior},
-        valor_nuevo={'estado': 'ANULADO'},
-        motivo=motivo or "Anulación de comprobante"
+    from apps.kardex.services import anular_documento_motor
+    return anular_documento_motor(
+        documento_id=documento_id, empresa_id=empresa_id, usuario_id=usuario_id,
+        motivo=motivo,
     )
-
-    return doc
