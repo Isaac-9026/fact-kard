@@ -206,3 +206,76 @@ class ConfigIgvPeriodo(models.Model):
 
     def __str__(self):
         return f"IGV {self.empresa.razon_social} - Periodo {self.periodo_id} ({self.metodo} - {self.porcentaje_recuperable}%)"
+
+
+class CierrePeriodo(models.Model):
+    periodo = models.ForeignKey(
+        'empresas.Periodo',
+        on_delete=models.CASCADE,
+        db_column='periodo_id',
+        related_name='cierres'
+    )
+    version_calculo = models.IntegerField()
+    cerrado_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.RESTRICT,
+        db_column='cerrado_por',
+        related_name='+'
+    )
+    cerrado_en = models.DateTimeField(auto_now_add=True)
+    archivo_excel = models.CharField(max_length=500, null=True, blank=True)
+    hash_resultado = models.CharField(max_length=128, null=True, blank=True)
+    snapshot_resumen = models.JSONField(null=True, blank=True)
+    vigente = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'cierre_periodo'
+        verbose_name = 'Cierre de Período'
+        verbose_name_plural = 'Cierres de Período'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['periodo', 'version_calculo'],
+                name='uq_cierre_periodo_version'
+            )
+        ]
+
+    def __str__(self):
+        return f"Cierre Período {self.periodo_id} v{self.version_calculo} ({'Vigente' if self.vigente else 'Histórico'})"
+
+
+class CierrePeriodoDetalle(models.Model):
+    cierre_periodo = models.ForeignKey(
+        'empresas.CierrePeriodo',
+        on_delete=models.CASCADE,
+        db_column='cierre_periodo_id',
+        related_name='detalles'
+    )
+    producto = models.ForeignKey(
+        'inventario.Producto',
+        on_delete=models.RESTRICT,
+        db_column='producto_id',
+        related_name='+'
+    )
+    establecimiento = models.ForeignKey(
+        'empresas.Establecimiento',
+        on_delete=models.RESTRICT,
+        db_column='establecimiento_id',
+        related_name='+'
+    )
+    saldo_cantidad = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    saldo_valor_pen = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    cpp_pen = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+
+    class Meta:
+        db_table = 'cierre_periodo_detalle'
+        verbose_name = 'Detalle de Cierre de Período'
+        verbose_name_plural = 'Detalles de Cierre de Período'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cierre_periodo', 'producto', 'establecimiento'],
+                name='uq_cierre_detalle_producto_estab'
+            )
+        ]
+
+    def __str__(self):
+        return f"Detalle Cierre #{self.cierre_periodo_id} - Prod {self.producto_id} @ Estab {self.establecimiento_id}"

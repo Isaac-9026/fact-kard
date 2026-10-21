@@ -12,6 +12,8 @@ import { DocumentosPage } from './pages/documentos/DocumentosPage';
 import { OperacionesInternasPage } from './pages/operaciones/OperacionesInternasPage';
 import { TransferenciasPage } from './pages/transferencias/TransferenciasPage';
 import { IncidenciasPage } from './pages/incidencias/IncidenciasPage';
+import { KardexPage } from './pages/kardex/KardexPage';
+import { CierresPage } from './pages/cierres/CierresPage';
 
 export const App: React.FC = () => {
   return (
@@ -33,6 +35,8 @@ export const App: React.FC = () => {
             <Route path="operaciones-internas" element={<OperacionesInternasPage />} />
             <Route path="transferencias" element={<TransferenciasPage />} />
             <Route path="incidencias" element={<IncidenciasPage />} />
+            <Route path="kardex" element={<KardexPage />} />
+            <Route path="cierres" element={<CierresPage />} />
           </Route>
 
           {/* Redirección wildcard */}

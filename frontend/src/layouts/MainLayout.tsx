@@ -28,6 +28,12 @@ export const MainLayout: React.FC = () => {
     if (path.startsWith('/incidencias')) {
       return { section: 'OPERACIONES', title: 'Incidencias y Recálculos', icon: '⚠️' };
     }
+    if (path.startsWith('/kardex')) {
+      return { section: 'KARDEX Y CIERRE', title: 'Consulta de Kardex Valorizado', icon: '📊' };
+    }
+    if (path.startsWith('/cierres')) {
+      return { section: 'KARDEX Y CIERRE', title: 'Cierre y Reapertura de Períodos', icon: '🔒' };
+    }
     if (path.startsWith('/inventario')) {
       return { section: 'MAESTROS Y FISCAL', title: 'Inventario y Terceros', icon: '📦' };
     }
@@ -131,6 +137,41 @@ export const MainLayout: React.FC = () => {
             >
               <span style={styles.navIcon}>⚠️</span>
               {!collapsed && <span style={styles.navText}>Incidencias</span>}
+            </NavLink>
+          </div>
+
+          {/* SECCIÓN: KARDEX Y CIERRE */}
+          <div style={styles.navGroup}>
+            {!collapsed ? (
+              <span style={styles.groupHeader}>KARDEX Y CIERRE</span>
+            ) : (
+              <div style={styles.groupDivider} />
+            )}
+
+            <NavLink
+              to="/kardex"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Kardex Valorizado (SUNAT 13.1)"
+            >
+              <span style={styles.navIcon}>📊</span>
+              {!collapsed && <span style={styles.navText}>Kardex Valorizado</span>}
+            </NavLink>
+
+            <NavLink
+              to="/cierres"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Cierre de Períodos"
+            >
+              <span style={styles.navIcon}>🔒</span>
+              {!collapsed && <span style={styles.navText}>Cierre de Períodos</span>}
             </NavLink>
           </div>
 

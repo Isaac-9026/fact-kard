@@ -484,3 +484,112 @@ class PeriodosYConfigIgvApiTest(TestCase):
             accion='DESACTUALIZAR'
         )
         self.assertEqual(desactualizar_audits.count(), 2)
+
+
+class CierrePeriodoModelTest(TestCase):
+    def setUp(self):
+        import datetime
+        from apps.catalogos.models import TipoExistencia, UnidadMedida
+        from apps.inventario.models import Producto
+        from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle
+
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20100070970',
+            razon_social='EMPRESA MODELO S.A.C.',
+            moneda_base_codigo=self.moneda
+        )
+        self.establecimiento = Establecimiento.objects.create(
+            empresa=self.empresa,
+            codigo_sunat='0000',
+            nombre='PRINCIPAL'
+        )
+        self.usuario = Usuario.objects.create(
+            username='admin_cierre',
+            email='cierre@factkard.pe',
+            password_hash='hash'
+        )
+        self.periodo = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=1,
+            orden=202601,
+            fecha_inicio=datetime.date(2026, 1, 1),
+            fecha_fin=datetime.date(2026, 1, 31),
+            estado='CERRADO'
+        )
+        self.tipo_existencia = TipoExistencia.objects.create(codigo='01', descripcion='Mercaderías')
+        self.und = UnidadMedida.objects.create(codigo='NIU', descripcion='Unidades')
+        self.producto = Producto.objects.create(
+            empresa=self.empresa,
+            codigo_interno='P001',
+            descripcion='Producto Cierre',
+            tipo_existencia_codigo=self.tipo_existencia
+        )
+
+    def test_creacion_cierre_y_detalle_exitoso(self):
+        from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle
+
+        cierre = CierrePeriodo.objects.create(
+            periodo=self.periodo,
+            version_calculo=1,
+            cerrado_por=self.usuario,
+            archivo_excel='/media/cierres/2026_01_v1.xlsx',
+            hash_resultado='a1b2c3d4e5f67890abcdef1234567890',
+            snapshot_resumen={'total_items': 1, 'valor_total': '1500.00'}
+        )
+        self.assertIsNotNone(cierre.id)
+        self.assertTrue(cierre.vigente)
+        self.assertEqual(cierre.periodo.cierres.count(), 1)
+
+        detalle = CierrePeriodoDetalle.objects.create(
+            cierre_periodo=cierre,
+            producto=self.producto,
+            establecimiento=self.establecimiento,
+            saldo_cantidad=Decimal('100.00000000'),
+            saldo_valor_pen=Decimal('1500.00000000'),
+            cpp_pen=Decimal('15.00000000')
+        )
+        self.assertIsNotNone(detalle.id)
+        self.assertEqual(cierre.detalles.count(), 1)
+
+    def test_cierre_periodo_version_unica(self):
+        from apps.empresas.models import CierrePeriodo
+
+        CierrePeriodo.objects.create(
+            periodo=self.periodo,
+            version_calculo=1,
+            cerrado_por=self.usuario
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                CierrePeriodo.objects.create(
+                    periodo=self.periodo,
+                    version_calculo=1,
+                    cerrado_por=self.usuario
+                )
+
+    def test_cierre_detalle_unicidad_producto_establecimiento(self):
+        from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle
+
+        cierre = CierrePeriodo.objects.create(
+            periodo=self.periodo,
+            version_calculo=1,
+            cerrado_por=self.usuario
+        )
+        CierrePeriodoDetalle.objects.create(
+            cierre_periodo=cierre,
+            producto=self.producto,
+            establecimiento=self.establecimiento,
+            saldo_cantidad=Decimal('50.00000000')
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                CierrePeriodoDetalle.objects.create(
+                    cierre_periodo=cierre,
+                    producto=self.producto,
+                    establecimiento=self.establecimiento,
+                    saldo_cantidad=Decimal('80.00000000')
+                )
