@@ -14,6 +14,8 @@ import { TransferenciasPage } from './pages/transferencias/TransferenciasPage';
 import { IncidenciasPage } from './pages/incidencias/IncidenciasPage';
 import { KardexPage } from './pages/kardex/KardexPage';
 import { CierresPage } from './pages/cierres/CierresPage';
+import { CapturaHomologacionPage } from './pages/captura/CapturaHomologacionPage';
+import { Formato131Page } from './pages/formato131/Formato131Page';
 
 export const App: React.FC = () => {
   return (
@@ -32,11 +34,13 @@ export const App: React.FC = () => {
             <Route path="periodos" element={<PeriodosPage />} />
             <Route path="inventario" element={<MaestrosInventarioPage />} />
             <Route path="documentos" element={<DocumentosPage />} />
+            <Route path="captura-homologacion" element={<CapturaHomologacionPage />} />
             <Route path="operaciones-internas" element={<OperacionesInternasPage />} />
             <Route path="transferencias" element={<TransferenciasPage />} />
             <Route path="incidencias" element={<IncidenciasPage />} />
             <Route path="kardex" element={<KardexPage />} />
             <Route path="cierres" element={<CierresPage />} />
+            <Route path="formato-13-1" element={<Formato131Page />} />
           </Route>
 
           {/* Redirección wildcard */}

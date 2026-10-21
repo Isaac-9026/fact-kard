@@ -247,3 +247,99 @@ class DocumentoDetalle(models.Model):
 
     def __str__(self):
         return f"Doc #{self.documento_id} Línea {self.linea} (Prod: {self.producto_id})"
+
+
+class DocumentoCaptura(models.Model):
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='capturas'
+    )
+    documento = models.ForeignKey(
+        'documentos.Documento',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='documento_id',
+        related_name='capturas'
+    )
+    tipo = models.CharField(max_length=20)
+    ruta_archivo = models.CharField(max_length=500)
+    hash_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    estado_proceso = models.CharField(max_length=30, default='PENDIENTE', db_default='PENDIENTE')
+    subido_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='subido_por',
+        related_name='+'
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'documento_captura'
+        verbose_name = 'Documento de Captura'
+        verbose_name_plural = 'Documentos de Captura'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tipo__in=['XML', 'PDF', 'IMAGEN', 'ESCANER']),
+                name='chk_documento_captura_tipo'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['empresa', 'creado_en'], name='idx_doc_captura_emp_creado'),
+            models.Index(fields=['documento'], name='idx_doc_captura_documento'),
+        ]
+
+    def __str__(self):
+        return f"Captura #{self.id} [{self.tipo}] - {self.estado_proceso}"
+
+
+class CapturaCampo(models.Model):
+    documento_captura = models.ForeignKey(
+        'documentos.DocumentoCaptura',
+        on_delete=models.CASCADE,
+        db_column='documento_captura_id',
+        related_name='campos'
+    )
+    seccion = models.CharField(max_length=20)
+    numero_linea = models.IntegerField(null=True, blank=True)
+    nombre_campo = models.CharField(max_length=100)
+    valor_extraido = models.TextField(null=True, blank=True)
+    confianza = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
+    valor_corregido = models.TextField(null=True, blank=True)
+    corregido_por = models.ForeignKey(
+        'usuarios.Usuario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='corregido_por',
+        related_name='+'
+    )
+
+    class Meta:
+        db_table = 'captura_campo'
+        verbose_name = 'Campo de Captura'
+        verbose_name_plural = 'Campos de Captura'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(seccion__in=['CABECERA', 'DETALLE']),
+                name='chk_captura_campo_seccion'
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(confianza__isnull=True) |
+                    models.Q(confianza__gte=0, confianza__lte=100)
+                ),
+                name='chk_captura_campo_confianza'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['documento_captura', 'seccion'], name='idx_cap_campo_doc_sec'),
+        ]
+
+    def __str__(self):
+        return f"Campo {self.nombre_campo} ({self.seccion}) - Captura #{self.documento_captura_id}"
+

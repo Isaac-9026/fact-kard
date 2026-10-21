@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.auditoria.models import Auditoria
 from apps.catalogos.models import Moneda, TipoCambio, TipoComprobante, TipoOperacion, UnidadMedida, TipoExistencia
-from apps.documentos.models import Documento, DocumentoDetalle
+from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
 from apps.empresas.models import Empresa, Establecimiento, Periodo, ConfigIgvPeriodo
 from apps.inventario.models import Almacen, Producto, ProductoUnidad, ProductoEquivalencia, Tercero
 from apps.usuarios.models import Usuario, UsuarioEmpresa
@@ -850,3 +850,142 @@ class DocumentosApiTest(TestCase):
         url_conf_2 = reverse('documento-confirmar', args=[doc_cerrado.id])
         resp_2 = self.client.post(url_conf_2, {}, format='json', **self.headers())
         self.assertEqual(resp_2.status_code, 400)
+
+
+class DocumentoCapturaIntegridadTest(TestCase):
+    def setUp(self):
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20600000099',
+            razon_social='CAPTURA TEST S.A.C.',
+            moneda_base_codigo=self.moneda
+        )
+        self.usuario = Usuario.objects.create(
+            username='user_captura',
+            email='captura@test.com',
+            password_hash='pbkdf2_test'
+        )
+
+    def test_documento_captura_tipos_validos(self):
+        for tipo in ['XML', 'PDF', 'IMAGEN', 'ESCANER']:
+            captura = DocumentoCaptura.objects.create(
+                empresa=self.empresa,
+                tipo=tipo,
+                ruta_archivo=f'/uploads/{tipo.lower()}/archivo.{tipo.lower()}',
+                hash_sha256='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                subido_por=self.usuario
+            )
+            self.assertEqual(captura.estado_proceso, 'PENDIENTE')
+            self.assertEqual(captura.tipo, tipo)
+
+    def test_documento_captura_tipo_invalido_viola_check(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DocumentoCaptura.objects.create(
+                    empresa=self.empresa,
+                    tipo='WORD',
+                    ruta_archivo='/uploads/word/archivo.docx'
+                )
+
+    def test_captura_campo_secciones_validas(self):
+        captura = DocumentoCaptura.objects.create(
+            empresa=self.empresa,
+            tipo='XML',
+            ruta_archivo='/uploads/xml/doc.xml'
+        )
+        campo_cab = CapturaCampo.objects.create(
+            documento_captura=captura,
+            seccion='CABECERA',
+            nombre_campo='ruc_emisor',
+            valor_extraido='20123456789',
+            confianza=Decimal('99.9500')
+        )
+        campo_det = CapturaCampo.objects.create(
+            documento_captura=captura,
+            seccion='DETALLE',
+            numero_linea=1,
+            nombre_campo='descripcion',
+            valor_extraido='ITEM 1',
+            confianza=Decimal('85.0000')
+        )
+        self.assertEqual(campo_cab.seccion, 'CABECERA')
+        self.assertEqual(campo_det.seccion, 'DETALLE')
+
+    def test_captura_campo_seccion_invalida_viola_check(self):
+        captura = DocumentoCaptura.objects.create(
+            empresa=self.empresa,
+            tipo='XML',
+            ruta_archivo='/uploads/xml/doc.xml'
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CapturaCampo.objects.create(
+                    documento_captura=captura,
+                    seccion='PIE_PAGINA',
+                    nombre_campo='total'
+                )
+
+    def test_captura_campo_confianza_valida_y_nula(self):
+        captura = DocumentoCaptura.objects.create(
+            empresa=self.empresa,
+            tipo='PDF',
+            ruta_archivo='/uploads/pdf/doc.pdf'
+        )
+        # Nula
+        c1 = CapturaCampo.objects.create(
+            documento_captura=captura,
+            seccion='CABECERA',
+            nombre_campo='fecha',
+            confianza=None
+        )
+        # En límites 0 y 100
+        c2 = CapturaCampo.objects.create(
+            documento_captura=captura,
+            seccion='CABECERA',
+            nombre_campo='serie',
+            confianza=Decimal('0.0000')
+        )
+        c3 = CapturaCampo.objects.create(
+            documento_captura=captura,
+            seccion='CABECERA',
+            nombre_campo='numero',
+            confianza=Decimal('100.0000')
+        )
+        self.assertIsNone(c1.confianza)
+        self.assertEqual(c2.confianza, Decimal('0.0000'))
+        self.assertEqual(c3.confianza, Decimal('100.0000'))
+
+    def test_captura_campo_confianza_invalida_viola_check(self):
+        captura = DocumentoCaptura.objects.create(
+            empresa=self.empresa,
+            tipo='PDF',
+            ruta_archivo='/uploads/pdf/doc.pdf'
+        )
+        # Menor a 0
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CapturaCampo.objects.create(
+                    documento_captura=captura,
+                    seccion='CABECERA',
+                    nombre_campo='total',
+                    confianza=Decimal('-0.0100')
+                )
+        # Mayor a 100
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CapturaCampo.objects.create(
+                    documento_captura=captura,
+                    seccion='CABECERA',
+                    nombre_campo='total',
+                    confianza=Decimal('100.0100')
+                )
+
+    def test_introspeccion_todas_las_tablas_sql_existen(self):
+        import re
+        from django.db import connection
+        with open('../docs/FACT_KARD_BD_COMPLETA_SQL.md', encoding='utf-8') as f:
+            content = f.read()
+        sql_tables = set(re.findall(r'CREATE TABLE (\w+)', content, re.IGNORECASE))
+        db_tables = set(connection.introspection.table_names())
+        missing = sql_tables - db_tables
+        self.assertEqual(len(missing), 0, f"Faltan tablas oficiales en la BD: {missing}")

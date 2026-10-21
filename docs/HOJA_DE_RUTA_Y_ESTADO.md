@@ -84,13 +84,13 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 ---
 
 ### 📊 BLOQUE 5: Vista Kardex, Exportación Excel y Cierre de Períodos
-- [ ] **Ventana de Migración 6:** Agregar las 2 tablas de cierre (`cierre_periodo`, `cierre_periodo_detalle`).
-- [ ] **Carril DEV A:** Consulta de Kardex Valorizado y exportación a Excel (`openpyxl`) + Pantalla de Kardex.
-- [ ] **Carril DEV B:** Lógica de Cierre (snapshot + hash) y Reapertura (paso a `DESACTUALIZADO`) + Pantalla de Cierres.
+- [x] **Ventana de Migración 6:** Agregar las 2 tablas de cierre (`cierre_periodo`, `cierre_periodo_detalle`).
+- [x] **Carril DEV A:** Consulta de Kardex Valorizado y exportación a Excel (`openpyxl`) + Pantalla de Kardex.
+- [x] **Carril DEV B:** Lógica de Cierre (snapshot + hash) y Reapertura (paso a `DESACTUALIZADO`) + Pantalla de Cierres.
 
 ---
 
 ### 🤖 BLOQUE 6: XML, Homologación, OCR y Formato 13.1 SUNAT
-- [ ] **Ventana de Migración 7 (Últimas 3 tablas — Completando las 32 tablas):** `producto_equivalencia`, `documento_captura`, `captura_campo`.
+- [x] **Ventana de Migración 7 (Últimas 3 tablas — Completando las 32 tablas):** `producto_equivalencia`, `documento_captura`, `captura_campo`.
 - [ ] **Carril DEV A:** Lector XML UBL y Homologación de productos.
 - [ ] **Carril DEV B:** OCR básico a borrador y reporte Formato 13.1 SUNAT.

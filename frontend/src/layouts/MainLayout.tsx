@@ -19,6 +19,9 @@ export const MainLayout: React.FC = () => {
     if (path.startsWith('/documentos')) {
       return { section: 'OPERACIONES', title: 'Documentos Comerciales', icon: '📑' };
     }
+    if (path.startsWith('/captura-homologacion')) {
+      return { section: 'OPERACIONES', title: 'Captura XML / OCR y Homologación', icon: '📥' };
+    }
     if (path.startsWith('/operaciones-internas')) {
       return { section: 'OPERACIONES', title: 'Operaciones Internas', icon: '📝' };
     }
@@ -33,6 +36,9 @@ export const MainLayout: React.FC = () => {
     }
     if (path.startsWith('/cierres')) {
       return { section: 'KARDEX Y CIERRE', title: 'Cierre y Reapertura de Períodos', icon: '🔒' };
+    }
+    if (path.startsWith('/formato-13-1')) {
+      return { section: 'KARDEX Y CIERRE', title: 'Reporte Oficial Formato 13.1 SUNAT', icon: '📜' };
     }
     if (path.startsWith('/inventario')) {
       return { section: 'MAESTROS Y FISCAL', title: 'Inventario y Terceros', icon: '📦' };
@@ -98,6 +104,19 @@ export const MainLayout: React.FC = () => {
             >
               <span style={styles.navIcon}>📑</span>
               {!collapsed && <span style={styles.navText}>Documentos Comerciales</span>}
+            </NavLink>
+
+            <NavLink
+              to="/captura-homologacion"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Captura XML / OCR y Homologación"
+            >
+              <span style={styles.navIcon}>📥</span>
+              {!collapsed && <span style={styles.navText}>Captura y Homologación</span>}
             </NavLink>
 
             <NavLink
@@ -172,6 +191,19 @@ export const MainLayout: React.FC = () => {
             >
               <span style={styles.navIcon}>🔒</span>
               {!collapsed && <span style={styles.navText}>Cierre de Períodos</span>}
+            </NavLink>
+
+            <NavLink
+              to="/formato-13-1"
+              style={({ isActive }) => ({
+                ...styles.navItem,
+                ...(isActive ? styles.navItemActive : {}),
+                justifyContent: collapsed ? 'center' : 'flex-start',
+              })}
+              title="Reporte Oficial Formato 13.1 SUNAT"
+            >
+              <span style={styles.navIcon}>📜</span>
+              {!collapsed && <span style={styles.navText}>Formato 13.1 SUNAT</span>}
             </NavLink>
           </div>
 
