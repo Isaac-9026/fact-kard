@@ -1,252 +1,37 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { compararCierres, ejecutarCierre, obtenerCierres, type CierrePeriodo, type DiferenciaCierre } from '../../api/cierres';
+import { obtenerPeriodos, reabrirPeriodo, type Periodo } from '../../api/periodos';
+
+const etiqueta = (p:{anio:number;mes:number}) => `${p.anio}-${String(p.mes).padStart(2,'0')}`;
+const dinero = (v:string|number|undefined) => Number(v||0).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
 
 export const CierresPage: React.FC = () => {
-  const { empresaActiva } = useAuth();
+  const { empresaActiva, usuario } = useAuth();
+  const admin = Boolean(usuario?.es_admin_global || empresaActiva?.rol === 'ADMIN');
+  const [periodos,setPeriodos] = useState<Periodo[]>([]), [cierres,setCierres] = useState<CierrePeriodo[]>([]);
+  const [periodoId,setPeriodoId] = useState(''), [seleccion,setSeleccion] = useState<CierrePeriodo|null>(null);
+  const [diferencias,setDiferencias] = useState<DiferenciaCierre[]>([]), [ocupado,setOcupado] = useState(false);
+  const [error,setError] = useState<string|null>(null), [mensaje,setMensaje] = useState<string|null>(null);
+  const periodo = useMemo(()=>periodos.find(p=>p.id===Number(periodoId)),[periodos,periodoId]);
 
-  return (
-    <div style={styles.page}>
-      {/* Encabezado */}
-      <header style={styles.header}>
-        <div>
-          <div style={styles.badgeRow}>
-            <span style={styles.badgePrimary}>CIERRE DE PERÍODOS & SNAPSHOTS</span>
-            <span style={styles.badgeNeutral}>Fases 9 & 10 · Bloque 5</span>
-          </div>
-          <h1 style={styles.title}>Cierre y Reapertura de Períodos</h1>
-          <p style={styles.subtitle}>
-            Generación de versiones oficiales de cierre, snapshots criptográficos y control de auditoría — {empresaActiva?.razon_social ?? 'Empresa Activa'}
-          </p>
-        </div>
-      </header>
+  const cargar = async () => { if(!empresaActiva)return; setOcupado(true);setError(null);try{const [p,c]=await Promise.all([obtenerPeriodos(),obtenerCierres()]);setPeriodos(p);setCierres(c);setSeleccion(c[0]||null)}catch{setError('No fue posible cargar los períodos y snapshots.')}finally{setOcupado(false)}};
+  useEffect(()=>{void cargar()},[empresaActiva?.id]);
+  const cerrar = async()=>{if(!periodo||!confirm(`¿Cerrar oficialmente ${etiqueta(periodo)}?`))return;setOcupado(true);setError(null);try{const r=await ejecutarCierre(periodo.id);setMensaje([r.mensaje,...r.advertencias].join(' '));await cargar()}catch(e:unknown){setError((e as {response?:{data?:{detail?:string}}}).response?.data?.detail||'El cierre no pudo completarse.');setOcupado(false)}};
+  const reabrir = async()=>{if(!periodo)return;const motivo=prompt('Motivo obligatorio de reapertura:')?.trim();if(!motivo)return;setOcupado(true);setError(null);try{const r=await reabrirPeriodo(periodo.id,{motivo_reapertura:motivo});setMensaje(`${r.mensaje} ${r.periodos_desactualizados} período(s) posterior(es) desactualizado(s).`);await cargar()}catch(e:unknown){setError((e as {response?:{data?:{detail?:string}}}).response?.data?.detail||'La reapertura no pudo completarse.');setOcupado(false)}};
+  const ver = async(c:CierrePeriodo)=>{setSeleccion(c);setDiferencias([]);try{setDiferencias((await compararCierres(c.periodo)).comparacion_ultimas_versiones)}catch{setError('No fue posible comparar las versiones.')}};
 
-      {/* Tarjeta de Control de Cierre (Placeholder funcional para Dev B) */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <div style={styles.cardIconWrap}>
-            <span>🔒</span>
-          </div>
-          <div>
-            <h2 style={styles.cardTitle}>Proceso de Cierre Oficial Mensual</h2>
-            <p style={styles.cardSubtitle}>
-              Congela las existencias y CPP oficiales, verifica 0 incidencias bloqueantes y guarda el hash SHA-256.
-            </p>
-          </div>
-        </div>
-
-        <div style={styles.controlsRow}>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Seleccionar Período a Cerrar</label>
-            <select style={styles.select} disabled defaultValue="">
-              <option value="">Seleccione período contable</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
-            <button type="button" disabled style={styles.btnPrimary}>
-              🔒 Ejecutar Cierre Oficial
-            </button>
-            <button type="button" disabled style={styles.btnDanger}>
-              🔓 Reapertura de Período
-            </button>
-          </div>
-        </div>
-
-        <div style={styles.infoBanner}>
-          <div style={styles.infoIcon}>🛡️</div>
-          <div>
-            <strong style={{ color: '#0f172a' }}>Reglas Estrictas de Cierre Contable</strong>
-            <p style={{ margin: '2px 0 0 0', fontSize: '12.5px', color: '#475569' }}>
-              Este módulo será completado por Dev B para conectar los modelos <code>CierrePeriodo</code> y <code>CierrePeriodoDetalle</code>, validar que no existan incidencias con <code>bloquea_cierre = true</code>, generar el archivo Excel oficial inmutable y calcular el <code>hash_resultado</code>.
-            </p>
-          </div>
-        </div>
-
-        {/* Empty State / Bandeja de Espera */}
-        <div style={styles.emptyWrap}>
-          <div style={{ fontSize: '36px', marginBottom: '8px' }}>📦</div>
-          <h3 style={styles.emptyTitle}>Bandeja de Cierres Lista para Conexión</h3>
-          <p style={styles.emptyDesc}>
-            Las tablas <code>cierre_periodo</code> y <code>cierre_periodo_detalle</code> ya han sido migradas en PostgreSQL con sus restricciones únicas 1:1.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  return <div style={s.page}><header><h1 style={s.title}>Cierres y snapshots</h1><p style={s.sub}>Control oficial de existencias y CPP · {empresaActiva?.razon_social||'Empresa activa'}</p></header>
+    {error&&<div role="alert" style={s.error}>{error}</div>}{mensaje&&<div role="status" style={s.ok}>{mensaje}</div>}
+    <section style={s.card}><h2 style={s.h2}>Operación del período</h2><p style={s.sub}>El cierre genera una versión inmutable; la reapertura conserva el historial.</p><div style={s.controls}>
+      <label style={s.field}>Período<select style={s.input} value={periodoId} onChange={e=>setPeriodoId(e.target.value)}><option value="">Seleccione un período</option>{periodos.map(p=><option key={p.id} value={p.id}>{etiqueta(p)} · {p.estado}</option>)}</select></label>
+      <button style={s.primary} disabled={!admin||ocupado||!periodo||periodo.estado==='CERRADO'} onClick={cerrar}>Ejecutar cierre</button><button style={s.danger} disabled={!admin||ocupado||!periodo||periodo.estado!=='CERRADO'} onClick={reabrir}>Reabrir período</button><button style={s.secondary} disabled={ocupado} onClick={cargar}>Actualizar</button>
+    </div></section>
+    <section style={s.card}><h2 style={s.h2}>Historial de snapshots</h2>{!cierres.length?<p style={s.empty}>{ocupado?'Cargando…':'Aún no existen cierres para esta empresa.'}</p>:<div style={s.scroll}><table style={s.table}><thead><tr><th>Período</th><th>Versión</th><th>Estado</th><th>Fecha</th><th>Usuario</th><th>Valor total</th><th>Hash SHA-256</th></tr></thead><tbody>{cierres.map(c=><tr key={c.id} onClick={()=>void ver(c)} style={{cursor:'pointer'}}><td>{etiqueta(c.periodo_info)}</td><td>v{c.version_calculo}</td><td>{c.vigente?'Vigente':'Histórico'}</td><td>{new Date(c.cerrado_en).toLocaleString('es-PE')}</td><td>{c.cerrado_por_username}</td><td style={s.num}>S/ {dinero(c.snapshot_resumen.valor_total_inventario_pen)}</td><td><code title={c.hash_resultado}>{c.hash_resultado.slice(0,14)}…</code></td></tr>)}</tbody></table></div>}</section>
+    {seleccion&&<section style={s.card}><h2 style={s.h2}>Detalle de {etiqueta(seleccion.periodo_info)} · v{seleccion.version_calculo}</h2><div style={s.scroll}><table style={s.table}><thead><tr><th>Producto</th><th>Establecimiento</th><th>Cantidad</th><th>CPP</th><th>Valor</th></tr></thead><tbody>{seleccion.detalles.map(d=><tr key={d.id}><td>{d.producto_codigo} · {d.producto_descripcion}</td><td>{d.establecimiento_nombre}</td><td style={s.num}>{d.saldo_cantidad}</td><td style={s.num}>{d.cpp_pen}</td><td style={s.num}>S/ {dinero(d.saldo_valor_pen)}</td></tr>)}</tbody></table></div>
+      {diferencias.length>0&&<><h3 style={s.h3}>Diferencias entre las dos últimas versiones</h3><div style={s.scroll}><table style={s.table}><thead><tr><th>Producto</th><th>Estab.</th><th>Cant. anterior</th><th>Cant. nueva</th><th>Δ cantidad</th><th>CPP anterior</th><th>CPP nuevo</th><th>Δ CPP</th><th>Valor anterior</th><th>Valor nuevo</th><th>Δ valor</th></tr></thead><tbody>{diferencias.map(d=><tr key={`${d.producto_id}-${d.establecimiento_id}`}><td>{d.producto_id}</td><td>{d.establecimiento_id}</td><td style={s.num}>{d.version_anterior.saldo_cantidad}</td><td style={s.num}>{d.version_nueva.saldo_cantidad}</td><td style={s.num}>{d.diferencia.cantidad}</td><td style={s.num}>{d.version_anterior.cpp_pen}</td><td style={s.num}>{d.version_nueva.cpp_pen}</td><td style={s.num}>{d.diferencia.cpp_pen}</td><td style={s.num}>S/ {dinero(d.version_anterior.saldo_valor_pen)}</td><td style={s.num}>S/ {dinero(d.version_nueva.saldo_valor_pen)}</td><td style={s.num}>S/ {dinero(d.diferencia.valor_pen)}</td></tr>)}</tbody></table></div></>}
+    </section>}</div>;
 };
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-    color: '#0f172a',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '6px',
-  },
-  badgePrimary: {
-    fontSize: '11px',
-    fontWeight: 700,
-    letterSpacing: '0.04em',
-    color: '#047857',
-    backgroundColor: '#d1fae5',
-    padding: '3px 8px',
-    borderRadius: '6px',
-    textTransform: 'uppercase',
-  },
-  badgeNeutral: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#475569',
-    backgroundColor: '#e2e8f0',
-    padding: '3px 8px',
-    borderRadius: '6px',
-  },
-  title: {
-    margin: 0,
-    fontSize: '24px',
-    fontWeight: 800,
-    color: '#0f172a',
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    margin: '4px 0 0 0',
-    fontSize: '14px',
-    color: '#475569',
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: '10px',
-    border: '1px solid #e2e8f0',
-    padding: '24px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  cardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '14px',
-    paddingBottom: '16px',
-    borderBottom: '1px solid #f1f5f9',
-  },
-  cardIconWrap: {
-    width: '42px',
-    height: '42px',
-    borderRadius: '10px',
-    backgroundColor: '#ecfdf5',
-    color: '#059669',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '20px',
-  },
-  cardTitle: {
-    margin: 0,
-    fontSize: '16px',
-    fontWeight: 700,
-    color: '#0f172a',
-  },
-  cardSubtitle: {
-    margin: '3px 0 0 0',
-    fontSize: '13px',
-    color: '#64748b',
-  },
-  controlsRow: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: '14px',
-    flexWrap: 'wrap',
-  },
-  fieldGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    minWidth: '240px',
-  },
-  label: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: '#334155',
-    textTransform: 'uppercase',
-    letterSpacing: '0.03em',
-  },
-  select: {
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: '1px solid #cbd5e1',
-    backgroundColor: '#ffffff',
-    color: '#0f172a',
-    fontSize: '13px',
-    outline: 'none',
-    width: '100%',
-  },
-  btnPrimary: {
-    backgroundColor: '#059669',
-    color: '#ffffff',
-    fontWeight: 700,
-    fontSize: '13px',
-    padding: '9px 16px',
-    borderRadius: '6px',
-    border: 'none',
-    cursor: 'not-allowed',
-    opacity: 0.7,
-    whiteSpace: 'nowrap',
-  },
-  btnDanger: {
-    backgroundColor: '#dc2626',
-    color: '#ffffff',
-    fontWeight: 700,
-    fontSize: '13px',
-    padding: '9px 16px',
-    borderRadius: '6px',
-    border: 'none',
-    cursor: 'not-allowed',
-    opacity: 0.7,
-    whiteSpace: 'nowrap',
-  },
-  infoBanner: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '12px',
-    padding: '14px 16px',
-    borderRadius: '8px',
-    backgroundColor: '#ecfdf5',
-    border: '1px solid #a7f3d0',
-  },
-  infoIcon: {
-    fontSize: '18px',
-  },
-  emptyWrap: {
-    padding: '40px 16px',
-    textAlign: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: '8px',
-    border: '1px dashed #cbd5e1',
-    color: '#475569',
-  },
-  emptyTitle: {
-    margin: 0,
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#0f172a',
-  },
-  emptyDesc: {
-    margin: '6px 0 0 0',
-    fontSize: '13px',
-    color: '#64748b',
-  },
-};
-
+const s:Record<string,React.CSSProperties>={page:{display:'flex',flexDirection:'column',gap:20,color:'#0f172a'},title:{margin:0,fontSize:26,fontWeight:800},sub:{margin:'5px 0',color:'#64748b',fontSize:13},card:{background:'#fff',border:'1px solid #e2e8f0',borderRadius:10,padding:20,boxShadow:'0 1px 3px rgba(15,23,42,.06)'},h2:{fontSize:17,margin:'0 0 4px'},h3:{fontSize:15,margin:'22px 0 10px'},controls:{display:'flex',alignItems:'flex-end',flexWrap:'wrap',gap:10,marginTop:18},field:{display:'flex',flexDirection:'column',gap:6,fontSize:12,fontWeight:700,minWidth:260},input:{border:'1px solid #cbd5e1',borderRadius:7,padding:'9px 11px',background:'#fff'},primary:{border:0,borderRadius:7,padding:'10px 15px',background:'#047857',color:'#fff',fontWeight:700},danger:{border:0,borderRadius:7,padding:'10px 15px',background:'#b91c1c',color:'#fff',fontWeight:700},secondary:{border:'1px solid #cbd5e1',borderRadius:7,padding:'9px 15px',background:'#fff',fontWeight:700},error:{padding:12,borderRadius:8,background:'#fef2f2',color:'#991b1b'},ok:{padding:12,borderRadius:8,background:'#ecfdf5',color:'#065f46'},empty:{padding:24,textAlign:'center',color:'#64748b'},scroll:{overflowX:'auto'},table:{width:'100%',borderCollapse:'collapse',fontSize:13},num:{textAlign:'right',fontVariantNumeric:'tabular-nums'}};
 export default CierresPage;

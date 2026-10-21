@@ -7,7 +7,7 @@ from rest_framework.exceptions import NotAuthenticated, NotFound, ValidationErro
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.empresas.models import ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.models import CierrePeriodo, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
 from apps.empresas.serializers import (
     ConfigEmpresaSerializer,
     ConfigIgvPeriodoSerializer,
@@ -16,7 +16,9 @@ from apps.empresas.serializers import (
     PeriodoCreateSerializer,
     PeriodoSerializer,
     ReabrirPeriodoSerializer,
+    CierrePeriodoSerializer,
 )
+from apps.empresas.services import cerrar_periodo, reabrir_periodo
 from apps.usuarios.models import UsuarioEmpresa
 from apps.usuarios.permissions import EsAdminEmpresa, TieneEmpresaActiva
 from apps.auditoria.services import registrar_auditoria
@@ -177,56 +179,7 @@ class PeriodoReabrirView(APIView):
         serializer.is_valid(raise_exception=True)
         motivo = serializer.validated_data['motivo_reapertura']
 
-        periodo = Periodo.objects.filter(
-            id=pk,
-            empresa_id=request.empresa_id
-        ).first()
-        if not periodo:
-            raise NotFound('Período no encontrado en la empresa activa.')
-
-        with transaction.atomic():
-            estado_anterior = periodo.estado
-            periodo.estado = 'ABIERTO'
-            periodo.reabierto_por = request.user
-            periodo.reabierto_en = timezone.now()
-            periodo.motivo_reapertura = motivo
-            periodo.save(update_fields=['estado', 'reabierto_por', 'reabierto_en', 'motivo_reapertura'])
-
-            registrar_auditoria(
-                empresa_id=request.empresa_id,
-                usuario_id=request.user.id,
-                accion='REABRIR',
-                entidad='periodo',
-                registro_id=periodo.id,
-                valor_anterior={'estado': estado_anterior},
-                valor_nuevo={'estado': 'ABIERTO', 'motivo_reapertura': motivo},
-                motivo=motivo
-            )
-
-            posteriores_cerrados = Periodo.objects.filter(
-                empresa_id=request.empresa_id,
-                orden__gt=periodo.orden,
-                estado='CERRADO'
-            ).order_by('orden')
-
-            desactualizados_count = 0
-            for post in posteriores_cerrados:
-                post_ant_estado = post.estado
-                post.estado = 'DESACTUALIZADO'
-                post.motivo_desactualizado = f"Reapertura de período anterior {periodo.anio}-{periodo.mes:02d}: {motivo}"
-                post.save(update_fields=['estado', 'motivo_desactualizado'])
-                desactualizados_count += 1
-
-                registrar_auditoria(
-                    empresa_id=request.empresa_id,
-                    usuario_id=request.user.id,
-                    accion='DESACTUALIZAR',
-                    entidad='periodo',
-                    registro_id=post.id,
-                    valor_anterior={'estado': post_ant_estado},
-                    valor_nuevo={'estado': post.estado, 'motivo': post.motivo_desactualizado},
-                    motivo=f'Desactualizado por reapertura de período {periodo.anio}-{periodo.mes:02d}'
-                )
+        periodo, desactualizados_count = reabrir_periodo(empresa_id=request.empresa_id, periodo_id=pk, usuario=request.user, motivo=motivo)
 
         return Response({
             'mensaje': 'Período reabierto correctamente.',
@@ -239,35 +192,51 @@ class PeriodoCerrarView(APIView):
     permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
 
     def post(self, request, pk):
-        periodo = Periodo.objects.filter(
-            id=pk,
-            empresa_id=request.empresa_id
-        ).first()
-        if not periodo:
-            raise NotFound('Período no encontrado en la empresa activa.')
-
-        with transaction.atomic():
-            estado_anterior = periodo.estado
-            periodo.estado = 'CERRADO'
-            periodo.cerrado_por = request.user
-            periodo.cerrado_en = timezone.now()
-            periodo.save(update_fields=['estado', 'cerrado_por', 'cerrado_en'])
-
-            registrar_auditoria(
-                empresa_id=request.empresa_id,
-                usuario_id=request.user.id,
-                accion='CERRAR',
-                entidad='periodo',
-                registro_id=periodo.id,
-                valor_anterior={'estado': estado_anterior},
-                valor_nuevo={'estado': 'CERRADO'},
-                motivo=f'Cierre de período {periodo.anio}-{periodo.mes:02d}'
-            )
-
+        cierre, advertencias = cerrar_periodo(empresa_id=request.empresa_id, periodo_id=pk, usuario=request.user)
         return Response({
             'mensaje': 'Período cerrado correctamente.',
-            'periodo': PeriodoSerializer(periodo).data,
+            'periodo': PeriodoSerializer(cierre.periodo).data,
+            'cierre': CierrePeriodoSerializer(cierre).data,
+            'advertencias': advertencias,
         }, status=status.HTTP_200_OK)
+
+
+class CierrePeriodoListView(APIView):
+    permission_classes = [TieneEmpresaActiva]
+
+    def get(self, request):
+        cierres = CierrePeriodo.objects.filter(periodo__empresa_id=request.empresa_id).select_related('periodo', 'cerrado_por').prefetch_related('detalles__producto', 'detalles__establecimiento').order_by('-periodo__orden', '-version_calculo')
+        return Response(CierrePeriodoSerializer(cierres, many=True).data)
+
+
+class CompararCierresView(APIView):
+    permission_classes = [TieneEmpresaActiva]
+
+    def get(self, request, pk):
+        cierres = list(CierrePeriodo.objects.filter(periodo_id=pk, periodo__empresa_id=request.empresa_id).select_related('periodo', 'cerrado_por').prefetch_related('detalles__producto', 'detalles__establecimiento').order_by('version_calculo'))
+        if not cierres:
+            raise NotFound('No existen cierres para el período indicado.')
+        versiones = CierrePeriodoSerializer(cierres, many=True).data
+        comparacion = []
+        if len(cierres) >= 2:
+            try:
+                version_a = int(request.query_params.get('version_a', cierres[-2].version_calculo))
+                version_b = int(request.query_params.get('version_b', cierres[-1].version_calculo))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({'detail': 'Las versiones deben ser números enteros.'}) from exc
+            anterior = next((c for c in cierres if c.version_calculo == version_a), None)
+            actual = next((c for c in cierres if c.version_calculo == version_b), None)
+            if not anterior or not actual or anterior.id == actual.id:
+                raise ValidationError({'detail': 'Seleccione dos versiones distintas existentes del período.'})
+            mapa_anterior = {(d.producto_id, d.establecimiento_id): d for d in anterior.detalles.all()}
+            mapa_actual = {(d.producto_id, d.establecimiento_id): d for d in actual.detalles.all()}
+            for clave in sorted(set(mapa_anterior) | set(mapa_actual)):
+                a, b = mapa_anterior.get(clave), mapa_actual.get(clave)
+                cantidad_a = a.saldo_cantidad if a else Decimal('0'); cantidad_b = b.saldo_cantidad if b else Decimal('0')
+                valor_a = a.saldo_valor_pen if a else Decimal('0'); valor_b = b.saldo_valor_pen if b else Decimal('0')
+                cpp_a = a.cpp_pen if a else Decimal('0'); cpp_b = b.cpp_pen if b else Decimal('0')
+                comparacion.append({'producto_id': clave[0], 'establecimiento_id': clave[1], 'version_anterior': {'saldo_cantidad': str(cantidad_a), 'saldo_valor_pen': str(valor_a), 'cpp_pen': str(cpp_a)}, 'version_nueva': {'saldo_cantidad': str(cantidad_b), 'saldo_valor_pen': str(valor_b), 'cpp_pen': str(cpp_b)}, 'diferencia': {'cantidad': str(cantidad_b - cantidad_a), 'valor_pen': str(valor_b - valor_a), 'cpp_pen': str(cpp_b - cpp_a)}})
+        return Response({'periodo_id': pk, 'version_a': anterior.version_calculo if len(cierres) >= 2 else None, 'version_b': actual.version_calculo if len(cierres) >= 2 else None, 'versiones': versiones, 'comparacion_ultimas_versiones': comparacion})
 
 
 class ConfigIgvPeriodoView(APIView):

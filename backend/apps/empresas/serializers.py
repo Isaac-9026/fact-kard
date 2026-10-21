@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.catalogos.models import Moneda
-from apps.empresas.models import ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
@@ -218,3 +218,26 @@ class ReabrirPeriodoSerializer(serializers.Serializer):
         required=True,
         error_messages={'required': 'El motivo de reapertura es obligatorio.'}
     )
+
+
+class CierrePeriodoDetalleSerializer(serializers.ModelSerializer):
+    producto_codigo = serializers.CharField(source='producto.codigo_interno', read_only=True)
+    producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
+    establecimiento_nombre = serializers.CharField(source='establecimiento.nombre', read_only=True)
+
+    class Meta:
+        model = CierrePeriodoDetalle
+        fields = ('id', 'producto', 'producto_codigo', 'producto_descripcion', 'establecimiento', 'establecimiento_nombre', 'saldo_cantidad', 'saldo_valor_pen', 'cpp_pen')
+
+
+class CierrePeriodoSerializer(serializers.ModelSerializer):
+    detalles = CierrePeriodoDetalleSerializer(many=True, read_only=True)
+    periodo_info = serializers.SerializerMethodField()
+    cerrado_por_username = serializers.CharField(source='cerrado_por.username', read_only=True)
+
+    class Meta:
+        model = CierrePeriodo
+        fields = ('id', 'periodo', 'periodo_info', 'version_calculo', 'cerrado_por', 'cerrado_por_username', 'cerrado_en', 'archivo_excel', 'hash_resultado', 'snapshot_resumen', 'vigente', 'detalles')
+
+    def get_periodo_info(self, obj):
+        return {'anio': obj.periodo.anio, 'mes': obj.periodo.mes, 'estado': obj.periodo.estado}

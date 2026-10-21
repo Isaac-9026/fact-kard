@@ -6,6 +6,10 @@ from rest_framework.test import APIClient
 from apps.catalogos.models import Moneda
 from apps.empresas.models import Empresa, Establecimiento, ConfigEmpresa, Periodo, ConfigIgvPeriodo
 from apps.usuarios.models import Usuario, UsuarioEmpresa
+from apps.empresas.services import calcular_hash_cierre, cerrar_periodo, reabrir_periodo
+from apps.empresas.models import CierrePeriodo
+from apps.kardex.models import Incidencia
+from rest_framework.exceptions import ValidationError
 
 
 class EmpresasModelTest(TestCase):
@@ -593,3 +597,79 @@ class CierrePeriodoModelTest(TestCase):
                     establecimiento=self.establecimiento,
                     saldo_cantidad=Decimal('80.00000000')
                 )
+
+
+class CierrePeriodoServiceTest(TestCase):
+    def setUp(self):
+        import datetime
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(ruc='20999999991', razon_social='CIERRES SAC', moneda_base_codigo=self.moneda)
+        self.establecimiento = Establecimiento.objects.create(empresa=self.empresa, codigo_sunat='0000', nombre='Principal')
+        ConfigEmpresa.objects.create(empresa=self.empresa, tolerancia_residuo_pen=Decimal('0.05'), decimales_calculo=6, establecimiento_principal=self.establecimiento)
+        self.usuario = Usuario.objects.create(username='cierre_service', email='service@factkard.local', password_hash='hash')
+        self.periodo = Periodo.objects.create(empresa=self.empresa, anio=2026, mes=1, orden=202601, fecha_inicio=datetime.date(2026,1,1), fecha_fin=datetime.date(2026,1,31))
+
+    def test_01_hash_es_determinista(self):
+        resumen = {'b': 2, 'a': 1}; detalles = [{'producto_id': 2, 'establecimiento_id': 1}, {'producto_id': 1, 'establecimiento_id': 1}]
+        self.assertEqual(calcular_hash_cierre(resumen, detalles), calcular_hash_cierre(resumen, list(reversed(detalles))))
+
+    def test_02_hash_cambia_con_resumen(self):
+        self.assertNotEqual(calcular_hash_cierre({'a': 1}, []), calcular_hash_cierre({'a': 2}, []))
+
+    def test_03_cierre_vacio_crea_snapshot(self):
+        cierre, avisos = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        self.assertEqual((cierre.version_calculo, cierre.detalles.count(), avisos), (1, 0, []))
+
+    def test_04_cierre_marca_periodo_cerrado(self):
+        cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario); self.periodo.refresh_from_db()
+        self.assertEqual(self.periodo.estado, 'CERRADO')
+
+    def test_05_cierre_archivo_excel_nulo(self):
+        cierre, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        self.assertIsNone(cierre.archivo_excel)
+
+    def test_06_cierre_hash_sha256(self):
+        cierre, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        self.assertEqual(len(cierre.hash_resultado), 64)
+
+    def test_07_no_cierra_dos_veces_sin_reabrir(self):
+        cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        with self.assertRaises(ValidationError): cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+
+    def test_08_bloquea_periodo_anterior_abierto(self):
+        import datetime
+        anterior = Periodo.objects.create(empresa=self.empresa, anio=2025, mes=12, orden=202512, fecha_inicio=datetime.date(2025,12,1), fecha_fin=datetime.date(2025,12,31))
+        with self.assertRaises(ValidationError): cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        self.assertEqual(anterior.estado, 'ABIERTO')
+
+    def test_09_bloquea_periodo_anterior_desactualizado(self):
+        import datetime
+        Periodo.objects.create(empresa=self.empresa, anio=2025, mes=12, orden=202512, fecha_inicio=datetime.date(2025,12,1), fecha_fin=datetime.date(2025,12,31), estado='DESACTUALIZADO')
+        with self.assertRaises(ValidationError): cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+
+    def test_10_bloquea_incidencia_pendiente(self):
+        Incidencia.objects.create(empresa=self.empresa, periodo=self.periodo, tipo='PRUEBA', descripcion='Bloqueante')
+        with self.assertRaises(ValidationError): cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+
+    def test_11_permite_incidencia_resuelta(self):
+        Incidencia.objects.create(empresa=self.empresa, periodo=self.periodo, tipo='PRUEBA', descripcion='Resuelta', estado='RESUELTA')
+        cierre, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        self.assertTrue(cierre.vigente)
+
+    def test_12_reapertura_preserva_cierre(self):
+        cierre, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        reabrir_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario, motivo='Corrección documentada')
+        self.assertTrue(CierrePeriodo.objects.filter(id=cierre.id).exists())
+
+    def test_13_nuevo_cierre_incrementa_version_e_invalida_anterior(self):
+        primero, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        reabrir_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario, motivo='Corrección documentada')
+        segundo, _ = cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario); primero.refresh_from_db()
+        self.assertEqual(segundo.version_calculo, 2); self.assertFalse(primero.vigente)
+
+    def test_14_reapertura_desactualiza_periodos_posteriores(self):
+        import datetime
+        cerrar_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario)
+        posterior = Periodo.objects.create(empresa=self.empresa, anio=2026, mes=2, orden=202602, fecha_inicio=datetime.date(2026,2,1), fecha_fin=datetime.date(2026,2,28), estado='CERRADO')
+        _, total = reabrir_periodo(empresa_id=self.empresa.id, periodo_id=self.periodo.id, usuario=self.usuario, motivo='Corrección documentada'); posterior.refresh_from_db()
+        self.assertEqual((total, posterior.estado), (1, 'DESACTUALIZADO'))
