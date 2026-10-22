@@ -92,5 +92,5 @@ Para que nuestros agentes de IA (Antigravity / Codex) jamás modifiquen el mismo
 
 ### 🤖 BLOQUE 6: XML, Homologación, OCR y Formato 13.1 SUNAT
 - [x] **Ventana de Migración 7 (Últimas 3 tablas — Completando las 32 tablas):** `producto_equivalencia`, `documento_captura`, `captura_campo`.
-- [ ] **Carril DEV A:** Lector XML UBL y Homologación de productos.
-- [ ] **Carril DEV B:** OCR básico a borrador y reporte Formato 13.1 SUNAT.
+- [x] **Carril DEV A:** Lector XML UBL y Homologación de productos.
+- [x] **Carril DEV B:** OCR básico a borrador y reporte Formato 13.1 SUNAT.
