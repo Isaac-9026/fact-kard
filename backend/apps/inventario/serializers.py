@@ -6,11 +6,13 @@ from django.utils import timezone
 
 from apps.catalogos.models import TipoExistencia, TipoOperacion, UnidadMedida
 from apps.empresas.models import Establecimiento, Periodo
+from apps.auditoria.services import registrar_auditoria
 from apps.inventario.models import (
     Almacen,
     NotaInterna,
     NotaInternaDetalle,
     Producto,
+    ProductoEquivalencia,
     ProductoUnidad,
     SaldoInicial,
     Tercero,
@@ -644,3 +646,59 @@ class TransferenciaSerializer(serializers.ModelSerializer):
                 TransferenciaDetalle(transferencia=instance, **detalle) for detalle in detalles
             ])
         return instance
+
+
+class ProductoEquivalenciaSerializer(serializers.ModelSerializer):
+    tercero_info = serializers.SerializerMethodField(read_only=True)
+    producto_info = serializers.SerializerMethodField(read_only=True)
+    unidad_externa_nombre = serializers.CharField(source='unidad_externa_codigo.descripcion', read_only=True)
+    confirmado_por_username = serializers.CharField(source='confirmado_por.username', read_only=True)
+
+    class Meta:
+        model = ProductoEquivalencia
+        fields = (
+            'id', 'empresa', 'tercero', 'tercero_info',
+            'codigo_externo', 'descripcion_externa',
+            'unidad_externa_codigo', 'unidad_externa_nombre',
+            'producto_unidad', 'producto_info',
+            'factor_conversion', 'confirmado_por', 'confirmado_por_username',
+            'confirmado_en', 'activa',
+        )
+        read_only_fields = ('id', 'empresa', 'confirmado_por', 'confirmado_en')
+
+    def get_tercero_info(self, obj):
+        if obj.tercero:
+            return {
+                'id': obj.tercero.id,
+                'numero_documento': obj.tercero.numero_documento,
+                'razon_social': obj.tercero.razon_social,
+            }
+        return None
+
+    def get_producto_info(self, obj):
+        if obj.producto_unidad:
+            pu = obj.producto_unidad
+            prod = pu.producto
+            return {
+                'producto_id': prod.id,
+                'producto_codigo': prod.codigo_interno,
+                'producto_descripcion': prod.descripcion,
+                'unidad_codigo': pu.unidad_codigo_id,
+                'factor_a_base': str(pu.factor_a_base),
+                'es_base': pu.es_base,
+            }
+        return None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id:
+            self.fields['tercero'].queryset = Tercero.objects.filter(empresa_id=empresa_id)
+            self.fields['producto_unidad'].queryset = ProductoUnidad.objects.filter(
+                producto__empresa_id=empresa_id
+            ).select_related('producto', 'unidad_codigo')
+
+    def validate_factor_conversion(self, value):
+        if value is None or value <= Decimal('0'):
+            raise serializers.ValidationError('El factor de conversión debe ser mayor a 0.')
+        return value.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)

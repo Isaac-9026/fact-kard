@@ -12,6 +12,7 @@ from apps.inventario.models import (
     Almacen,
     NotaInterna,
     Producto,
+    ProductoEquivalencia,
     ProductoUnidad,
     SaldoInicial,
     Tercero,
@@ -20,6 +21,7 @@ from apps.inventario.models import (
 from apps.inventario.serializers import (
     AlmacenSerializer,
     NotaInternaSerializer,
+    ProductoEquivalenciaSerializer,
     ProductoSerializer,
     ProductoUnidadSerializer,
     SaldoInicialSerializer,
@@ -454,3 +456,100 @@ class TransferenciaConfirmarView(TransferenciaMixin, generics.GenericAPIView):
         )
         transferencia = self.get_queryset().get(pk=transferencia.pk)
         return Response(self.get_serializer(transferencia).data)
+
+
+class ProductoEquivalenciaMixin(AuditoriaMixin, EmpresaActivaMixin):
+    serializer_class = ProductoEquivalenciaSerializer
+    entidad_auditoria = 'PRODUCTO_EQUIVALENCIA'
+    admin_write_required = False
+
+    def get_queryset(self):
+        empresa_id = self.request.empresa_id
+        qs = ProductoEquivalencia.objects.filter(empresa_id=empresa_id).select_related(
+            'tercero',
+            'unidad_externa_codigo',
+            'producto_unidad__producto',
+            'producto_unidad__unidad_codigo',
+            'confirmado_por',
+        )
+        tercero_id = self.request.query_params.get('tercero_id')
+        if tercero_id:
+            qs = qs.filter(tercero_id=tercero_id)
+        codigo_ext = self.request.query_params.get('codigo_externo')
+        if codigo_ext:
+            qs = qs.filter(codigo_externo__icontains=codigo_ext.strip())
+        activa = self.request.query_params.get('activa')
+        if activa is not None:
+            qs = qs.filter(activa=activa.lower() in ('true', '1', 't'))
+        return qs.order_by('-id')
+
+
+class ProductoEquivalenciaListCreateView(ProductoEquivalenciaMixin, generics.ListCreateAPIView):
+    def perform_create(self, serializer):
+        from django.utils import timezone
+        serializer.save(
+            empresa_id=self.request.empresa_id,
+            confirmado_por=self.request.user,
+            confirmado_en=timezone.now(),
+        )
+
+
+class ProductoEquivalenciaDetailView(ProductoEquivalenciaMixin, generics.RetrieveUpdateDestroyAPIView):
+    def perform_update(self, serializer):
+        from django.utils import timezone
+        serializer.save(
+            confirmado_por=self.request.user,
+            confirmado_en=timezone.now(),
+        )
+
+
+class ProductoEquivalenciaSugerirView(EmpresaActivaMixin, generics.GenericAPIView):
+    admin_write_required = False
+
+    def get(self, request, *args, **kwargs):
+        tercero_id = request.query_params.get('tercero_id')
+        codigo_externo = (request.query_params.get('codigo_externo') or '').strip()
+        descripcion = (request.query_params.get('descripcion') or '').strip()
+
+        if not tercero_id:
+            return Response(
+                {'detail': 'El parámetro tercero_id es obligatorio.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        qs = ProductoEquivalencia.objects.filter(
+            empresa_id=request.empresa_id,
+            tercero_id=tercero_id,
+            activa=True,
+            confirmado_por__isnull=False,
+        ).select_related(
+            'tercero',
+            'unidad_externa_codigo',
+            'producto_unidad__producto',
+            'producto_unidad__unidad_codigo',
+            'confirmado_por',
+        )
+
+        equivalencia = None
+        if codigo_externo:
+            equivalencia = qs.filter(codigo_externo__iexact=codigo_externo).first()
+
+        if not equivalencia and descripcion:
+            equivalencia = qs.filter(descripcion_externa__iexact=descripcion).first()
+            if not equivalencia:
+                equivalencia = qs.filter(descripcion_externa__icontains=descripcion).first()
+
+        if equivalencia:
+            serializer = ProductoEquivalenciaSerializer(equivalencia, context={'empresa_id': request.empresa_id})
+            return Response({
+                'encontrado': True,
+                'sugerencia': serializer.data,
+                'mensaje': 'Equivalencia encontrada y propuesta automáticamente.',
+            })
+
+        return Response({
+            'encontrado': False,
+            'sugerencia': None,
+            'estado': 'PRODUCTO_SIN_HOMOLOGAR',
+            'mensaje': 'Producto pendiente de homologación.',
+        })

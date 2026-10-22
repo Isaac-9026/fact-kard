@@ -1,7 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 
-from apps.documentos.models import Documento, DocumentoDetalle
+from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
 from apps.documentos.services import crear_documento, revisar_documento, anular_documento
 
 
@@ -223,3 +223,89 @@ class DocumentoAnularSerializer(serializers.Serializer):
         max_length=500,
         required=True
     )
+
+
+class CapturaCampoSerializer(serializers.ModelSerializer):
+    corregido_por_username = serializers.ReadOnlyField(source='corregido_por.username')
+
+    class Meta:
+        model = CapturaCampo
+        fields = [
+            'id',
+            'seccion',
+            'numero_linea',
+            'nombre_campo',
+            'valor_extraido',
+            'confianza',
+            'valor_corregido',
+            'corregido_por',
+            'corregido_por_username',
+        ]
+        read_only_fields = ['id', 'seccion', 'numero_linea', 'nombre_campo', 'valor_extraido', 'confianza', 'corregido_por']
+
+
+class DocumentoCapturaListSerializer(serializers.ModelSerializer):
+    subido_por_username = serializers.ReadOnlyField(source='subido_por.username')
+    total_campos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentoCaptura
+        fields = [
+            'id',
+            'tipo',
+            'ruta_archivo',
+            'hash_sha256',
+            'estado_proceso',
+            'documento_id',
+            'subido_por',
+            'subido_por_username',
+            'creado_en',
+            'total_campos',
+        ]
+        read_only_fields = fields
+
+    def get_total_campos(self, obj):
+        return obj.campos.count()
+
+
+class DocumentoCapturaDetailSerializer(serializers.ModelSerializer):
+    subido_por_username = serializers.ReadOnlyField(source='subido_por.username')
+    campos = CapturaCampoSerializer(many=True, read_only=True)
+    documento_serie_numero = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentoCaptura
+        fields = [
+            'id',
+            'tipo',
+            'ruta_archivo',
+            'hash_sha256',
+            'estado_proceso',
+            'documento_id',
+            'documento_serie_numero',
+            'subido_por',
+            'subido_por_username',
+            'creado_en',
+            'campos',
+        ]
+        read_only_fields = fields
+
+    def get_documento_serie_numero(self, obj):
+        if obj.documento:
+            return f"{obj.documento.serie_normalizada}-{obj.documento.numero_normalizado}"
+        return None
+
+
+class DocumentoCapturaSubirSerializer(serializers.Serializer):
+    archivo = serializers.FileField(required=True)
+    tipo = serializers.ChoiceField(choices=['XML', 'PDF', 'IMAGEN', 'ESCANER'], required=True)
+    texto_ocr = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class CapturaCampoCorregirSerializer(serializers.Serializer):
+    campo_id = serializers.IntegerField(required=True)
+    valor_corregido = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class GenerarBorradorSerializer(serializers.Serializer):
+    almacen_id = serializers.IntegerField(required=False, allow_null=True, default=None)

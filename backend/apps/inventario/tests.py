@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -1115,4 +1116,97 @@ class OperacionesInternasApiTest(TestCase):
         anulacion = auditorias.get(accion='ANULAR_NOTA_INTERNA')
         self.assertEqual(anulacion.valor_anterior['estado'], 'BORRADOR')
         self.assertEqual(anulacion.valor_nuevo['estado'], 'ANULADO')
+
+
+class ProductoEquivalenciaApiTest(TestCase):
+    def setUp(self):
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20600000088', razon_social='EQUIV TEST S.A.C.', moneda_base_codigo=self.moneda,
+        )
+        self.usuario = Usuario.objects.create(
+            username='user_equiv', email='equiv@factkard.pe', password_hash='hash',
+        )
+        UsuarioEmpresa.objects.create(
+            usuario=self.usuario, empresa=self.empresa, rol='ADMIN',
+        )
+        self.tercero = Tercero.objects.create(
+            empresa=self.empresa, tipo_documento='6', numero_documento='20555666777',
+            razon_social='PROVEEDOR INDUSTRIAL S.A.C.', es_proveedor=True,
+        )
+        tipo_ex = TipoExistencia.objects.create(codigo='01', descripcion='MERCADERIA')
+        self.und = UnidadMedida.objects.create(codigo='NIU', descripcion='UNIDAD')
+        self.producto = Producto.objects.create(
+            empresa=self.empresa, codigo_interno='P-EQ-01', descripcion='PRODUCTO HOMOLOGABLE',
+            tipo_existencia_codigo=tipo_ex,
+        )
+        self.prod_und = ProductoUnidad.objects.create(
+            producto=self.producto, unidad_codigo=self.und,
+            factor_a_base=Decimal('1.00000000'), es_base=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.usuario)
+
+    def headers(self):
+        return {'HTTP_X_EMPRESA_ID': str(self.empresa.id)}
+
+    def test_crear_equivalencia_guarda_confirmacion_humana_y_auditoria(self):
+        url = reverse('producto-equivalencia-list-create')
+        payload = {
+            'tercero': self.tercero.id,
+            'codigo_externo': 'PROV-ITEM-100',
+            'descripcion_externa': 'ITEM DEL PROVEEDOR 100',
+            'unidad_externa_codigo': 'NIU',
+            'producto_unidad': self.prod_und.id,
+            'factor_conversion': '2.50000000',
+            'activa': True,
+        }
+        resp = self.client.post(url, payload, format='json', **self.headers())
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['codigo_externo'], 'PROV-ITEM-100')
+        self.assertEqual(resp.data['confirmado_por_username'], self.usuario.username)
+        self.assertIsNotNone(resp.data['confirmado_en'])
+
+        # Verificar auditoría
+        aud = Auditoria.objects.filter(
+            entidad='PRODUCTO_EQUIVALENCIA',
+            registro_id=resp.data['id'],
+            accion='CREAR_PRODUCTO_EQUIVALENCIA',
+        ).first()
+        self.assertIsNotNone(aud)
+
+    def test_sugerir_equivalencia_proveedor_sugerida_vs_sin_homologar(self):
+        # 1. Crear equivalencia confirmada
+        ProductoEquivalencia.objects.create(
+            empresa=self.empresa,
+            tercero=self.tercero,
+            codigo_externo='SKU-PROV-A',
+            descripcion_externa='TORNILLO ACERO 2 PULG',
+            unidad_externa_codigo=self.und,
+            producto_unidad=self.prod_und,
+            factor_conversion=Decimal('1.00000000'),
+            confirmado_por=self.usuario,
+            confirmado_en=timezone.now(),
+            activa=True,
+        )
+
+        url_sugerir = reverse('producto-equivalencia-sugerir')
+
+        # 2. Consultar con código existente
+        resp_ok = self.client.get(
+            f"{url_sugerir}?tercero_id={self.tercero.id}&codigo_externo=SKU-PROV-A",
+            **self.headers()
+        )
+        self.assertEqual(resp_ok.status_code, 200)
+        self.assertTrue(resp_ok.data['encontrado'])
+        self.assertEqual(resp_ok.data['sugerencia']['codigo_externo'], 'SKU-PROV-A')
+
+        # 3. Consultar con código inexistente
+        resp_no = self.client.get(
+            f"{url_sugerir}?tercero_id={self.tercero.id}&codigo_externo=SKU-DESCONOCIDO",
+            **self.headers()
+        )
+        self.assertEqual(resp_no.status_code, 200)
+        self.assertFalse(resp_no.data['encontrado'])
+        self.assertEqual(resp_no.data['estado'], 'PRODUCTO_SIN_HOMOLOGAR')
 

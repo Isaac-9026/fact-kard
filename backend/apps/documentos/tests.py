@@ -5,11 +5,15 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+
 from apps.auditoria.models import Auditoria
 from apps.catalogos.models import Moneda, TipoCambio, TipoComprobante, TipoOperacion, UnidadMedida, TipoExistencia
 from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
 from apps.empresas.models import Empresa, Establecimiento, Periodo, ConfigIgvPeriodo
 from apps.inventario.models import Almacen, Producto, ProductoUnidad, ProductoEquivalencia, Tercero
+from apps.kardex.models import Incidencia
 from apps.usuarios.models import Usuario, UsuarioEmpresa
 
 
@@ -1034,3 +1038,315 @@ class DocumentoCapturaIntegridadTest(TestCase):
         db_tables = set(connection.introspection.table_names())
         missing = sql_tables - db_tables
         self.assertEqual(len(missing), 0, f"Faltan tablas oficiales en la BD: {missing}")
+
+
+XML_FACTURA_PRUEBA = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+    <cbc:CustomizationID>2.0</cbc:CustomizationID>
+    <cbc:ID>F001-00000088</cbc:ID>
+    <cbc:IssueDate>2026-02-10</cbc:IssueDate>
+    <cbc:InvoiceTypeCode listID="0101">01</cbc:InvoiceTypeCode>
+    <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="6">20555666777</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>DISTRIBUIDORA PROV SAC</cbc:RegistrationName>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="6">20600000001</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>DOCS TEST SAC</cbc:RegistrationName>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="PEN">18.00</cbc:TaxAmount>
+    </cac:TaxTotal>
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="PEN">100.00</cbc:LineExtensionAmount>
+        <cbc:PayableAmount currencyID="PEN">118.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="NIU">10.00</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="PEN">100.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>TALADRO ELECTRICO 500W</cbc:Description>
+            <cac:SellersItemIdentification>
+                <cbc:ID>SKU-EXT-999</cbc:ID>
+            </cac:SellersItemIdentification>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="PEN">10.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>
+"""
+
+
+class DocumentoCapturaFlujoCompletoTest(TestCase):
+    def setUp(self):
+        self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')
+        self.empresa = Empresa.objects.create(
+            ruc='20600000001',
+            razon_social='DOCS TEST S.A.C.',
+            moneda_base_codigo=self.moneda,
+        )
+        self.establecimiento = Establecimiento.objects.create(
+            empresa=self.empresa,
+            codigo_sunat='0000',
+            nombre='SEDE CENTRAL',
+        )
+        self.almacen = Almacen.objects.create(
+            empresa=self.empresa,
+            establecimiento=self.establecimiento,
+            codigo='ALM-01',
+            nombre='ALMACEN PRINCIPAL',
+        )
+        self.periodo = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=2,
+            orden=202602,
+            fecha_inicio='2026-02-01',
+            fecha_fin='2026-02-28',
+            estado='ABIERTO',
+        )
+        self.tipo_factura = TipoComprobante.objects.create(
+            codigo_sunat='01',
+            descripcion='FACTURA',
+            es_nota=False,
+            efecto_nota='NINGUNO',
+        )
+        self.tipo_op_compra = TipoOperacion.objects.create(
+            codigo_interno='COMPRA',
+            codigo_sunat='02',
+            descripcion='COMPRA NACIONAL',
+            naturaleza='ENTRADA',
+            es_interna=False,
+            afecta_kardex=True,
+            origen_requerido='DOCUMENTO',
+        )
+        self.tipo_existencia = TipoExistencia.objects.create(
+            codigo='01',
+            descripcion='MERCADERIA',
+        )
+        self.und = UnidadMedida.objects.create(codigo='NIU', descripcion='UNIDAD')
+        self.producto = Producto.objects.create(
+            empresa=self.empresa,
+            codigo_interno='P-TALADRO',
+            descripcion='TALADRO ELECTRICO 500W INTERNO',
+            tipo_existencia_codigo=self.tipo_existencia,
+        )
+        self.prod_unidad = ProductoUnidad.objects.create(
+            producto=self.producto,
+            unidad_codigo=self.und,
+            factor_a_base=Decimal('1.00000000'),
+            es_base=True,
+        )
+        self.usuario = Usuario.objects.create(
+            username='user_doc_test',
+            email='doctest@factkard.pe',
+            password_hash='pbkdf2_test',
+        )
+        UsuarioEmpresa.objects.create(
+            usuario=self.usuario,
+            empresa=self.empresa,
+            rol='ADMIN',
+            activo=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.usuario)
+
+    def headers(self):
+        return {'HTTP_X_EMPRESA_ID': str(self.empresa.id)}
+
+    def test_subir_xml_ubl_crea_captura_y_campos_con_confianza_100(self):
+        url = reverse('documento-captura-subir')
+        archivo = SimpleUploadedFile("factura_F001_88.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+
+        resp = self.client.post(
+            url,
+            {'archivo': archivo, 'tipo': 'XML'},
+            format='multipart',
+            **self.headers()
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['tipo'], 'XML')
+        self.assertEqual(resp.data['estado_proceso'], 'PROCESADO')
+        self.assertTrue(resp.data['fue_creado_nuevo'])
+
+        captura_id = resp.data['id']
+        captura = DocumentoCaptura.objects.get(pk=captura_id)
+        self.assertEqual(captura.tipo, 'XML')
+
+        # Verificar campos cabecera
+        c_ruc = captura.campos.get(seccion='CABECERA', nombre_campo='ruc_emisor')
+        self.assertEqual(c_ruc.valor_extraido, '20555666777')
+        self.assertEqual(c_ruc.confianza, Decimal('100.0000'))
+
+        c_total = captura.campos.get(seccion='CABECERA', nombre_campo='total')
+        self.assertEqual(Decimal(c_total.valor_extraido), Decimal('118.00000000'))
+
+        # Verificar campos detalle
+        c_sku = captura.campos.get(seccion='DETALLE', numero_linea=1, nombre_campo='codigo_externo')
+        self.assertEqual(c_sku.valor_extraido, 'SKU-EXT-999')
+        self.assertEqual(c_sku.confianza, Decimal('100.0000'))
+
+    def test_subir_archivo_identico_reutiliza_captura_sin_duplicar(self):
+        url = reverse('documento-captura-subir')
+        archivo1 = SimpleUploadedFile("factura_1.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+        resp1 = self.client.post(url, {'archivo': archivo1, 'tipo': 'XML'}, format='multipart', **self.headers())
+        self.assertEqual(resp1.status_code, 201)
+        self.assertTrue(resp1.data['fue_creado_nuevo'])
+
+        # Subir nuevamente el mismo archivo
+        archivo2 = SimpleUploadedFile("factura_1_duplicado.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+        resp2 = self.client.post(url, {'archivo': archivo2, 'tipo': 'XML'}, format='multipart', **self.headers())
+        self.assertEqual(resp2.status_code, 200)
+        self.assertFalse(resp2.data['fue_creado_nuevo'])
+        self.assertEqual(resp1.data['id'], resp2.data['id'])
+        self.assertEqual(DocumentoCaptura.objects.filter(empresa=self.empresa).count(), 1)
+
+    def test_corregir_campo_captura_guarda_usuario_y_auditoria(self):
+        # 1. Subir captura
+        url_subir = reverse('documento-captura-subir')
+        archivo = SimpleUploadedFile("factura_test.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+        resp_subir = self.client.post(url_subir, {'archivo': archivo, 'tipo': 'XML'}, format='multipart', **self.headers())
+        captura_id = resp_subir.data['id']
+
+        # 2. Corregir campo
+        captura = DocumentoCaptura.objects.get(pk=captura_id)
+        campo = captura.campos.get(seccion='CABECERA', nombre_campo='serie')
+        self.assertEqual(campo.valor_extraido, 'F001')
+
+        url_corregir = reverse('captura-campo-corregir', args=[captura_id])
+        resp_corregir = self.client.patch(
+            url_corregir,
+            {'campo_id': campo.id, 'valor_corregido': 'F002'},
+            format='json',
+            **self.headers()
+        )
+        self.assertEqual(resp_corregir.status_code, 200)
+        self.assertEqual(resp_corregir.data['valor_corregido'], 'F002')
+
+        campo.refresh_from_db()
+        self.assertEqual(campo.valor_corregido, 'F002')
+        self.assertEqual(campo.corregido_por, self.usuario)
+
+        # Auditoría
+        aud = Auditoria.objects.filter(
+            entidad='CAPTURA_CAMPO',
+            registro_id=campo.id,
+            accion='CORREGIR_CAMPO_CAPTURA',
+        ).first()
+        self.assertIsNotNone(aud)
+
+    def test_generar_borrador_sin_equivalencia_crea_incidencia_bloqueante(self):
+        # 1. Subir XML
+        url_subir = reverse('documento-captura-subir')
+        archivo = SimpleUploadedFile("factura_sin_homologar.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+        resp_subir = self.client.post(url_subir, {'archivo': archivo, 'tipo': 'XML'}, format='multipart', **self.headers())
+        captura_id = resp_subir.data['id']
+
+        # 2. Generar borrador
+        url_borrador = reverse('documento-captura-generar-borrador', args=[captura_id])
+        resp_borrador = self.client.post(url_borrador, {}, format='json', **self.headers())
+        self.assertEqual(resp_borrador.status_code, 201)
+        self.assertEqual(resp_borrador.data['estado'], 'BORRADOR')
+        self.assertEqual(resp_borrador.data['estado_revision'], 'PENDIENTE')
+        self.assertEqual(resp_borrador.data['lineas_sin_homologar'], 1)
+
+        doc_id = resp_borrador.data['documento_id']
+        doc = Documento.objects.get(pk=doc_id)
+        self.assertEqual(doc.estado, 'BORRADOR')
+        self.assertEqual(doc.estado_revision, 'PENDIENTE')
+        self.assertEqual(doc.origen_captura, 'XML')
+
+        # La línea no tiene producto asignado
+        det = doc.detalles.first()
+        self.assertIsNone(det.producto)
+
+        # Incidencia bloqueante generada
+        inc = Incidencia.objects.filter(
+            empresa=self.empresa,
+            documento=doc,
+            tipo='PRODUCTO_SIN_HOMOLOGAR',
+        ).first()
+        self.assertIsNotNone(inc)
+        self.assertTrue(inc.bloquea_cierre)
+        self.assertEqual(inc.estado, 'PENDIENTE')
+
+    def test_generar_borrador_con_equivalencia_previa_asocia_producto(self):
+        # 1. Crear tercero y equivalencia previa confirmada
+        tercero = Tercero.objects.create(
+            empresa=self.empresa,
+            tipo_documento='6',
+            numero_documento='20555666777',
+            razon_social='DISTRIBUIDORA PROV SAC',
+            es_proveedor=True,
+        )
+        ProductoEquivalencia.objects.create(
+            empresa=self.empresa,
+            tercero=tercero,
+            codigo_externo='SKU-EXT-999',
+            descripcion_externa='TALADRO ELECTRICO 500W',
+            unidad_externa_codigo=self.und,
+            producto_unidad=self.prod_unidad,
+            factor_conversion=Decimal('2.00000000'),
+            confirmado_por=self.usuario,
+            confirmado_en=timezone.now(),
+            activa=True,
+        )
+
+        # 2. Subir XML y generar borrador
+        url_subir = reverse('documento-captura-subir')
+        archivo = SimpleUploadedFile("factura_homologada.xml", XML_FACTURA_PRUEBA, content_type="text/xml")
+        resp_subir = self.client.post(url_subir, {'archivo': archivo, 'tipo': 'XML'}, format='multipart', **self.headers())
+        captura_id = resp_subir.data['id']
+
+        url_borrador = reverse('documento-captura-generar-borrador', args=[captura_id])
+        resp_borrador = self.client.post(url_borrador, {}, format='json', **self.headers())
+        self.assertEqual(resp_borrador.status_code, 201)
+        self.assertEqual(resp_borrador.data['lineas_sin_homologar'], 0)
+
+        doc = Documento.objects.get(pk=resp_borrador.data['documento_id'])
+        det = doc.detalles.first()
+        self.assertEqual(det.producto, self.producto)
+        self.assertEqual(det.factor_conversion, Decimal('2.00000000'))
+        # 10 cantidad original * 2 factor = 20 cantidad base
+        self.assertEqual(det.cantidad_base, Decimal('20.00000000'))
+
+        # No debe haber incidencias
+        self.assertFalse(Incidencia.objects.filter(documento=doc).exists())
+
+    def test_subir_captura_ocr_asigna_confianzas_entre_0_y_100(self):
+        url = reverse('documento-captura-subir')
+        archivo_pdf = SimpleUploadedFile("factura_escaneada.pdf", b"%PDF-1.4 dummy", content_type="application/pdf")
+        texto_ocr = "FACTURA F001-00000999 RUC: 20111222333 TOTAL: S/ 236.00"
+
+        resp = self.client.post(
+            url,
+            {'archivo': archivo_pdf, 'tipo': 'PDF', 'texto_ocr': texto_ocr},
+            format='multipart',
+            **self.headers()
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['tipo'], 'PDF')
+
+        captura = DocumentoCaptura.objects.get(pk=resp.data['id'])
+        for campo in captura.campos.all():
+            self.assertIsNotNone(campo.confianza)
+            self.assertGreaterEqual(campo.confianza, Decimal('0'))
+            self.assertLessEqual(campo.confianza, Decimal('100'))
