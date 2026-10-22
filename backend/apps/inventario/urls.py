@@ -8,6 +8,9 @@ from apps.inventario.views import (
     NotaInternaDetailView,
     NotaInternaListCreateView,
     ProductoDetailView,
+    ProductoEquivalenciaDetailView,
+    ProductoEquivalenciaListCreateView,
+    ProductoEquivalenciaSugerirView,
     ProductoListCreateView,
     ProductoUnidadDetailView,
     ProductoUnidadListCreateView,
@@ -100,5 +103,20 @@ urlpatterns = [
         'transferencias/<int:pk>/confirmar/',
         TransferenciaConfirmarView.as_view(),
         name='transferencia-confirmar',
+    ),
+    path(
+        'equivalencias/',
+        ProductoEquivalenciaListCreateView.as_view(),
+        name='producto-equivalencia-list-create',
+    ),
+    path(
+        'equivalencias/<int:pk>/',
+        ProductoEquivalenciaDetailView.as_view(),
+        name='producto-equivalencia-detail',
+    ),
+    path(
+        'equivalencias/sugerir/',
+        ProductoEquivalenciaSugerirView.as_view(),
+        name='producto-equivalencia-sugerir',
     ),
 ]

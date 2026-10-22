@@ -2,21 +2,33 @@ from django.db.models import Q
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.documentos.models import Documento
+from apps.documentos.models import Documento, DocumentoCaptura, CapturaCampo
 from apps.documentos.serializers import (
     DocumentoListSerializer,
     DocumentoDetailSerializer,
     DocumentoCreateSerializer,
     DocumentoRevisarSerializer,
     DocumentoAnularSerializer,
+    CapturaCampoSerializer,
+    DocumentoCapturaListSerializer,
+    DocumentoCapturaDetailSerializer,
+    DocumentoCapturaSubirSerializer,
+    CapturaCampoCorregirSerializer,
+    GenerarBorradorSerializer,
 )
 from apps.documentos.services import (
     revisar_documento,
     confirmar_documento_validacion,
     anular_documento,
+)
+from apps.documentos.captura_services import (
+    procesar_subida_captura,
+    corregir_campo_captura,
+    generar_borrador_desde_captura,
 )
 from apps.usuarios.permissions import TieneEmpresaActiva
 
@@ -196,3 +208,108 @@ class DocumentoAnularView(APIView):
             motivo=serializer.validated_data['motivo']
         )
         return Response(DocumentoDetailSerializer(doc).data, status=status.HTTP_200_OK)
+
+
+class DocumentoCapturaSubirView(APIView):
+    """
+    Sube un archivo XML, PDF o Imagen para captura electrónica u OCR.
+    Calcula SHA-256 para evitar duplicados y extrae campos automáticamente.
+    """
+    permission_classes = [TieneEmpresaActiva]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        serializer = DocumentoCapturaSubirSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        archivo = serializer.validated_data['archivo']
+        tipo = serializer.validated_data['tipo']
+        texto_ocr = serializer.validated_data.get('texto_ocr', '')
+
+        captura, fue_creado = procesar_subida_captura(
+            empresa_id=request.empresa_id,
+            usuario=request.user,
+            archivo=archivo,
+            tipo=tipo,
+            texto_ocr=texto_ocr,
+        )
+
+        data = DocumentoCapturaDetailSerializer(captura).data
+        data['fue_creado_nuevo'] = fue_creado
+        data['mensaje'] = (
+            'Archivo procesado exitosamente.'
+            if fue_creado
+            else 'Archivo idéntico detectado (hash SHA-256 ya existente), reutilizando captura.'
+        )
+
+        st = status.HTTP_201_CREATED if fue_creado else status.HTTP_200_OK
+        return Response(data, status=st)
+
+
+class DocumentoCapturaListView(generics.ListAPIView):
+    """Lista las capturas realizadas por la empresa activa."""
+    permission_classes = [TieneEmpresaActiva]
+    serializer_class = DocumentoCapturaListSerializer
+
+    def get_queryset(self):
+        empresa_id = getattr(self.request, 'empresa_id', None)
+        if not empresa_id:
+            return DocumentoCaptura.objects.none()
+        qs = DocumentoCaptura.objects.filter(empresa_id=empresa_id).select_related('subido_por').prefetch_related('campos')
+        tipo = self.request.query_params.get('tipo')
+        if tipo:
+            qs = qs.filter(tipo=tipo.upper())
+        estado = self.request.query_params.get('estado')
+        if estado:
+            qs = qs.filter(estado_proceso=estado.upper())
+        return qs.order_by('-id')
+
+
+class DocumentoCapturaDetailView(generics.RetrieveAPIView):
+    """Detalle completo de una captura con todos sus campos extraídos."""
+    permission_classes = [TieneEmpresaActiva]
+    serializer_class = DocumentoCapturaDetailSerializer
+
+    def get_queryset(self):
+        empresa_id = getattr(self.request, 'empresa_id', None)
+        if not empresa_id:
+            return DocumentoCaptura.objects.none()
+        return DocumentoCaptura.objects.filter(empresa_id=empresa_id).select_related('subido_por', 'documento').prefetch_related('campos')
+
+
+class CapturaCampoCorregirView(APIView):
+    """Permite al usuario corregir el valor de un campo extraído en CapturaCampo."""
+    permission_classes = [TieneEmpresaActiva]
+
+    def patch(self, request, pk):
+        serializer = CapturaCampoCorregirSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        campo = corregir_campo_captura(
+            captura_id=pk,
+            campo_id=serializer.validated_data['campo_id'],
+            valor_corregido=serializer.validated_data['valor_corregido'],
+            empresa_id=request.empresa_id,
+            usuario=request.user,
+        )
+        return Response(CapturaCampoSerializer(campo).data, status=status.HTTP_200_OK)
+
+
+class DocumentoCapturaGenerarBorradorView(APIView):
+    """
+    Convierte la captura en un Documento comercial estrictamente en BORRADOR y PENDIENTE.
+    Crea Incidencia tipo 'PRODUCTO_SIN_HOMOLOGAR' para cada ítem sin ProductoEquivalencia.
+    """
+    permission_classes = [TieneEmpresaActiva]
+
+    def post(self, request, pk):
+        serializer = GenerarBorradorSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        res = generar_borrador_desde_captura(
+            captura_id=pk,
+            empresa_id=request.empresa_id,
+            usuario=request.user,
+            almacen_id=serializer.validated_data.get('almacen_id'),
+        )
+        return Response(res, status=status.HTTP_201_CREATED)
