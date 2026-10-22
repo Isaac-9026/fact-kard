@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from rest_framework.exceptions import ValidationError
 
 from apps.auditoria.services import registrar_auditoria
@@ -23,6 +23,44 @@ def q8(value):
 
 def cpp(value, quantity):
     return ZERO if quantity == ZERO else (value / quantity).quantize(Q6, rounding=ROUND_HALF_UP)
+
+
+def siguiente_secuencia_movimiento(*, empresa_id, producto_id, fecha_movimiento, prioridad_dia):
+    ultima = Movimiento.objects.filter(
+        empresa_id=empresa_id,
+        producto_id=producto_id,
+        fecha_movimiento=fecha_movimiento,
+        prioridad_dia=prioridad_dia,
+    ).aggregate(valor=Max('secuencia'))['valor']
+    return (ultima or 0) + 1
+
+
+def hay_movimientos_posteriores(movimiento):
+    """Indica si el movimiento quedó antes de otro en el orden oficial del Kardex."""
+    posteriores = Movimiento.objects.filter(
+        empresa_id=movimiento.empresa_id,
+        producto_id=movimiento.producto_id,
+    )
+    if movimiento.transferencia_id:
+        posteriores = posteriores.exclude(transferencia_id=movimiento.transferencia_id)
+    return posteriores.filter(
+        Q(fecha_movimiento__gt=movimiento.fecha_movimiento)
+        | Q(
+            fecha_movimiento=movimiento.fecha_movimiento,
+            prioridad_dia__gt=movimiento.prioridad_dia,
+        )
+        | Q(
+            fecha_movimiento=movimiento.fecha_movimiento,
+            prioridad_dia=movimiento.prioridad_dia,
+            secuencia__gt=movimiento.secuencia,
+        )
+        | Q(
+            fecha_movimiento=movimiento.fecha_movimiento,
+            prioridad_dia=movimiento.prioridad_dia,
+            secuencia=movimiento.secuencia,
+            id__gt=movimiento.id,
+        )
+    ).exists()
 
 
 def _saldo(empresa_id, producto_id):
@@ -123,16 +161,18 @@ def aplicar_movimiento(*, empresa_id, producto_id, almacen_id, periodo, tipo_ope
         saldo.valor_total_pen = q8(saldo.valor_total_pen + valor)
         prioridad = 3
     saldo.cpp_pen = cpp(saldo.valor_total_pen, saldo.cantidad_total)
-    secuencia = Movimiento.objects.filter(
-        empresa_id=empresa_id, producto_id=producto_id, fecha_movimiento=fecha,
+    secuencia = siguiente_secuencia_movimiento(
+        empresa_id=empresa_id,
+        producto_id=producto_id,
+        fecha_movimiento=fecha,
         prioridad_dia=prioridad,
-    ).aggregate(valor=Max('secuencia'))['valor'] or 0
+    )
     movimiento = Movimiento.objects.create(
         empresa_id=empresa_id, producto_id=producto_id, almacen_id=almacen_id,
         periodo=periodo, documento_detalle=documento_detalle,
         movimiento_origen=movimiento_origen, movimiento_extornado=movimiento_extornado,
         tipo_operacion=tipo_operacion, fecha_movimiento=fecha, prioridad_dia=prioridad,
-        secuencia=secuencia + 1, naturaleza=naturaleza, cantidad_base=cantidad,
+        secuencia=secuencia, naturaleza=naturaleza, cantidad_base=cantidad,
         valor_ajuste_pen=valor if naturaleza == 'AJUSTE_VALOR' else None,
         es_extorno=es_extorno, creado_por_id=usuario_id,
     )
@@ -152,6 +192,13 @@ def aplicar_movimiento(*, empresa_id, producto_id, almacen_id, periodo, tipo_ope
         valor_movimiento_pen=valor, saldo_cantidad_empresa=saldo.cantidad_total,
         saldo_valor_empresa=saldo.valor_total_pen, cpp_empresa=saldo.cpp_pen,
     )
+    if hay_movimientos_posteriores(movimiento):
+        ejecutar_recalculo_producto(
+            empresa_id=empresa_id,
+            producto_id=producto_id,
+            fecha_desde=fecha,
+            usuario_id=usuario_id,
+        )
     return movimiento
 
 
@@ -165,16 +212,54 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
         empresa_id=empresa_id, producto_id=producto_id, fecha_desde=fecha_desde,
         version=version, estado='EN_PROCESO', ejecutado_por_id=usuario_id,
     )
-    cantidad = ZERO
-    valor = ZERO
     stocks = {}
-    movimientos = Movimiento.objects.filter(
+    movimientos_base = Movimiento.objects.filter(
         empresa_id=empresa_id, producto_id=producto_id,
     ).select_related('tipo_operacion').order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
-    for movimiento in movimientos:
+
+    movimientos_anteriores = list(movimientos_base.filter(fecha_movimiento__lt=fecha_desde))
+    movimientos_afectados = list(movimientos_base.filter(fecha_movimiento__gte=fecha_desde))
+
+    # Los movimientos anteriores solo reconstruyen el punto de partida. Su
+    # valorización es historia consolidada y no debe versionarse nuevamente.
+    for movimiento in movimientos_anteriores:
+        if movimiento.naturaleza == 'ENTRADA':
+            stocks[movimiento.almacen_id] = q8(
+                stocks.get(movimiento.almacen_id, ZERO) + movimiento.cantidad_base,
+            )
+        elif movimiento.naturaleza == 'SALIDA':
+            stocks[movimiento.almacen_id] = q8(
+                stocks.get(movimiento.almacen_id, ZERO) - movimiento.cantidad_base,
+            )
+
+    if movimientos_anteriores:
+        valorizacion_previa = getattr(movimientos_anteriores[-1], 'valorizacion', None)
+        if valorizacion_previa is None:
+            raise ValidationError({
+                'recalculo': 'El último movimiento anterior a fecha_desde no tiene valorización.',
+            })
+        cantidad = q8(valorizacion_previa.saldo_cantidad_empresa or ZERO)
+        valor = q8(valorizacion_previa.saldo_valor_empresa or ZERO)
+    else:
+        cantidad = ZERO
+        valor = ZERO
+
+    for movimiento in movimientos_afectados:
         anterior = getattr(movimiento, 'valorizacion', None)
         cpp_vigente = cpp(valor, cantidad)
-        if movimiento.naturaleza == 'ENTRADA':
+        if movimiento.transferencia_id:
+            # Una transferencia solo redistribuye stock entre almacenes. Sus dos
+            # movimientos conservan el mismo costo histórico y no alteran el
+            # saldo ni el CPP global de empresa + producto.
+            costo = anterior.costo_unitario_pen if anterior else cpp_vigente
+            movimiento_valor = q8(movimiento.cantidad_base * costo)
+            delta_stock = movimiento.cantidad_base if movimiento.naturaleza == 'ENTRADA' else -movimiento.cantidad_base
+            stocks[movimiento.almacen_id] = q8(stocks.get(movimiento.almacen_id, ZERO) + delta_stock)
+            if stocks[movimiento.almacen_id] < ZERO:
+                _incidencia(empresa_id=empresa_id, periodo_id=movimiento.periodo_id,
+                            producto_id=producto_id, movimiento_id=movimiento.id,
+                            tipo='STOCK_INSUFICIENTE', descripcion='El recálculo detectó stock negativo posterior.')
+        elif movimiento.naturaleza == 'ENTRADA':
             costo = anterior.costo_unitario_pen if anterior else ZERO
             movimiento_valor = q8(movimiento.cantidad_base * costo)
             cantidad = q8(cantidad + movimiento.cantidad_base); valor = q8(valor + movimiento_valor)
@@ -206,7 +291,12 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
             )
     saldo = SaldoCppActual.objects.select_for_update().get(empresa_id=empresa_id, producto_id=producto_id)
     saldo.cantidad_total=cantidad; saldo.valor_total_pen=valor; saldo.cpp_pen=cpp(valor, cantidad)
-    saldo.ultimo_movimiento=movimientos.last(); saldo.save()
+    ultimo_movimiento = (
+        movimientos_afectados[-1] if movimientos_afectados
+        else movimientos_anteriores[-1] if movimientos_anteriores
+        else None
+    )
+    saldo.ultimo_movimiento=ultimo_movimiento; saldo.save()
     for almacen_id, cantidad_stock in stocks.items():
         StockAlmacen.objects.update_or_create(
             empresa_id=empresa_id, almacen_id=almacen_id, producto_id=producto_id,
@@ -243,7 +333,6 @@ def confirmar_documento_motor(*, documento_id, empresa_id, usuario_id):
         raise ValidationError({'estado_revision': 'El documento debe estar REVISADO.'})
     if documento.periodo.estado != 'ABIERTO':
         raise ValidationError({'periodo': 'El período debe estar ABIERTO.'})
-    productos = set()
     for detalle in documento.detalles.all():
         if not detalle.afecta_kardex_aplicado or detalle.producto_id is None:
             continue
@@ -268,18 +357,8 @@ def confirmar_documento_motor(*, documento_id, empresa_id, usuario_id):
             cantidad=cantidad, usuario_id=usuario_id, costo_unitario=costo,
             valor_ajuste=valor_ajuste, documento_detalle=detalle, movimiento_origen=origen,
         )
-        productos.add(detalle.producto_id)
     documento.estado='CONFIRMADO'; documento.confirmado_por_id=usuario_id; documento.confirmado_en=timezone.now()
     documento.save(update_fields=['estado', 'confirmado_por', 'confirmado_en'])
-    for producto_id in productos:
-        if Movimiento.objects.filter(
-            empresa_id=empresa_id, producto_id=producto_id,
-            fecha_movimiento__gt=documento.fecha_emision,
-        ).exists():
-            ejecutar_recalculo_producto(
-                empresa_id=empresa_id, producto_id=producto_id,
-                fecha_desde=documento.fecha_emision, usuario_id=usuario_id,
-            )
     registrar_auditoria(empresa_id, usuario_id, 'CONFIRMAR', 'DOCUMENTO', documento.id,
                         {'estado': 'BORRADOR'}, {'estado': 'CONFIRMADO'})
     return documento

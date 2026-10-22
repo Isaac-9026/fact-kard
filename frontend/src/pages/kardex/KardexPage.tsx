@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, type FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   obtenerKardexValorizado,
@@ -10,6 +10,7 @@ import {
 import { getProductos, getAlmacenes, type Producto, type Almacen } from '../../api/inventario';
 import { obtenerPeriodos, type Periodo } from '../../api/periodos';
 import { obtenerTiposOperacion, type TipoOperacion } from '../../api/catalogos';
+import { filtrosKardexDesdeFormulario } from '../../utils/kardexFiltros';
 
 const formatQty = (val: string | null | undefined): string => {
   if (val === null || val === undefined || val === '') return '—';
@@ -56,7 +57,27 @@ export const KardexPage: React.FC = () => {
   const [exporting, setExporting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Carga inicial de catálogos
+  // Ejecución de la consulta contable con una instantánea estable de filtros.
+  const cargarKardex = useCallback(async (filtros: KardexFiltros) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await obtenerKardexValorizado(filtros);
+      setMovimientos(res.movimientos);
+      setResumen(res.resumen);
+    } catch (err: any) {
+      console.error('Error al consultar Kardex', err);
+      setError(
+        err?.response?.data?.detail ||
+          err?.response?.data?.message ||
+          'No se pudo cargar el Kardex Valorizado. Verifique los filtros y conexión.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Carga inicial de catálogos y del reporte de la empresa activa.
   useEffect(() => {
     let isMounted = true;
     const cargarCatalogos = async () => {
@@ -78,6 +99,7 @@ export const KardexPage: React.FC = () => {
           if (abierto) {
             setPeriodoId(String(abierto.id));
           }
+          void cargarKardex({ periodo_id: abierto?.id });
         }
       } catch (err) {
         console.error('Error al cargar catálogos de Kardex', err);
@@ -87,41 +109,19 @@ export const KardexPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [empresaActiva?.id]);
+  }, [empresaActiva?.id, cargarKardex]);
 
-  // Ejecución de la consulta contable
-  const cargarKardex = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const filtros: KardexFiltros = {
-        producto_id: productoId ? Number(productoId) : undefined,
-        periodo_id: periodoId ? Number(periodoId) : undefined,
-        almacen_id: almacenId ? Number(almacenId) : undefined,
-        tipo_operacion_id: tipoOperacionId ? Number(tipoOperacionId) : undefined,
-        fecha_desde: fechaDesde || undefined,
-        fecha_hasta: fechaHasta || undefined,
-      };
-
-      const res = await obtenerKardexValorizado(filtros);
-      setMovimientos(res.movimientos);
-      setResumen(res.resumen);
-    } catch (err: any) {
-      console.error('Error al consultar Kardex', err);
-      setError(
-        err?.response?.data?.detail ||
-          err?.response?.data?.message ||
-          'No se pudo cargar el Kardex Valorizado. Verifique los filtros y conexión.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [productoId, periodoId, almacenId, tipoOperacionId, fechaDesde, fechaHasta]);
-
-  // Cargar kardex al cambiar los filtros principales
-  useEffect(() => {
-    cargarKardex();
-  }, [cargarKardex]);
+  const handleActualizarConsulta = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const filtros = filtrosKardexDesdeFormulario(new FormData(event.currentTarget));
+    setProductoId(filtros.producto_id ? String(filtros.producto_id) : '');
+    setPeriodoId(filtros.periodo_id ? String(filtros.periodo_id) : '');
+    setAlmacenId(filtros.almacen_id ? String(filtros.almacen_id) : '');
+    setTipoOperacionId(filtros.tipo_operacion_id ? String(filtros.tipo_operacion_id) : '');
+    setFechaDesde(filtros.fecha_desde ?? '');
+    setFechaHasta(filtros.fecha_hasta ?? '');
+    void cargarKardex(filtros);
+  };
 
   // Exportar a Excel
   const handleExportarExcel = async () => {
@@ -151,6 +151,7 @@ export const KardexPage: React.FC = () => {
     setTipoOperacionId('');
     setFechaDesde('');
     setFechaHasta('');
+    void cargarKardex({});
   };
 
   const productoSeleccionado = useMemo(() => {
@@ -261,7 +262,7 @@ export const KardexPage: React.FC = () => {
       </div>
 
       {/* 3. Barra de Filtros Oficiales (Sección 42 del Manual) */}
-      <div style={styles.filterCard}>
+      <form style={styles.filterCard} onSubmit={handleActualizarConsulta}>
         <div style={styles.filterHeader}>
           <span style={styles.filterTitle}>🔍 Filtros de Consulta Oficial</span>
           <span style={styles.filterSubtitle}>
@@ -275,6 +276,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Producto</label>
             <select
               style={styles.select}
+              name="producto_id"
               value={productoId}
               onChange={(e) => setProductoId(e.target.value)}
             >
@@ -292,6 +294,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Período Contable</label>
             <select
               style={styles.select}
+              name="periodo_id"
               value={periodoId}
               onChange={(e) => setPeriodoId(e.target.value)}
             >
@@ -309,6 +312,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Almacén</label>
             <select
               style={styles.select}
+              name="almacen_id"
               value={almacenId}
               onChange={(e) => setAlmacenId(e.target.value)}
             >
@@ -326,6 +330,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Tipo de Operación</label>
             <select
               style={styles.select}
+              name="tipo_operacion_id"
               value={tipoOperacionId}
               onChange={(e) => setTipoOperacionId(e.target.value)}
             >
@@ -343,6 +348,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Fecha Desde</label>
             <input
               type="date"
+              name="fecha_desde"
               style={styles.input}
               value={fechaDesde}
               onChange={(e) => setFechaDesde(e.target.value)}
@@ -354,6 +360,7 @@ export const KardexPage: React.FC = () => {
             <label style={styles.label}>Fecha Hasta</label>
             <input
               type="date"
+              name="fecha_hasta"
               style={styles.input}
               value={fechaHasta}
               onChange={(e) => setFechaHasta(e.target.value)}
@@ -363,8 +370,7 @@ export const KardexPage: React.FC = () => {
 
         <div style={styles.filterActions}>
           <button
-            type="button"
-            onClick={cargarKardex}
+            type="submit"
             disabled={loading}
             style={styles.btnPrimary}
           >
@@ -379,7 +385,7 @@ export const KardexPage: React.FC = () => {
             Limpiar Filtros
           </button>
         </div>
-      </div>
+      </form>
 
       {/* 4. Mensaje de Error */}
       {error && (

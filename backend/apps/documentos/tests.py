@@ -538,6 +538,51 @@ class DocumentosApiTest(TestCase):
         # Costo total = 1200 / 120 = 10 PEN/unidad base
         self.assertEqual(det.costo_unitario_pen, Decimal('10.00000000'))
 
+    def test_creacion_conserva_fecha_emision_calendario(self):
+        periodo_octubre = Periodo.objects.create(
+            empresa=self.empresa,
+            anio=2026,
+            mes=10,
+            orden=202610,
+            fecha_inicio=date(2026, 10, 1),
+            fecha_fin=date(2026, 10, 31),
+            estado='ABIERTO',
+        )
+        response = self.client.post(
+            reverse('documento-list-create'),
+            {
+                'clase': 'COMPRA',
+                'periodo': periodo_octubre.id,
+                'tercero': self.tercero_prov.id,
+                'tipo_comprobante': self.tipo_factura.id,
+                'serie': 'F004',
+                'numero': '21',
+                'fecha_emision': '2026-10-21',
+                'moneda_codigo': 'PEN',
+                'detalles': [
+                    {
+                        'producto': self.producto.id,
+                        'producto_unidad': self.pu_und.id,
+                        'almacen': self.almacen.id,
+                        'tipo_operacion': self.tipo_op_compra.id,
+                        'cantidad_original': '50.00000000',
+                        'precio_unitario': '12.00000000',
+                        'igv': '108.00000000',
+                        'es_bonificacion': False,
+                    }
+                ],
+            },
+            format='json',
+            **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['fecha_emision'], '2026-10-21')
+
+        documento = Documento.objects.get(id=response.data['id'])
+        self.assertEqual(documento.fecha_emision, date(2026, 10, 21))
+        self.assertEqual(documento.estado, 'BORRADOR')
+
     def test_creacion_factura_compra_usd_con_igv_prorrata_y_nulo(self):
         url = reverse('documento-list-create')
 

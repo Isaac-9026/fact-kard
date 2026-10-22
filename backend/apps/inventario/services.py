@@ -7,6 +7,10 @@ from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoOperacion
 from apps.inventario.models import NotaInterna, SaldoInicial, Transferencia
 from apps.kardex.models import Movimiento, SaldoCppActual, StockAlmacen, ValorizacionMovimiento
+from apps.kardex.services import (
+    ejecutar_recalculo_producto, hay_movimientos_posteriores,
+    siguiente_secuencia_movimiento,
+)
 
 
 OCHO_DECIMALES = Decimal('0.00000001')
@@ -84,6 +88,12 @@ def confirmar_saldo_inicial(*, saldo_id, empresa_id, usuario):
         almacen_id=saldo_inicial.almacen_id, periodo=saldo_inicial.periodo,
         saldo_inicial=saldo_inicial, tipo_operacion=tipo,
         fecha_movimiento=saldo_inicial.periodo.fecha_inicio, prioridad_dia=1,
+        secuencia=siguiente_secuencia_movimiento(
+            empresa_id=empresa_id,
+            producto_id=saldo_inicial.producto_id,
+            fecha_movimiento=saldo_inicial.periodo.fecha_inicio,
+            prioridad_dia=1,
+        ),
         naturaleza='ENTRADA', cantidad_base=saldo_inicial.cantidad,
         creado_por=usuario,
     )
@@ -91,6 +101,11 @@ def confirmar_saldo_inicial(*, saldo_id, empresa_id, usuario):
     saldo.save(update_fields=['cantidad_total', 'valor_total_pen', 'cpp_pen', 'ultimo_movimiento', 'actualizado_en'])
     stock.save(update_fields=['cantidad_actual', 'actualizado_en'])
     _crear_valorizacion(movimiento, saldo_inicial.cpp_inicial, saldo_inicial.valor_pen, saldo)
+    if hay_movimientos_posteriores(movimiento):
+        ejecutar_recalculo_producto(
+            empresa_id=empresa_id, producto_id=saldo_inicial.producto_id,
+            fecha_desde=movimiento.fecha_movimiento, usuario_id=usuario.id,
+        )
     saldo_inicial.estado = 'CONFIRMADO'
     saldo_inicial.save(update_fields=['estado'])
     registrar_auditoria(
@@ -141,6 +156,12 @@ def confirmar_nota_interna(*, nota_id, empresa_id, usuario):
             almacen_id=nota.almacen_id, periodo=nota.periodo,
             nota_interna_detalle=detalle, tipo_operacion=nota.tipo_operacion,
             fecha_movimiento=nota.fecha, prioridad_dia=prioridad,
+            secuencia=siguiente_secuencia_movimiento(
+                empresa_id=empresa_id,
+                producto_id=detalle.producto_id,
+                fecha_movimiento=nota.fecha,
+                prioridad_dia=prioridad,
+            ),
             naturaleza=naturaleza, cantidad_base=cantidad,
             valor_ajuste_pen=valor if naturaleza == 'AJUSTE_VALOR' else None,
             creado_por=usuario,
@@ -149,6 +170,11 @@ def confirmar_nota_interna(*, nota_id, empresa_id, usuario):
         saldo.save(update_fields=['cantidad_total', 'valor_total_pen', 'cpp_pen', 'ultimo_movimiento', 'actualizado_en'])
         stock.save(update_fields=['cantidad_actual', 'actualizado_en'])
         _crear_valorizacion(movimiento, costo, valor, saldo)
+        if hay_movimientos_posteriores(movimiento):
+            ejecutar_recalculo_producto(
+                empresa_id=empresa_id, producto_id=detalle.producto_id,
+                fecha_desde=movimiento.fecha_movimiento, usuario_id=usuario.id,
+            )
 
     nota.estado = 'CONFIRMADO'
     nota.save(update_fields=['estado'])
@@ -201,17 +227,36 @@ def confirmar_transferencia(*, transferencia_id, empresa_id, usuario):
             almacen_id=transferencia.almacen_origen_id, periodo=periodo,
             transferencia=transferencia, transferencia_detalle=detalle,
             tipo_operacion=tipos['TRANSFERENCIA_SALIDA'], fecha_movimiento=transferencia.fecha,
-            prioridad_dia=4, naturaleza='SALIDA', cantidad_base=cantidad, creado_por=usuario,
+            prioridad_dia=4,
+            secuencia=siguiente_secuencia_movimiento(
+                empresa_id=empresa_id,
+                producto_id=detalle.producto_id,
+                fecha_movimiento=transferencia.fecha,
+                prioridad_dia=4,
+            ),
+            naturaleza='SALIDA', cantidad_base=cantidad, creado_por=usuario,
         )
         entrada = Movimiento.objects.create(
             empresa_id=empresa_id, producto_id=detalle.producto_id,
             almacen_id=transferencia.almacen_destino_id, periodo=periodo,
             transferencia=transferencia, transferencia_detalle=detalle,
             tipo_operacion=tipos['TRANSFERENCIA_ENTRADA'], fecha_movimiento=transferencia.fecha,
-            prioridad_dia=2, naturaleza='ENTRADA', cantidad_base=cantidad, creado_por=usuario,
+            prioridad_dia=2,
+            secuencia=siguiente_secuencia_movimiento(
+                empresa_id=empresa_id,
+                producto_id=detalle.producto_id,
+                fecha_movimiento=transferencia.fecha,
+                prioridad_dia=2,
+            ),
+            naturaleza='ENTRADA', cantidad_base=cantidad, creado_por=usuario,
         )
         _crear_valorizacion(salida, cpp, valor, saldo)
         _crear_valorizacion(entrada, cpp, valor, saldo)
+        if hay_movimientos_posteriores(entrada) or hay_movimientos_posteriores(salida):
+            ejecutar_recalculo_producto(
+                empresa_id=empresa_id, producto_id=detalle.producto_id,
+                fecha_desde=transferencia.fecha, usuario_id=usuario.id,
+            )
 
     transferencia.estado = 'CONFIRMADO'
     transferencia.save(update_fields=['estado'])

@@ -26,6 +26,7 @@ import {
 } from '../../api/operaciones';
 import { obtenerPeriodos, type Periodo } from '../../api/periodos';
 import { useAuth } from '../../context/AuthContext';
+import { campoFechaNotaInterna, formularioNotaTrasRespuesta } from '../../utils/notaInternaForm';
 import './OperacionesInternasPage.css';
 
 type TabId = 'saldos' | 'notas';
@@ -128,6 +129,10 @@ export const OperacionesInternasPage = () => {
   const periodosAbiertos = useMemo(
     () => periodos.filter((periodo) => periodo.estado === 'ABIERTO'),
     [periodos],
+  );
+  const periodoNotaSeleccionado = useMemo(
+    () => periodosAbiertos.find((periodo) => String(periodo.id) === notaForm.periodo),
+    [notaForm.periodo, periodosAbiertos],
   );
   const tiposInternos = useMemo(() => tiposOperacion.filter((tipo) =>
     tipo.activo
@@ -315,20 +320,26 @@ export const OperacionesInternasPage = () => {
     }));
   };
 
-  const guardarNota = (event: FormEvent) => {
+  const guardarNota = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const campoFecha = campoFechaNotaInterna(new FormData(event.currentTarget).get('fecha'));
+    if (!campoFecha.fecha) {
+      setError('La fecha debe tener el formato YYYY-MM-DD.');
+      return;
+    }
     if (!notaForm.detalles.length || notaForm.detalles.some((linea) => !linea.producto)) {
       setError('Cada línea debe tener un producto y la nota debe contener al menos una línea.');
       return;
     }
     void (async () => {
+      const formularioEnviado = { ...notaForm, ...campoFecha };
       const payload = {
-        almacen: Number(notaForm.almacen), periodo: Number(notaForm.periodo),
-        tipo_operacion: Number(notaForm.tipo_operacion), fecha: notaForm.fecha,
-        motivo: notaForm.motivo, responsable: notaForm.responsable || null,
-        observacion: notaForm.observacion || null,
-        archivo_sustento: notaForm.archivo_sustento || null,
-        detalles: notaForm.detalles.map((linea) => ({
+        almacen: Number(formularioEnviado.almacen), periodo: Number(formularioEnviado.periodo),
+        tipo_operacion: Number(formularioEnviado.tipo_operacion), fecha: formularioEnviado.fecha,
+        motivo: formularioEnviado.motivo, responsable: formularioEnviado.responsable || null,
+        observacion: formularioEnviado.observacion || null,
+        archivo_sustento: formularioEnviado.archivo_sustento || null,
+        detalles: formularioEnviado.detalles.map((linea) => ({
           ...linea,
           costo_unitario_pen: esAdmin ? linea.costo_unitario_pen || null : null,
           valor_ajuste_pen: esAdmin ? linea.valor_ajuste_pen || null : null,
@@ -338,7 +349,11 @@ export const OperacionesInternasPage = () => {
         if (notaEditando) await updateNotaInterna(notaEditando.id, payload);
         else await createNotaInterna(payload);
       }, notaEditando ? 'Nota interna actualizada.' : 'Nota interna creada.');
-      if (!guardado) return;
+      const formularioConservado = formularioNotaTrasRespuesta(formularioEnviado, guardado);
+      if (formularioConservado) {
+        setNotaForm(formularioConservado);
+        return;
+      }
       cerrarNota(); setNotaEditando(null); setNotaForm(NOTA_INICIAL);
       await refrescar();
     })();
@@ -376,12 +391,9 @@ export const OperacionesInternasPage = () => {
   };
 
   const seleccionarPeriodoNota = (periodoId: string) => {
-    const periodo = periodos.find((item) => String(item.id) === periodoId);
     setNotaForm((actual) => ({
       ...actual,
       periodo: periodoId,
-      fecha: periodo && (!actual.fecha || actual.fecha < periodo.fecha_inicio || actual.fecha > periodo.fecha_fin)
-        ? periodo.fecha_inicio : actual.fecha,
     }));
   };
 
@@ -455,12 +467,12 @@ export const OperacionesInternasPage = () => {
         {notaFormVisible && <aside ref={editorRef} className="oi-editor oi-editor--wide" aria-label={notaEditando ? 'Editar nota interna' : 'Crear nota interna'}>
           <EditorHeader titulo={notaEditando ? `Editar nota #${notaEditando.id}` : 'Nueva nota interna'} detalle={esAdmin ? 'Operaciones estándar y ajustes manuales.' : 'Solo operaciones estándar sin costos manuales.'} onClose={cerrarNota} />
           <form className="oi-form" onSubmit={guardarNota}>
-            <div className="oi-form__three"><Campo label="Período"><select required value={notaForm.periodo} onChange={(e) => seleccionarPeriodoNota(e.target.value)}><option value="">Seleccionar</option>{periodosAbiertos.map((p) => <option key={p.id} value={p.id}>{etiquetaPeriodo(p)}</option>)}</select></Campo><Campo label="Almacén"><select required value={notaForm.almacen} onChange={(e) => setNotaForm({ ...notaForm, almacen: e.target.value })}><option value="">Seleccionar</option>{almacenes.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}</select></Campo><Campo label="Fecha"><input required type="date" value={notaForm.fecha} onChange={(e) => setNotaForm({ ...notaForm, fecha: e.target.value })} /></Campo></div>
-            <Campo label="Tipo de operación"><select required value={notaForm.tipo_operacion} onChange={(e) => setNotaForm({ ...notaForm, tipo_operacion: e.target.value })}><option value="">Seleccionar tipo interno</option>{tiposSeleccionables.map((tipo) => <option key={tipo.id} value={tipo.id}>{tipo.codigo_interno} · {tipo.descripcion}</option>)}</select></Campo>
-            <Campo label="Motivo"><textarea required maxLength={500} rows={2} value={notaForm.motivo} onChange={(e) => setNotaForm({ ...notaForm, motivo: e.target.value })} /></Campo>
-            <div className="oi-form__two"><Campo label="Responsable"><input maxLength={200} value={notaForm.responsable} onChange={(e) => setNotaForm({ ...notaForm, responsable: e.target.value })} /></Campo><Campo label="Sustento" hint="Ruta o referencia documental; este bloque no almacena binarios."><input maxLength={500} value={notaForm.archivo_sustento} onChange={(e) => setNotaForm({ ...notaForm, archivo_sustento: e.target.value })} /></Campo></div>
-            <Campo label="Observación"><textarea rows={2} value={notaForm.observacion} onChange={(e) => setNotaForm({ ...notaForm, observacion: e.target.value })} /></Campo>
-            <div className="oi-lines-header"><div><h3>Detalle de productos</h3><p>{notaForm.detalles.length} {notaForm.detalles.length === 1 ? 'línea' : 'líneas'} en borrador</p></div><button type="button" className="oi-button oi-button--secondary" onClick={() => setNotaForm({ ...notaForm, detalles: [...notaForm.detalles, LINEA_INICIAL()] })}>Agregar línea</button></div>
+            <div className="oi-form__three"><Campo label="Período"><select required value={notaForm.periodo} onChange={(e) => seleccionarPeriodoNota(e.target.value)}><option value="">Seleccionar</option>{periodosAbiertos.map((p) => <option key={p.id} value={p.id}>{etiquetaPeriodo(p)}</option>)}</select></Campo><Campo label="Almacén"><select required value={notaForm.almacen} onChange={(e) => setNotaForm((actual) => ({ ...actual, almacen: e.target.value }))}><option value="">Seleccionar</option>{almacenes.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}</select></Campo><Campo label="Fecha"><input required name="fecha" type="date" min={periodoNotaSeleccionado?.fecha_inicio} max={periodoNotaSeleccionado?.fecha_fin} value={notaForm.fecha} onChange={(e) => setNotaForm((actual) => ({ ...actual, fecha: e.target.value }))} /></Campo></div>
+            <Campo label="Tipo de operación"><select required value={notaForm.tipo_operacion} onChange={(e) => setNotaForm((actual) => ({ ...actual, tipo_operacion: e.target.value }))}><option value="">Seleccionar tipo interno</option>{tiposSeleccionables.map((tipo) => <option key={tipo.id} value={tipo.id}>{tipo.codigo_interno} · {tipo.descripcion}</option>)}</select></Campo>
+            <Campo label="Motivo"><textarea required maxLength={500} rows={2} value={notaForm.motivo} onChange={(e) => setNotaForm((actual) => ({ ...actual, motivo: e.target.value }))} /></Campo>
+            <div className="oi-form__two"><Campo label="Responsable"><input maxLength={200} value={notaForm.responsable} onChange={(e) => setNotaForm((actual) => ({ ...actual, responsable: e.target.value }))} /></Campo><Campo label="Sustento" hint="Ruta o referencia documental; este bloque no almacena binarios."><input maxLength={500} value={notaForm.archivo_sustento} onChange={(e) => setNotaForm((actual) => ({ ...actual, archivo_sustento: e.target.value }))} /></Campo></div>
+            <Campo label="Observación"><textarea rows={2} value={notaForm.observacion} onChange={(e) => setNotaForm((actual) => ({ ...actual, observacion: e.target.value }))} /></Campo>
+            <div className="oi-lines-header"><div><h3>Detalle de productos</h3><p>{notaForm.detalles.length} {notaForm.detalles.length === 1 ? 'línea' : 'líneas'} en borrador</p></div><button type="button" className="oi-button oi-button--secondary" onClick={() => setNotaForm((actual) => ({ ...actual, detalles: [...actual.detalles, LINEA_INICIAL()] }))}>Agregar línea</button></div>
             <div className="oi-lines">
               {notaForm.detalles.map((linea, indice) => <div className={`oi-line ${esAdmin ? '' : 'oi-line--standard'}`} key={indice}>
                 <span className="oi-line__number">{indice + 1}</span>
@@ -468,7 +480,7 @@ export const OperacionesInternasPage = () => {
                 <Campo label="Cantidad base"><input required inputMode="decimal" pattern="^\d+(\.\d{1,8})?$" value={linea.cantidad_base} onChange={(e) => actualizarLinea(indice, { cantidad_base: e.target.value })} /></Campo>
                 {esAdmin && <Campo label="Costo unitario PEN"><input inputMode="decimal" pattern="^-?\d+(\.\d{1,8})?$" value={linea.costo_unitario_pen ?? ''} onChange={(e) => actualizarLinea(indice, { costo_unitario_pen: e.target.value || null })} /></Campo>}
                 {esAdmin && <Campo label="Valor ajuste PEN"><input inputMode="decimal" pattern="^-?\d+(\.\d{1,8})?$" value={linea.valor_ajuste_pen ?? ''} onChange={(e) => actualizarLinea(indice, { valor_ajuste_pen: e.target.value || null })} /></Campo>}
-                <button type="button" className="oi-remove" onClick={() => setNotaForm({ ...notaForm, detalles: notaForm.detalles.filter((_, posicion) => posicion !== indice) })} disabled={notaForm.detalles.length === 1}>Eliminar</button>
+                <button type="button" className="oi-remove" onClick={() => setNotaForm((actual) => ({ ...actual, detalles: actual.detalles.filter((_, posicion) => posicion !== indice) }))} disabled={notaForm.detalles.length === 1}>Eliminar</button>
               </div>)}
             </div>
             <FormActions saving={saving} label={notaEditando ? 'Guardar nota' : 'Crear nota'} onCancel={cerrarNota} />

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { getAlmacenes, getProductos, type Almacen, type Producto } from '../../api/inventario';
 import { confirmarTransferencia, createTransferencia, getTransferencias, type Transferencia } from '../../api/transferencias';
 import { useAuth } from '../../context/AuthContext';
+import { fechaCalendarioFormulario, fechaCalendarioLocal } from '../../utils/date';
 
 interface LineaTransferencia {
   producto: string;
@@ -31,7 +32,7 @@ export const TransferenciasPage: React.FC = () => {
   const [form, setForm] = useState({
     almacen_origen: '',
     almacen_destino: '',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: fechaCalendarioLocal(),
     detalles: [lineaVacia()],
   });
   const [loading, setLoading] = useState(false);
@@ -62,10 +63,11 @@ export const TransferenciasPage: React.FC = () => {
     void cargar();
   }, [cargar]);
 
-  const guardar = async (event: FormEvent) => {
+  const guardar = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setSuccess(null);
+    const fecha = fechaCalendarioFormulario(new FormData(event.currentTarget).get('fecha'));
 
     if (!form.almacen_origen || !form.almacen_destino) {
       setError('Debe seleccionar los almacenes de origen y destino.');
@@ -77,8 +79,8 @@ export const TransferenciasPage: React.FC = () => {
       return;
     }
 
-    if (!form.fecha) {
-      setError('Debe ingresar la fecha de transferencia.');
+    if (!fecha) {
+      setError('Debe ingresar la fecha de transferencia con formato YYYY-MM-DD.');
       return;
     }
 
@@ -96,7 +98,7 @@ export const TransferenciasPage: React.FC = () => {
       await createTransferencia({
         almacen_origen: Number(form.almacen_origen),
         almacen_destino: Number(form.almacen_destino),
-        fecha: form.fecha,
+        fecha,
         detalles: lineasValidas.map((l) => ({
           producto: Number(l.producto),
           cantidad_base: l.cantidad_base,
@@ -105,7 +107,7 @@ export const TransferenciasPage: React.FC = () => {
       setForm({
         almacen_origen: '',
         almacen_destino: '',
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: fechaCalendarioLocal(),
         detalles: [lineaVacia()],
       });
       setSuccess('Transferencia creada exitosamente en estado BORRADOR.');
@@ -198,7 +200,7 @@ export const TransferenciasPage: React.FC = () => {
                 required
                 style={styles.select}
                 value={form.almacen_origen}
-                onChange={(e) => setForm({ ...form, almacen_origen: e.target.value })}
+                onChange={(e) => setForm((actual) => ({ ...actual, almacen_origen: e.target.value }))}
               >
                 <option value="">Seleccione almacén origen</option>
                 {almacenes.map((a) => (
@@ -215,7 +217,7 @@ export const TransferenciasPage: React.FC = () => {
                 required
                 style={styles.select}
                 value={form.almacen_destino}
-                onChange={(e) => setForm({ ...form, almacen_destino: e.target.value })}
+                onChange={(e) => setForm((actual) => ({ ...actual, almacen_destino: e.target.value }))}
               >
                 <option value="">Seleccione almacén destino</option>
                 {almacenes.map((a) => (
@@ -234,10 +236,11 @@ export const TransferenciasPage: React.FC = () => {
               <label style={styles.label}>Fecha de Traslado *</label>
               <input
                 required
+                name="fecha"
                 type="date"
                 style={styles.input}
                 value={form.fecha}
-                onChange={(e) => setForm({ ...form, fecha: e.target.value })}
+                onChange={(e) => setForm((actual) => ({ ...actual, fecha: e.target.value }))}
               />
             </div>
           </div>
@@ -288,10 +291,10 @@ export const TransferenciasPage: React.FC = () => {
                     type="button"
                     style={styles.btnRemove}
                     onClick={() =>
-                      setForm({
-                        ...form,
-                        detalles: form.detalles.filter((_, pos) => pos !== indice),
-                      })
+                      setForm((actual) => ({
+                        ...actual,
+                        detalles: actual.detalles.filter((_, pos) => pos !== indice),
+                      }))
                     }
                     title="Quitar producto"
                   >
@@ -306,7 +309,7 @@ export const TransferenciasPage: React.FC = () => {
             <button
               type="button"
               style={styles.btnSecondary}
-              onClick={() => setForm({ ...form, detalles: [...form.detalles, lineaVacia()] })}
+              onClick={() => setForm((actual) => ({ ...actual, detalles: [...actual.detalles, lineaVacia()] }))}
             >
               + Agregar otro producto
             </button>

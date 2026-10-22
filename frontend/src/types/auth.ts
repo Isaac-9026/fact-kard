@@ -32,5 +32,6 @@ export interface AuthContextType {
   login: (token: string, usuario: Usuario, empresas: EmpresaAsociada[]) => void;
   logout: () => void;
   registrarEmpresaDisponible: (empresa: EmpresaAsociada) => void;
+  refrescarEmpresasDisponibles: () => Promise<EmpresaAsociada[]>;
   seleccionarEmpresa: (empresaId: number) => void;
 }
