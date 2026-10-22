@@ -121,6 +121,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'apps.usuarios.authentication.UsuarioTokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
 }
 
 # DRF Spectacular (Swagger / OpenAPI 3)
@@ -132,4 +136,9 @@ SPECTACULAR_SETTINGS = {
 }
 
 # CORS Configuration
+from corsheaders.defaults import default_headers
+
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=True, cast=bool)
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-empresa-id',
+]
