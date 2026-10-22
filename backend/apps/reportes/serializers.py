@@ -53,3 +53,13 @@ class KardexReporteResponseSerializer(serializers.Serializer):
     filtros = serializers.DictField()
     resumen = KardexResumenSerializer()
     movimientos = KardexFilaSerializer(many=True)
+
+
+class PilotoComparacionSerializer(serializers.Serializer):
+    periodo_id = serializers.IntegerField(min_value=1)
+    producto_id = serializers.IntegerField(min_value=1)
+    cantidad_esperada = serializers.DecimalField(max_digits=20, decimal_places=8)
+    cpp_esperado = serializers.DecimalField(max_digits=20, decimal_places=8)
+    valor_esperado = serializers.DecimalField(max_digits=20, decimal_places=8)
+    tiempo_manual_segundos = serializers.DecimalField(max_digits=20, decimal_places=8)
+    tiempo_factkard_segundos = serializers.DecimalField(max_digits=20, decimal_places=8)

@@ -1,4 +1,5 @@
 import apiClient from './http';
+import { parametrosKardex } from '../utils/kardexFiltros';
 
 export interface KardexFila {
   id: number;
@@ -61,14 +62,7 @@ export interface KardexReporteResponse {
 export const obtenerKardexValorizado = async (
   filtros?: KardexFiltros
 ): Promise<KardexReporteResponse> => {
-  const cleanParams: Record<string, any> = {};
-  if (filtros) {
-    Object.entries(filtros).forEach(([key, val]) => {
-      if (val !== undefined && val !== null && val !== '') {
-        cleanParams[key] = val;
-      }
-    });
-  }
+  const cleanParams = parametrosKardex(filtros);
   const response = await apiClient.get<KardexReporteResponse>('/reportes/kardex/', {
     params: cleanParams,
   });
@@ -81,14 +75,7 @@ export const obtenerKardexValorizado = async (
 export const exportarKardexExcel = async (
   filtros?: KardexFiltros
 ): Promise<void> => {
-  const cleanParams: Record<string, any> = {};
-  if (filtros) {
-    Object.entries(filtros).forEach(([key, val]) => {
-      if (val !== undefined && val !== null && val !== '') {
-        cleanParams[key] = val;
-      }
-    });
-  }
+  const cleanParams = parametrosKardex(filtros);
 
   const response = await apiClient.get('/reportes/kardex/excel/', {
     params: cleanParams,

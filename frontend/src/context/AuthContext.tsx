@@ -1,9 +1,12 @@
-import React, { createContext, useContext, useState, type ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { getMeApi } from '../api/auth';
 import type { Usuario, EmpresaAsociada, EmpresaActiva, AuthContextType } from '../types/auth';
+import { reconciliarEstadoEmpresas } from './authState';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const refrescoEmpresasEnCurso = useRef<Promise<EmpresaAsociada[]> | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
   const [usuario, setUsuario] = useState<Usuario | null>(() => {
     const saved = localStorage.getItem('usuario');
@@ -29,11 +32,60 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const saved = localStorage.getItem('empresa_activa');
     if (!saved) return null;
     try {
-      return JSON.parse(saved) as EmpresaActiva;
+      const activaGuardada = JSON.parse(saved) as EmpresaActiva;
+      const empresasGuardadas = localStorage.getItem('empresas_disponibles');
+      const empresas = empresasGuardadas
+        ? JSON.parse(empresasGuardadas) as EmpresaAsociada[]
+        : [];
+      return reconciliarEstadoEmpresas(empresas, activaGuardada).empresaActiva;
     } catch {
       return null;
     }
   });
+
+  const persistirEstadoEmpresas = useCallback((empresas: EmpresaAsociada[]) => {
+    setEmpresasDisponibles(empresas);
+    localStorage.setItem('empresas_disponibles', JSON.stringify(empresas));
+
+    setEmpresaActiva((actual) => {
+      const siguiente = reconciliarEstadoEmpresas(empresas, actual).empresaActiva;
+      if (siguiente) {
+        localStorage.setItem('empresa_id', String(siguiente.id));
+        localStorage.setItem('empresa_activa', JSON.stringify(siguiente));
+      } else {
+        localStorage.removeItem('empresa_id');
+        localStorage.removeItem('empresa_activa');
+      }
+      return siguiente;
+    });
+  }, []);
+
+  const refrescarEmpresasDisponibles = useCallback(() => {
+    if (refrescoEmpresasEnCurso.current) return refrescoEmpresasEnCurso.current;
+
+    const refresco = getMeApi()
+      .then((data) => {
+        setUsuario(data.usuario);
+        localStorage.setItem('usuario', JSON.stringify(data.usuario));
+        persistirEstadoEmpresas(data.empresas);
+        return data.empresas;
+      })
+      .catch((error: unknown) => {
+        persistirEstadoEmpresas([]);
+        throw error;
+      })
+      .finally(() => {
+        refrescoEmpresasEnCurso.current = null;
+      });
+
+    refrescoEmpresasEnCurso.current = refresco;
+    return refresco;
+  }, [persistirEstadoEmpresas]);
+
+  useEffect(() => {
+    if (!token) return;
+    void refrescarEmpresasDisponibles().catch(() => undefined);
+  }, [refrescarEmpresasDisponibles, token]);
 
   const login = (newToken: string, newUsuario: Usuario, empresas: EmpresaAsociada[]) => {
     setToken(newToken);
@@ -118,6 +170,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         login,
         logout,
         registrarEmpresaDisponible,
+        refrescarEmpresasDisponibles,
         seleccionarEmpresa,
       }}
     >

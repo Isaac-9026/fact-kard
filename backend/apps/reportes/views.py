@@ -8,6 +8,10 @@ from apps.usuarios.permissions import TieneEmpresaActiva
 from apps.reportes.services import consultar_kardex_valorizado
 from apps.reportes.serializers import KardexReporteResponseSerializer
 from apps.reportes.excel_exporter import generar_bytes_excel_kardex
+from apps.reportes.formato131_excel import generar_excel_formato_131
+from apps.reportes.formato131_service import generar_formato_131
+from apps.reportes.piloto_service import comparar_piloto, obtener_valores_factkard
+from apps.reportes.serializers import PilotoComparacionSerializer
 
 
 class KardexReportView(APIView):
@@ -83,3 +87,60 @@ class KardexExcelExportView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
         return response
+
+
+class Formato131View(APIView):
+    authentication_classes = (UsuarioTokenAuthentication,)
+    permission_classes = (TieneEmpresaActiva,)
+
+    def get(self, request):
+        resultado = generar_formato_131(
+            empresa_id=request.empresa_id,
+            periodo_id=request.query_params.get('periodo_id'),
+            establecimiento_id=request.query_params.get('establecimiento_id'),
+            producto_id=request.query_params.get('producto_id'),
+        )
+        return Response(resultado)
+
+
+class Formato131ExcelView(APIView):
+    authentication_classes = (UsuarioTokenAuthentication,)
+    permission_classes = (TieneEmpresaActiva,)
+
+    def get(self, request):
+        periodo_id = request.query_params.get('periodo_id')
+        buffer = generar_excel_formato_131(
+            empresa_id=request.empresa_id,
+            periodo_id=periodo_id,
+            establecimiento_id=request.query_params.get('establecimiento_id'),
+            producto_id=request.query_params.get('producto_id'),
+        )
+        response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="formato_13_1_periodo_{periodo_id}.xlsx"'
+        return response
+
+
+class PilotoComparadorView(APIView):
+    authentication_classes = (UsuarioTokenAuthentication,)
+    permission_classes = (TieneEmpresaActiva,)
+
+    def get(self, request):
+        periodo_id = request.query_params.get('periodo_id')
+        producto_id = request.query_params.get('producto_id')
+        if not periodo_id:
+            return Response({'periodo_id': 'Este parámetro es obligatorio.'}, status=400)
+        if not producto_id:
+            return Response({'producto_id': 'Este parámetro es obligatorio.'}, status=400)
+        return Response(obtener_valores_factkard(
+            empresa_id=request.empresa_id,
+            periodo_id=periodo_id,
+            producto_id=producto_id,
+        ))
+
+    def post(self, request):
+        serializer = PilotoComparacionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(comparar_piloto(
+            empresa_id=request.empresa_id,
+            datos=serializer.validated_data,
+        ))

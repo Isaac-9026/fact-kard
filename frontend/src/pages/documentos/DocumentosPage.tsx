@@ -39,6 +39,7 @@ import type {
   Tercero,
 } from '../../api/inventario';
 import { useAuth } from '../../context/AuthContext';
+import { fechaCalendarioLocal } from '../../utils/date';
 
 interface LineaFormulario {
   tempId: string;
@@ -94,7 +95,7 @@ export const DocumentosPage: React.FC = () => {
   const [formTercero, setFormTercero] = useState<number | ''>('');
   const [formSerie, setFormSerie] = useState('');
   const [formNumero, setFormNumero] = useState('');
-  const [formFechaEmision, setFormFechaEmision] = useState(() => new Date().toISOString().slice(0, 10));
+  const [formFechaEmision, setFormFechaEmision] = useState(fechaCalendarioLocal);
   const [formMoneda, setFormMoneda] = useState<'PEN' | 'USD'>('PEN');
   const [formDocOrigen, setFormDocOrigen] = useState<number | ''>('');
   const [tcResuelto, setTcResuelto] = useState<TipoCambioResolverResult | null>(null);

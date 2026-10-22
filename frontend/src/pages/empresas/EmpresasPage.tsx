@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useState, type FormEvent } from 'react';
 import axios from 'axios';
 import {
   actualizarConfigEmpresa, actualizarEstablecimiento, crearEmpresa, crearEstablecimiento,
-  obtenerConfigEmpresa, obtenerEmpresas, obtenerEstablecimientos, obtenerMonedas,
-  type ConfigEmpresa, type Empresa, type Establecimiento, type Moneda,
+  obtenerConfigEmpresa, obtenerEstablecimientos, obtenerMonedas,
+  type ConfigEmpresa, type Establecimiento, type Moneda,
 } from '../../api/empresas';
 import { useAuth } from '../../context/AuthContext';
 
@@ -17,8 +17,10 @@ const mensajeError = (error: unknown) => {
 };
 
 export const EmpresasPage: React.FC = () => {
-  const { empresaActiva, registrarEmpresaDisponible, seleccionarEmpresa } = useAuth();
-  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const {
+    empresaActiva, empresasDisponibles, registrarEmpresaDisponible,
+    refrescarEmpresasDisponibles, seleccionarEmpresa,
+  } = useAuth();
   const [monedas, setMonedas] = useState<Moneda[]>([]);
   const [establecimientos, setEstablecimientos] = useState<Establecimiento[]>([]);
   const [config, setConfig] = useState<ConfigEmpresa | null>(null);
@@ -48,9 +50,22 @@ export const EmpresasPage: React.FC = () => {
     const cargar = async () => {
       setLoading(true); setError('');
       try {
-        const [listaEmpresas, listaMonedas] = await Promise.all([obtenerEmpresas(), obtenerMonedas()]);
-        setEmpresas(listaEmpresas); setMonedas(listaMonedas); await cargarDatosEmpresa();
+        const [, listaMonedas] = await Promise.all([refrescarEmpresasDisponibles(), obtenerMonedas()]);
+        setMonedas(listaMonedas);
       } catch (err) { setError(mensajeError(err)); } finally { setLoading(false); }
+    };
+    void cargar();
+  }, [refrescarEmpresasDisponibles]);
+
+  useEffect(() => {
+    if (!empresaActiva) {
+      setEstablecimientos([]);
+      setConfig(null);
+      return;
+    }
+    const cargar = async () => {
+      setError('');
+      try { await cargarDatosEmpresa(); } catch (err) { setError(mensajeError(err)); }
     };
     void cargar();
   }, [cargarDatosEmpresa]);
@@ -64,7 +79,6 @@ export const EmpresasPage: React.FC = () => {
     event.preventDefault();
     void ejecutar(async () => {
       const nueva = await crearEmpresa(empresaForm);
-      setEmpresas((actuales) => [...actuales, nueva]);
       registrarEmpresaDisponible(nueva);
       setEmpresaForm({ ruc: '', razon_social: '', nombre_comercial: '', direccion: '', moneda_base_codigo: 'PEN' });
       setMostrarEmpresa(false);
@@ -108,7 +122,7 @@ export const EmpresasPage: React.FC = () => {
       <Campo label="Moneda base"><select style={styles.input} value={empresaForm.moneda_base_codigo} onChange={(e) => setEmpresaForm({ ...empresaForm, moneda_base_codigo: e.target.value })}>{monedas.map((m) => <option key={m.codigo} value={m.codigo}>{m.codigo} — {m.nombre}</option>)}</select></Campo>
     </div><button disabled={saving} style={styles.primaryButton}>Crear empresa</button></form>}
 
-    <section style={styles.card}><h3 style={styles.cardTitle}>Empresas disponibles ({empresas.length})</h3>{empresas.length === 0 ? <p style={styles.muted}>No tienes empresas asignadas.</p> : <div style={styles.tableWrap}><table style={styles.table}><thead><tr><th style={styles.th}>RUC</th><th style={styles.th}>Razón social</th><th style={styles.th}>Rol</th><th style={styles.th}>Estado</th><th style={styles.th}></th></tr></thead><tbody>{empresas.map((e) => <tr key={e.id}><td style={styles.td}>{e.ruc}</td><td style={styles.td}>{e.razon_social}</td><td style={styles.td}>{e.rol}</td><td style={styles.td}>{e.estado}</td><td style={styles.td}><button type="button" style={styles.secondaryButton} onClick={() => seleccionarEmpresa(e.id)} disabled={empresaActiva?.id === e.id}>{empresaActiva?.id === e.id ? 'Activa' : 'Seleccionar'}</button></td></tr>)}</tbody></table></div>}</section>
+    <section style={styles.card}><h3 style={styles.cardTitle}>Empresas disponibles ({empresasDisponibles.length})</h3>{empresasDisponibles.length === 0 ? <p style={styles.muted}>No tienes empresas asignadas.</p> : <div style={styles.tableWrap}><table style={styles.table}><thead><tr><th style={styles.th}>RUC</th><th style={styles.th}>Razón social</th><th style={styles.th}>Rol</th><th style={styles.th}>Estado</th><th style={styles.th}></th></tr></thead><tbody>{empresasDisponibles.map((e) => <tr key={e.id}><td style={styles.td}>{e.ruc}</td><td style={styles.td}>{e.razon_social}</td><td style={styles.td}>{e.rol}</td><td style={styles.td}>ACTIVA</td><td style={styles.td}><button type="button" style={styles.secondaryButton} onClick={() => seleccionarEmpresa(e.id)} disabled={empresaActiva?.id === e.id}>{empresaActiva?.id === e.id ? 'Activa' : 'Seleccionar'}</button></td></tr>)}</tbody></table></div>}</section>
 
     {!empresaActiva ? <div style={styles.notice}>Selecciona una empresa activa para administrar su configuración y establecimientos.</div> : <>
       <div style={styles.activeBanner}><strong>Empresa activa:</strong> {empresaActiva.razon_social} · RUC {empresaActiva.ruc} · Rol {empresaActiva.rol}</div>

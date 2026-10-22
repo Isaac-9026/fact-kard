@@ -868,6 +868,79 @@ class OperacionesInternasApiTest(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['estado'], 'BORRADOR')
 
+    def test_nota_interna_conserva_fecha_ingresada_dentro_del_periodo(self):
+        from datetime import date
+
+        periodo_octubre = Periodo.objects.create(
+            empresa=self.empresa_a,
+            anio=2026,
+            mes=10,
+            orden=202610,
+            fecha_inicio=date(2026, 10, 1),
+            fecha_fin=date(2026, 10, 31),
+            estado='ABIERTO',
+        )
+        response = self.client.post(
+            reverse('nota-interna-list-create'),
+            self.nota_payload(
+                periodo=periodo_octubre.id,
+                fecha='2026-10-21',
+                detalles=[{
+                    'producto': self.producto_a.id,
+                    'cantidad_base': '5.00000000',
+                    'costo_unitario_pen': None,
+                    'valor_ajuste_pen': None,
+                }],
+            ),
+            format='json',
+            **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        nota = NotaInterna.objects.get(pk=response.data['id'])
+        self.assertEqual(nota.fecha, date(2026, 10, 21))
+        self.assertNotEqual(nota.fecha, date(2026, 10, 1))
+
+    def test_transferencia_conserva_fecha_calendario_ingresada(self):
+        from datetime import date
+        from apps.inventario.models import Transferencia
+
+        periodo_octubre = Periodo.objects.create(
+            empresa=self.empresa_a,
+            anio=2026,
+            mes=10,
+            orden=202610,
+            fecha_inicio=date(2026, 10, 1),
+            fecha_fin=date(2026, 10, 31),
+            estado='ABIERTO',
+        )
+        almacen_destino = Almacen.objects.create(
+            empresa=self.empresa_a,
+            establecimiento=self.almacen_a.establecimiento,
+            codigo='A02',
+            nombre='ALMACÉN DESTINO',
+        )
+
+        response = self.client.post(
+            reverse('transferencia-list-create'),
+            {
+                'almacen_origen': self.almacen_a.id,
+                'almacen_destino': almacen_destino.id,
+                'fecha': '2026-10-21',
+                'detalles': [{
+                    'producto': self.producto_a.id,
+                    'cantidad_base': '10.00000000',
+                }],
+            },
+            format='json',
+            **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['fecha'], '2026-10-21')
+        transferencia = Transferencia.objects.get(pk=response.data['id'])
+        self.assertEqual(transferencia.fecha, date(2026, 10, 21))
+
     def test_nota_interna_crea_multiples_detalles(self):
         detalles = [
             {'producto': self.producto_a.id, 'cantidad_base': '2.00000000'},
