@@ -2,15 +2,47 @@ import React, { useEffect, useState } from 'react';
 import { obtenerEstablecimientos, type Establecimiento } from '../../api/empresas';
 import { getProductos, type Producto } from '../../api/inventario';
 import { obtenerPeriodos, type Periodo } from '../../api/periodos';
-import { compararPiloto, descargarFormato131, obtenerFormato131, obtenerPiloto, type Formato131Response, type PilotoReal, type PilotoResultado } from '../../api/formato131';
+import {
+  compararPiloto,
+  descargarFormato131,
+  obtenerFormato131,
+  obtenerPiloto,
+  type Formato131Response,
+  type PilotoReal,
+  type PilotoResultado,
+} from '../../api/formato131';
 import { useAuth } from '../../context/AuthContext';
+import {
+  FileCheck2,
+  FileDown,
+  Search,
+  Scale,
+  Gauge,
+  RotateCcw,
+  AlertCircle,
+  CheckCircle2,
+  Inbox,
+  Loader2,
+  ShieldCheck,
+  TrendingDown,
+  Info,
+} from 'lucide-react';
+import { PageHeader } from '../../components/ui/page-header';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Select } from '../../components/ui/select';
+import { Label } from '../../components/ui/label';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
 
 const apiError = (error: unknown) => {
   const data = (error as { response?: { data?: Record<string, string | string[]> | string } }).response?.data;
-  if (!data || typeof data === 'string') return 'No se pudo completar la operación. Intenta nuevamente.';
+  if (!data || typeof data === 'string') return 'No se pudo completar la operación. Intente nuevamente.';
   return Object.values(data).flat().join(' ');
 };
-const n = (value?: string | null) => value ?? '—';
+
+const n = (value?: string | null) => (value !== null && value !== undefined && value !== '' ? value : '—');
 
 export const Formato131Page: React.FC = () => {
   const { empresaActiva } = useAuth();
@@ -24,62 +56,675 @@ export const Formato131Page: React.FC = () => {
   const [reporte, setReporte] = useState<Formato131Response | null>(null);
   const [real, setReal] = useState<PilotoReal | null>(null);
   const [resultado, setResultado] = useState<PilotoResultado | null>(null);
-  const [form, setForm] = useState({ cantidad_esperada: '', cpp_esperado: '', valor_esperado: '', tiempo_manual_segundos: '', tiempo_factkard_segundos: '' });
+  const [form, setForm] = useState({
+    cantidad_esperada: '',
+    cpp_esperado: '',
+    valor_esperado: '',
+    tiempo_manual_segundos: '',
+    tiempo_factkard_segundos: '',
+  });
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let active = true;
-    Promise.all([obtenerPeriodos(), obtenerEstablecimientos(), getProductos()]).then(([p, e, pr]) => {
-      if (!active) return;
-      setPeriodos(p); setEstablecimientos(e); setProductos(pr);
-      setPeriodo(p[0] ? String(p[0].id) : ''); setProducto(pr[0] ? String(pr[0].id) : '');
-    }).catch(e => active && setError(apiError(e)));
-    return () => { active = false; };
+    Promise.all([obtenerPeriodos(), obtenerEstablecimientos(), getProductos()])
+      .then(([p, e, pr]) => {
+        if (!active) return;
+        setPeriodos(p);
+        setEstablecimientos(e);
+        setProductos(pr);
+        setPeriodo(p[0] ? String(p[0].id) : '');
+        setProducto(pr[0] ? String(pr[0].id) : '');
+      })
+      .catch((e) => active && setError(apiError(e)));
+    return () => {
+      active = false;
+    };
   }, [empresaActiva?.id]);
 
   const consultar = async () => {
-    if (!periodo) return setError('Selecciona un período para generar el reporte.');
-    setBusy(true); setError('');
-    try { setReporte(await obtenerFormato131({ periodo_id: periodo, establecimiento_id: establecimiento, producto_id: producto })); }
-    catch (e) { setError(apiError(e)); } finally { setBusy(false); }
+    if (!periodo) return setError('Selecciona un período contable para generar el reporte.');
+    setBusy(true);
+    setError('');
+    try {
+      setReporte(
+        await obtenerFormato131({
+          periodo_id: periodo,
+          establecimiento_id: establecimiento || undefined,
+          producto_id: producto || undefined,
+        })
+      );
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const descargarExcel = async () => {
+    if (!periodo) return setError('Selecciona un período contable.');
+    setExporting(true);
+    setError('');
+    try {
+      await descargarFormato131({
+        periodo_id: periodo,
+        establecimiento_id: establecimiento || undefined,
+        producto_id: producto || undefined,
+      });
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const consultarReal = async () => {
-    if (!periodo || !producto) return setError('Selecciona período y producto.');
-    setBusy(true); setError(''); setResultado(null);
-    try { setReal(await obtenerPiloto(periodo, producto)); } catch (e) { setError(apiError(e)); } finally { setBusy(false); }
+    if (!periodo || !producto) return setError('Seleccione un período y un producto.');
+    setBusy(true);
+    setError('');
+    setResultado(null);
+    try {
+      setReal(await obtenerPiloto(periodo, producto));
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setBusy(false);
+    }
   };
+
   const comparar = async (event: React.FormEvent) => {
-    event.preventDefault(); setBusy(true); setError('');
-    try { const data = await compararPiloto({ periodo_id: periodo, producto_id: producto, ...form }); setReal(data); setResultado(data); }
-    catch (e) { setError(apiError(e)); } finally { setBusy(false); }
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const data = await compararPiloto({
+        periodo_id: periodo,
+        producto_id: producto,
+        ...form,
+      });
+      setReal(data);
+      setResultado(data);
+    } catch (e) {
+      setError(apiError(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const selectorPeriodo = <label style={s.field}>Período<select style={s.input} value={periodo} onChange={e => setPeriodo(e.target.value)}><option value="">Seleccionar</option>{periodos.map(p => <option key={p.id} value={p.id}>{p.anio}-{String(p.mes).padStart(2, '0')} · {p.estado}</option>)}</select></label>;
-  const selectorProducto = <label style={s.field}>Producto<select style={s.input} value={producto} onChange={e => setProducto(e.target.value)}><option value="">Todos</option>{productos.map(p => <option key={p.id} value={p.id}>{p.codigo_interno} · {p.descripcion}</option>)}</select></label>;
+  return (
+    <div className="space-y-6">
+      {/* 1. Encabezado principal */}
+      <PageHeader
+        title="Formato 13.1 SUNAT y Conciliación Paralela"
+        description={`Registro de Inventario Permanente Valorizado (Res. SUNAT 234-2006) · ${
+          empresaActiva?.razon_social ?? 'Empresa Activa'
+        }${empresaActiva?.ruc ? ` · RUC: ${empresaActiva.ruc}` : ''}`}
+        icon={FileCheck2}
+        badge={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge variant="success" dot>Normativa SUNAT</Badge>
+            <Badge variant="neutral" className="font-mono text-xs">CPP Móvil</Badge>
+          </div>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="success"
+            size="sm"
+            disabled={!periodo || busy || exporting}
+            onClick={descargarExcel}
+            className="shadow-xs"
+            title="Exportar archivo oficial en formato Excel (.xlsx)"
+          >
+            {exporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+            ) : (
+              <FileDown className="h-3.5 w-3.5 mr-1.5" />
+            )}
+            {exporting ? 'Generando Excel...' : 'Exportar Oficial (.xlsx)'}
+          </Button>
+        }
+      />
 
-  return <main style={s.page}>
-    <header style={s.hero}><div><h1 style={s.title}>Inventario valorizado y conciliación</h1><p style={s.subtitle}>Emisión oficial del Formato 13.1 y validación paralela de {empresaActiva?.razon_social ?? 'la empresa activa'}.</p></div><span style={s.safe}>● Fuente contable protegida</span></header>
-    <nav style={s.tabs} aria-label="Secciones"><button style={tab === 'formato' ? s.active : s.tab} onClick={() => setTab('formato')}>Formato 13.1 Oficial SUNAT</button><button style={tab === 'piloto' ? s.active : s.tab} onClick={() => setTab('piloto')}>Piloto Paralelo y Métrica de Eficiencia</button></nav>
-    {error && <div role="alert" style={s.error}>{error}</div>}
-    {tab === 'formato' ? <>
-      <section style={s.filters}>{selectorPeriodo}<label style={s.field}>Establecimiento<select style={s.input} value={establecimiento} onChange={e => setEstablecimiento(e.target.value)}><option value="">Todos</option>{establecimientos.map(e => <option key={e.id} value={e.id}>{e.codigo_sunat} · {e.nombre}</option>)}</select></label>{selectorProducto}<button style={s.primary} disabled={busy} onClick={consultar}>{busy ? 'Consultando…' : 'Consultar'}</button><button style={s.secondary} disabled={!periodo || busy} onClick={async () => { setBusy(true); setError(''); try { await descargarFormato131({ periodo_id: periodo, establecimiento_id: establecimiento, producto_id: producto }); } catch (e) { setError(apiError(e)); } finally { setBusy(false); } }}>Exportar oficial (.xlsx)</button></section>
-      {!reporte && <div style={s.empty}><strong>Selecciona el alcance del libro</strong><span>El reporte conserva el orden oficial y usa el CPP global.</span></div>}
-      {reporte?.reportes.length === 0 && <div style={s.empty}><strong>Sin movimientos</strong><span>No hay operaciones para los filtros elegidos.</span></div>}
-      {reporte?.reportes.map(r => <section style={s.report} key={`${r.cabecera.establecimiento.id}-${r.cabecera.producto_id}`}>
-        <div style={s.official}><div style={s.lead}><span>{reporte.periodo}</span><strong>{r.cabecera.codigo_existencia}</strong><small>{r.cabecera.descripcion_existencia}</small></div><dl style={s.meta}><div><dt>RUC</dt><dd>{reporte.empresa.ruc}</dd></div><div><dt>Razón social</dt><dd>{reporte.empresa.razon_social}</dd></div><div><dt>Establecimiento</dt><dd>{r.cabecera.establecimiento.codigo_sunat} · {r.cabecera.establecimiento.nombre}</dd></div><div><dt>Tabla 5</dt><dd>{r.cabecera.tipo_existencia.codigo} · {r.cabecera.tipo_existencia.descripcion}</dd></div><div><dt>Tabla 6</dt><dd>{r.cabecera.unidad_medida.codigo} · {r.cabecera.unidad_medida.descripcion}</dd></div><div><dt>Método</dt><dd>{r.cabecera.metodo_valuacion}</dd></div></dl></div>
-        <div style={s.tableWrap}><table style={s.table}><thead><tr><th rowSpan={2}>Fecha</th><th colSpan={3}>Documento</th><th rowSpan={2}>Tipo op.</th><th colSpan={3}>Entradas</th><th colSpan={3}>Salidas</th><th colSpan={3}>Saldo final</th></tr><tr><th>Tipo</th><th>Serie</th><th>Número</th><th>Cantidad</th><th>Costo unit.</th><th>Costo total</th><th>Cantidad</th><th>Costo unit.</th><th>Costo total</th><th>Cantidad</th><th>Costo unit.</th><th>Costo total</th></tr></thead><tbody>{r.movimientos.map(m => <tr key={m.movimiento_id}><td>{m.fecha_emision}</td><td>{m.documento.tipo_documento}</td><td>{m.documento.serie || '—'}</td><td>{m.documento.numero || '—'}</td><td>{m.tipo_operacion || '—'}</td><td>{n(m.entrada?.cantidad)}</td><td>{n(m.entrada?.costo_unitario)}</td><td>{n(m.entrada?.costo_total)}</td><td>{n(m.salida?.cantidad)}</td><td>{n(m.salida?.costo_unitario)}</td><td>{n(m.salida?.costo_total)}</td><td>{n(m.saldo_final.cantidad)}</td><td>{n(m.saldo_final.costo_unitario)}</td><td>{n(m.saldo_final.costo_total)}</td></tr>)}</tbody></table></div>
-        {r.microdiferencia_cierre !== '0.00000000' && <p style={s.note}>Microdiferencia oficial asignada al establecimiento principal: S/ {r.microdiferencia_cierre}</p>}
-      </section>)}
-    </> : <section style={s.pilot}>
-      <form style={s.form} onSubmit={comparar}><h2 style={s.h2}>Contraste con el proceso actual</h2><p style={s.copy}>Captura los valores validados por el contador. El lado FACT-KARD nunca se toma del formulario.</p><div style={s.two}>{selectorPeriodo}{selectorProducto}</div><button type="button" style={s.link} onClick={consultarReal}>Consultar valores FACT-KARD</button><div style={s.formGrid}>{Object.entries({ cantidad_esperada: 'Cantidad esperada', cpp_esperado: 'CPP esperado', valor_esperado: 'Valor esperado', tiempo_manual_segundos: 'Tiempo manual (segundos)', tiempo_factkard_segundos: 'Tiempo FACT-KARD (segundos)' }).map(([key, label]) => <label style={s.field} key={key}>{label}<input required inputMode="decimal" style={s.input} value={form[key as keyof typeof form]} onChange={e => setForm(v => ({ ...v, [key]: e.target.value }))} /></label>)}</div><button style={s.primary} disabled={busy}>{busy ? 'Comparando…' : 'Comparar resultados'}</button></form>
-      <aside style={s.result}><h2 style={s.h2}>Resultado FACT-KARD</h2>{!real && <p style={s.muted}>Consulta un producto para ver los valores oficiales.</p>}{real && <><span style={s.source}>{real.fuente.replaceAll('_', ' ')} · {real.estado_periodo}</span><div style={s.metrics}><div><span>Cantidad</span><strong>{real.cantidad_factkard}</strong></div><div><span>CPP</span><strong>{real.cpp_factkard}</strong></div><div><span>Valor</span><strong>S/ {real.valor_factkard}</strong></div></div></>}{resultado && <div style={resultado.cuadra_100 ? s.match : s.mismatch}><strong>{resultado.cuadra_100 ? 'COINCIDE 100%' : 'REQUIERE CONCILIACIÓN'}</strong><p>Δ Cantidad {resultado.diferencias.cantidad}<br />Δ CPP {resultado.diferencias.cpp}<br />Δ Valor {resultado.diferencias.valor}</p><b>Reducción de tiempo: {resultado.reduccion_porcentaje}%</b></div>}</aside>
-    </section>}
-  </main>;
-};
+      {/* 2. Alertas */}
+      {error && (
+        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex items-start gap-2.5">
+          <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Error al consultar</p>
+            <p className="mt-0.5">{error}</p>
+          </div>
+        </div>
+      )}
 
-const s: Record<string, React.CSSProperties> = {
-  page: { display: 'flex', flexDirection: 'column', gap: 20, color: '#172033' }, hero: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 20 }, title: { margin: 0, fontSize: 30, letterSpacing: '-0.025em' }, subtitle: { margin: '7px 0 0', color: '#5c667a' }, safe: { color: '#286248', background: '#edf7f1', padding: '8px 12px', borderRadius: 999, fontSize: 12 }, tabs: { display: 'flex', gap: 4, borderBottom: '1px solid #dce1e8' }, tab: { border: 0, background: 'transparent', padding: 12, color: '#697386', cursor: 'pointer' }, active: { border: 0, borderBottom: '2px solid #194b7a', background: 'transparent', padding: 12, color: '#143c62', fontWeight: 700, cursor: 'pointer' }, error: { padding: 12, background: '#fff1f0', color: '#8d2c27', borderRadius: 12 }, filters: { display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.3fr auto auto', gap: 12, alignItems: 'end', background: '#f5f7fa', padding: 16, borderRadius: 14 }, field: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, fontWeight: 650, color: '#4b566b' }, input: { minHeight: 40, border: '1px solid #cfd6df', borderRadius: 9, background: '#fff', padding: '8px 10px', color: '#172033' }, primary: { minHeight: 40, border: 0, borderRadius: 9, padding: '0 16px', background: '#174a78', color: '#fff', fontWeight: 700, cursor: 'pointer' }, secondary: { minHeight: 40, border: '1px solid #9db0c2', borderRadius: 9, padding: '0 16px', background: '#fff', color: '#174a78', fontWeight: 700, cursor: 'pointer' }, empty: { minHeight: 200, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 8, color: '#697386', background: '#f8fafc', borderRadius: 14 }, report: { background: '#fff', borderRadius: 14, boxShadow: '0 8px 28px rgba(23,32,51,.08)', overflow: 'hidden' }, official: { display: 'grid', gridTemplateColumns: '240px 1fr', background: '#173d60', color: '#fff' }, lead: { display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, background: '#102f4b' }, meta: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(150px,1fr))', margin: 0, padding: 18, gap: 14 }, tableWrap: { overflowX: 'auto' }, table: { width: '100%', minWidth: 1220, borderCollapse: 'collapse', fontSize: 12, fontVariantNumeric: 'tabular-nums' }, note: { margin: 0, padding: 10, background: '#fff8df', color: '#765c0d' }, pilot: { display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) minmax(320px,.8fr)', gap: 18 }, form: { padding: 24, background: '#fff', borderRadius: 14, boxShadow: '0 8px 28px rgba(23,32,51,.08)' }, result: { padding: 24, borderRadius: 14, background: '#102f4b', color: '#fff' }, h2: { margin: 0, fontSize: 19 }, copy: { color: '#697386' }, two: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }, formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, margin: '18px 0' }, link: { marginTop: 12, border: 0, background: 'transparent', color: '#246292', fontWeight: 700, cursor: 'pointer' }, muted: { color: '#c3d1dd' }, source: { display: 'inline-block', marginTop: 16, padding: 7, background: '#234d70', borderRadius: 7, fontSize: 11 }, metrics: { display: 'grid', gap: 1, marginTop: 18 }, match: { marginTop: 22, padding: 18, borderRadius: 12, background: '#dff4e8', color: '#185b3d' }, mismatch: { marginTop: 22, padding: 18, borderRadius: 12, background: '#fff1cf', color: '#755612' },
+      {/* 3. Navegación de Pestañas */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'formato' | 'piloto')}>
+        <TabsList className="grid grid-cols-2 max-w-md">
+          <TabsTrigger value="formato" className="gap-2">
+            <FileCheck2 className="h-4 w-4" />
+            Formato 13.1 SUNAT
+          </TabsTrigger>
+          <TabsTrigger value="piloto" className="gap-2">
+            <Gauge className="h-4 w-4" />
+            Piloto Paralelo
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ==================================================================== */}
+        {/* PESTAÑA 1: REPORTE REGLAMENTARIO FORMATO 13.1 */}
+        {/* ==================================================================== */}
+        <TabsContent value="formato" className="space-y-5 pt-2">
+          {/* Barra de Filtros */}
+          <Card>
+            <CardHeader className="pb-3 border-b border-slate-100">
+              <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                <Search className="h-4 w-4 text-indigo-600" />
+                Parámetros de Emisión Oficial
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Genere el reporte reglamentario por período contable, establecimiento físico y producto
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                <div className="space-y-1.5">
+                  <Label htmlFor="f131-periodo">Período Contable</Label>
+                  <Select
+                    id="f131-periodo"
+                    value={periodo}
+                    onChange={(e) => setPeriodo(e.target.value)}
+                  >
+                    <option value="">Seleccione un período...</option>
+                    {periodos.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.anio}-{String(p.mes).padStart(2, '0')} · {p.estado}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="f131-establecimiento">Establecimiento SUNAT</Label>
+                  <Select
+                    id="f131-establecimiento"
+                    value={establecimiento}
+                    onChange={(e) => setEstablecimiento(e.target.value)}
+                  >
+                    <option value="">Todos los establecimientos</option>
+                    {establecimientos.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.codigo_sunat} · {e.nombre}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="f131-producto">Producto / Existencia</Label>
+                  <Select
+                    id="f131-producto"
+                    value={producto}
+                    onChange={(e) => setProducto(e.target.value)}
+                  >
+                    <option value="">Todos los productos</option>
+                    {productos.map((pr) => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.codigo_interno} · {pr.descripcion}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={busy || !periodo}
+                    onClick={consultar}
+                    className="w-full"
+                  >
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Search className="h-4 w-4 mr-1.5" />}
+                    {busy ? 'Consultando...' : 'Consultar Libro'}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Estado Inicial o Vacío */}
+          {!reporte && (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 py-16 text-center">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
+                <FileCheck2 className="h-6 w-6 text-slate-500" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">Seleccione los filtros para generar el reporte</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                El Formato 13.1 reglamentario se genera con encabezados oficiales de Tablas SUNAT (5, 6, 10, 12) y cálculo de CPP móvil.
+              </p>
+            </div>
+          )}
+
+          {reporte && reporte.reportes.length === 0 && (
+            <div className="rounded-xl border border-slate-200 bg-white py-14 text-center">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
+                <Inbox className="h-6 w-6" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">Sin movimientos registrados</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                No existen operaciones para el período y filtros seleccionados.
+              </p>
+            </div>
+          )}
+
+          {/* Listado de reportes oficiales por existencia */}
+          {reporte?.reportes.map((r) => (
+            <Card key={`${r.cabecera.establecimiento.id}-${r.cabecera.producto_id}`} className="overflow-hidden">
+              {/* Recuadro Oficial de Datos de Cabecera SUNAT */}
+              <div className="bg-slate-900 text-white p-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 mb-3 border-b border-slate-800 gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="bg-indigo-950/80 text-indigo-200 border-indigo-700 text-xs">
+                        FORMATO 13.1 SUNAT
+                      </Badge>
+                      <span className="font-mono text-xs text-slate-300">Período: {reporte.periodo}</span>
+                    </div>
+                    <h3 className="text-base font-bold text-white mt-1">
+                      <span className="font-mono text-indigo-400 mr-2">{r.cabecera.codigo_existencia}</span>
+                      {r.cabecera.descripcion_existencia}
+                    </h3>
+                  </div>
+
+                  {reporte.fuente_cierre && (
+                    <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
+                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                      <span className="text-slate-300">Cierre v{reporte.fuente_cierre.version} · Hash:</span>
+                      <code className="font-mono text-[11px] text-emerald-300">
+                        {reporte.fuente_cierre.hash.slice(0, 12)}…
+                      </code>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">RUC:</span>
+                    <span className="font-mono font-semibold text-slate-200">{reporte.empresa.ruc}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Razón Social:</span>
+                    <span className="text-slate-200 truncate block" title={reporte.empresa.razon_social}>
+                      {reporte.empresa.razon_social}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Establecimiento:</span>
+                    <span className="text-slate-200 font-mono">
+                      {r.cabecera.establecimiento.codigo_sunat} · {r.cabecera.establecimiento.nombre}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Tabla 5 (Existencia):</span>
+                    <span className="text-slate-200">
+                      {r.cabecera.tipo_existencia.codigo} · {r.cabecera.tipo_existencia.descripcion}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Tabla 6 (Unidad):</span>
+                    <span className="text-slate-200">
+                      {r.cabecera.unidad_medida.codigo} · {r.cabecera.unidad_medida.descripcion}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Método Valuación:</span>
+                    <span className="text-emerald-400 font-semibold">{r.cabecera.metodo_valuacion}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla Oficial de Movimientos SUNAT */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-center border-b border-slate-200">
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 w-24">Fecha</th>
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-slate-200 bg-slate-50">
+                        Documento de Traslado / Comprobante
+                      </th>
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 w-24">Tipo Op.</th>
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-emerald-100 bg-emerald-50/80 text-emerald-900">
+                        Entradas
+                      </th>
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-amber-100 bg-amber-50/80 text-amber-900">
+                        Salidas
+                      </th>
+                      <th colSpan={3} className="py-1.5 px-3 bg-indigo-50/80 text-indigo-950">
+                        Saldo Final
+                      </th>
+                    </tr>
+                    <tr className="bg-slate-50 text-[10px] font-semibold text-slate-600 border-b border-slate-200">
+                      {/* Documento */}
+                      <th className="py-1.5 px-2 text-center">Tipo</th>
+                      <th className="py-1.5 px-2 text-center">Serie</th>
+                      <th className="py-1.5 px-2 text-center border-r border-slate-200">Número</th>
+
+                      {/* Entradas */}
+                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/30">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/30">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/30 border-r border-emerald-100">Costo Total</th>
+
+                      {/* Salidas */}
+                      <th className="py-1.5 px-2.5 text-right bg-amber-50/30">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right bg-amber-50/30">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right bg-amber-50/30 border-r border-amber-100">Costo Total</th>
+
+                      {/* Saldo Final */}
+                      <th className="py-1.5 px-2.5 text-right bg-indigo-50/30">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right bg-indigo-50/30">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right bg-indigo-50/30 font-bold text-slate-900">Costo Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono tabular-nums text-[11px]">
+                    {r.movimientos.map((m) => (
+                      <tr key={m.movimiento_id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-2 px-3 text-center text-slate-700 whitespace-nowrap">{m.fecha_emision}</td>
+                        <td className="py-2 px-2 text-center">{m.documento.tipo_documento}</td>
+                        <td className="py-2 px-2 text-center text-slate-600">{m.documento.serie || '—'}</td>
+                        <td className="py-2 px-2 text-center border-r border-slate-200 text-slate-800">{m.documento.numero || '—'}</td>
+                        <td className="py-2 px-3 text-center border-r border-slate-200 font-sans font-medium text-slate-700">
+                          {m.tipo_operacion || '—'}
+                        </td>
+
+                        {/* Entradas */}
+                        <td className="py-2 px-2.5 text-right bg-emerald-50/10 text-emerald-800">{n(m.entrada?.cantidad)}</td>
+                        <td className="py-2 px-2.5 text-right bg-emerald-50/10 text-slate-600">{n(m.entrada?.costo_unitario)}</td>
+                        <td className="py-2 px-2.5 text-right bg-emerald-50/10 border-r border-emerald-100 font-semibold text-emerald-800">
+                          {n(m.entrada?.costo_total)}
+                        </td>
+
+                        {/* Salidas */}
+                        <td className="py-2 px-2.5 text-right bg-amber-50/10 text-rose-800">{n(m.salida?.cantidad)}</td>
+                        <td className="py-2 px-2.5 text-right bg-amber-50/10 text-slate-600">{n(m.salida?.costo_unitario)}</td>
+                        <td className="py-2 px-2.5 text-right bg-amber-50/10 border-r border-amber-100 font-semibold text-rose-800">
+                          {n(m.salida?.costo_total)}
+                        </td>
+
+                        {/* Saldo Final */}
+                        <td className="py-2 px-2.5 text-right bg-indigo-50/10 font-medium text-slate-900">{n(m.saldo_final.cantidad)}</td>
+                        <td className="py-2 px-2.5 text-right bg-indigo-50/10 text-slate-700">{n(m.saldo_final.costo_unitario)}</td>
+                        <td className="py-2 px-2.5 text-right bg-indigo-50/10 font-bold text-slate-950">
+                          {n(m.saldo_final.costo_total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Microdiferencia de cierre si aplica */}
+              {r.microdiferencia_cierre !== '0.00000000' && (
+                <div className="bg-amber-50/80 border-t border-amber-200 px-4 py-2 text-xs text-amber-800 flex items-center gap-2">
+                  <Info className="h-4 w-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>Microdiferencia oficial asignada al establecimiento principal:</strong> S/{' '}
+                    <code className="font-mono">{r.microdiferencia_cierre}</code> (absorbida por redondeo contable).
+                  </span>
+                </div>
+              )}
+            </Card>
+          ))}
+        </TabsContent>
+
+        {/* ==================================================================== */}
+        {/* PESTAÑA 2: LABORATORIO DE PILOTO PARALELO */}
+        {/* ==================================================================== */}
+        <TabsContent value="piloto" className="pt-2">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Formulario de Contraste */}
+            <Card className="lg:col-span-7">
+              <CardHeader className="pb-3 border-b border-slate-100">
+                <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <Scale className="h-4 w-4 text-indigo-600" />
+                  Contraste con el Proceso Actual / Sistema Anterior
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Ingrese los valores calculados manualmente por el contador o extraídos del ERP previo para validar la exactitud de FACT-KARD.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <form onSubmit={comparar} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-periodo">Período a Evaluar</Label>
+                      <Select
+                        id="piloto-periodo"
+                        value={periodo}
+                        onChange={(e) => setPeriodo(e.target.value)}
+                      >
+                        <option value="">Seleccione...</option>
+                        {periodos.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.anio}-{String(p.mes).padStart(2, '0')} · {p.estado}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-producto">Producto de Muestra</Label>
+                      <Select
+                        id="piloto-producto"
+                        value={producto}
+                        onChange={(e) => setProducto(e.target.value)}
+                      >
+                        <option value="">Seleccione...</option>
+                        {productos.map((pr) => (
+                          <option key={pr.id} value={pr.id}>
+                            {pr.codigo_interno} · {pr.descripcion}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={consultarReal}
+                      disabled={busy || !periodo || !producto}
+                      className="text-xs text-indigo-600 hover:text-indigo-700"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Consultar valores FACT-KARD en tiempo real
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-cant">Cantidad Esperada</Label>
+                      <Input
+                        id="piloto-cant"
+                        required
+                        inputMode="decimal"
+                        value={form.cantidad_esperada}
+                        onChange={(e) => setForm((v) => ({ ...v, cantidad_esperada: e.target.value }))}
+                        placeholder="Ej. 100.00"
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-cpp">CPP Esperado (PEN)</Label>
+                      <Input
+                        id="piloto-cpp"
+                        required
+                        inputMode="decimal"
+                        value={form.cpp_esperado}
+                        onChange={(e) => setForm((v) => ({ ...v, cpp_esperado: e.target.value }))}
+                        placeholder="Ej. 12.500000"
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-val">Valor Esperado (S/)</Label>
+                      <Input
+                        id="piloto-val"
+                        required
+                        inputMode="decimal"
+                        value={form.valor_esperado}
+                        onChange={(e) => setForm((v) => ({ ...v, valor_esperado: e.target.value }))}
+                        placeholder="Ej. 1250.00"
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-t-man">Tiempo Manual Previo (segundos)</Label>
+                      <Input
+                        id="piloto-t-man"
+                        required
+                        inputMode="numeric"
+                        value={form.tiempo_manual_segundos}
+                        onChange={(e) => setForm((v) => ({ ...v, tiempo_manual_segundos: e.target.value }))}
+                        placeholder="Ej. 1800 (30 min)"
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="piloto-t-fk">Tiempo FACT-KARD (segundos)</Label>
+                      <Input
+                        id="piloto-t-fk"
+                        required
+                        inputMode="numeric"
+                        value={form.tiempo_factkard_segundos}
+                        onChange={(e) => setForm((v) => ({ ...v, tiempo_factkard_segundos: e.target.value }))}
+                        placeholder="Ej. 5 (5 seg)"
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={busy}
+                      className="w-full"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Gauge className="h-4 w-4 mr-1.5" />}
+                      {busy ? 'Comparando...' : 'Comparar Resultados y Medir Eficiencia'}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            {/* Panel de Resultados y Métrica de Eficiencia */}
+            <div className="lg:col-span-5 space-y-4">
+              <Card className="bg-slate-900 text-white border-slate-800">
+                <CardHeader className="pb-3 border-b border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                      Resultado Oficial FACT-KARD
+                    </CardTitle>
+                    {real && (
+                      <Badge variant="outline" className="bg-slate-800 text-slate-300 border-slate-700 text-xs">
+                        {real.fuente.replaceAll('_', ' ')}
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  {!real ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      Seleccione período y producto para contrastar los valores oficiales del motor contable.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                          <span className="text-[11px] text-slate-400 block mb-1">Cantidad</span>
+                          <span className="font-mono text-base font-bold text-white tabular-nums">
+                            {real.cantidad_factkard}
+                          </span>
+                        </div>
+                        <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                          <span className="text-[11px] text-slate-400 block mb-1">CPP (PEN)</span>
+                          <span className="font-mono text-base font-bold text-indigo-300 tabular-nums">
+                            {real.cpp_factkard}
+                          </span>
+                        </div>
+                        <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                          <span className="text-[11px] text-slate-400 block mb-1">Saldo Valor</span>
+                          <span className="font-mono text-base font-bold text-emerald-400 tabular-nums">
+                            S/ {real.valor_factkard}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Cuadro de Cuadre y Conciliación */}
+                      {resultado && (
+                        <div
+                          className={`rounded-xl p-4 border ${
+                            resultado.cuadra_100
+                              ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
+                              : 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            {resultado.cuadra_100 ? (
+                              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                            ) : (
+                              <AlertCircle className="h-5 w-5 text-amber-400" />
+                            )}
+                            <strong className="text-sm tracking-wide">
+                              {resultado.cuadra_100 ? 'CUADRE CONTABLE PERFECTO (100%)' : 'REQUIERE CONCILIACIÓN'}
+                            </strong>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 font-mono text-xs tabular-nums py-2 border-y border-white/10 my-2">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Δ Cantidad:</span>
+                              <span className="font-bold">{resultado.diferencias.cantidad}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Δ CPP:</span>
+                              <span className="font-bold">{resultado.diferencias.cpp}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Δ Valor:</span>
+                              <span className="font-bold">{resultado.diferencias.valor}</span>
+                            </div>
+                          </div>
+
+                          {/* Métrica de Eficiencia */}
+                          <div className="flex items-center justify-between pt-2">
+                            <span className="text-xs text-slate-300 flex items-center gap-1.5">
+                              <TrendingDown className="h-4 w-4 text-emerald-400" />
+                              Reducción de Tiempo Operativo:
+                            </span>
+                            <span className="font-mono text-lg font-black text-emerald-400 tabular-nums">
+                              {resultado.reduccion_porcentaje}%
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 };
 
 export default Formato131Page;

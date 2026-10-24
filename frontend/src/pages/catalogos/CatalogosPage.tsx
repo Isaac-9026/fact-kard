@@ -1,4 +1,18 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react'
+import {
+  Globe,
+  RotateCcw,
+  DollarSign,
+  FileText,
+  Zap,
+  Boxes,
+  Scale,
+  Coins,
+  Search,
+  Plus,
+  CalendarSearch,
+  AlertCircle,
+} from 'lucide-react'
 import {
   obtenerMonedas,
   obtenerTiposComprobante,
@@ -15,50 +29,58 @@ import {
   type UnidadMedida,
   type TipoCambio,
   type TipoCambioResolverResult,
-} from '../../api/catalogos';
-
-type TabKey = 'tc' | 'comprobantes' | 'operaciones' | 'existencias' | 'unidades' | 'monedas';
+} from '../../api/catalogos'
+import { PageHeader } from '../../components/ui/page-header'
+import { Button } from '../../components/ui/button'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table'
+import { Badge } from '../../components/ui/badge'
+import { Input } from '../../components/ui/input'
+import { Select } from '../../components/ui/select'
+import { Label } from '../../components/ui/label'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
+import { Modal } from '../../components/ui/modal'
 
 export const CatalogosPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabKey>('tc');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<string>('tc')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
 
   // Data states
-  const [monedas, setMonedas] = useState<Moneda[]>([]);
-  const [comprobantes, setComprobantes] = useState<TipoComprobante[]>([]);
-  const [operaciones, setOperaciones] = useState<TipoOperacion[]>([]);
-  const [existencias, setExistencias] = useState<TipoExistencia[]>([]);
-  const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
-  const [tiposCambio, setTiposCambio] = useState<TipoCambio[]>([]);
+  const [monedas, setMonedas] = useState<Moneda[]>([])
+  const [comprobantes, setComprobantes] = useState<TipoComprobante[]>([])
+  const [operaciones, setOperaciones] = useState<TipoOperacion[]>([])
+  const [existencias, setExistencias] = useState<TipoExistencia[]>([])
+  const [unidades, setUnidades] = useState<UnidadMedida[]>([])
+  const [tiposCambio, setTiposCambio] = useState<TipoCambio[]>([])
 
   // Resolver tester state
-  const [testMoneda, setTestMoneda] = useState('USD');
-  const [testFecha, setTestFecha] = useState(() => new Date().toISOString().split('T')[0]);
-  const [resolviendo, setResolviendo] = useState(false);
-  const [resolverError, setResolverError] = useState<string | null>(null);
-  const [resolverResult, setResolverResult] = useState<TipoCambioResolverResult | null>(null);
+  const [testMoneda, setTestMoneda] = useState('USD')
+  const [testFecha, setTestFecha] = useState(() => new Date().toISOString().split('T')[0])
+  const [resolviendo, setResolviendo] = useState(false)
+  const [resolverError, setResolverError] = useState<string | null>(null)
+  const [resolverResult, setResolverResult] = useState<TipoCambioResolverResult | null>(null)
 
   // New TC modal/form state
-  const [modalTcOpen, setModalTcOpen] = useState(false);
+  const [modalTcOpen, setModalTcOpen] = useState(false)
   const [nuevoTc, setNuevoTc] = useState({
     moneda_codigo: 'USD',
     fecha_publicacion: new Date().toISOString().split('T')[0],
     compra: '',
     venta: '',
     fuente: 'SBS',
-  });
-  const [guardandoTc, setGuardandoTc] = useState(false);
+  })
+  const [guardandoTc, setGuardandoTc] = useState(false)
 
   // Initial load
   useEffect(() => {
-    cargarDatos();
-  }, []);
+    cargarDatos()
+  }, [])
 
   const cargarDatos = async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true)
+    setError(null)
     try {
       const [m, c, o, e, u, tc] = await Promise.all([
         obtenerMonedas(),
@@ -67,44 +89,44 @@ export const CatalogosPage: React.FC = () => {
         obtenerTiposExistencia(),
         obtenerUnidadesMedida(),
         obtenerTiposCambio(),
-      ]);
-      setMonedas(m);
-      setComprobantes(c);
-      setOperaciones(o);
-      setExistencias(e);
-      setUnidades(u);
-      setTiposCambio(tc);
+      ])
+      setMonedas(m)
+      setComprobantes(c)
+      setOperaciones(o)
+      setExistencias(e)
+      setUnidades(u)
+      setTiposCambio(tc)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(msg || 'Error al conectar con el servidor de catálogos.');
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(msg || 'Error al conectar con el servidor de catálogos.')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleResolver = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testFecha) return;
-    setResolviendo(true);
-    setResolverError(null);
-    setResolverResult(null);
+    e.preventDefault()
+    if (!testFecha) return
+    setResolviendo(true)
+    setResolverError(null)
+    setResolverResult(null)
     try {
-      const res = await resolverTipoCambio(testMoneda, testFecha);
-      setResolverResult(res);
+      const res = await resolverTipoCambio(testMoneda, testFecha)
+      setResolverResult(res)
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string; fecha?: string[] } } })?.response?.data?.detail ||
-        (err as { response?: { data?: { fecha?: string[] } } })?.response?.data?.fecha?.[0];
-      setResolverError(msg || 'No se encontró un tipo de cambio aplicable para esta fecha.');
+        (err as { response?: { data?: { fecha?: string[] } } })?.response?.data?.fecha?.[0]
+      setResolverError(msg || 'No se encontró un tipo de cambio aplicable para esta fecha.')
     } finally {
-      setResolviendo(false);
+      setResolviendo(false)
     }
-  };
+  }
 
   const handleCrearTc = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGuardandoTc(true);
-    setError(null);
+    e.preventDefault()
+    setGuardandoTc(true)
+    setError(null)
     try {
       const creado = await crearTipoCambio({
         moneda_codigo: nuevoTc.moneda_codigo,
@@ -112,1150 +134,623 @@ export const CatalogosPage: React.FC = () => {
         compra: nuevoTc.compra,
         venta: nuevoTc.venta,
         fuente: nuevoTc.fuente || 'SBS',
-      });
-      setTiposCambio((prev) => [creado, ...prev]);
-      setModalTcOpen(false);
+      })
+      setTiposCambio((prev) => [creado, ...prev])
+      setModalTcOpen(false)
       setNuevoTc({
         moneda_codigo: 'USD',
         fecha_publicacion: new Date().toISOString().split('T')[0],
         compra: '',
         venta: '',
         fuente: 'SBS',
-      });
+      })
     } catch (err: unknown) {
-      const respData = (err as { response?: { data?: Record<string, string[] | string> } })?.response?.data;
-      let msg = 'Error al registrar el tipo de cambio.';
+      const respData = (err as { response?: { data?: Record<string, string[] | string> } })?.response?.data
+      let msg = 'Error al registrar el tipo de cambio.'
       if (respData) {
         msg = Object.entries(respData)
           .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' ') : v}`)
-          .join(' | ');
+          .join(' | ')
       }
-      alert(msg);
+      alert(msg)
     } finally {
-      setGuardandoTc(false);
+      setGuardandoTc(false)
     }
-  };
+  }
 
   // Filtered views
   const filteredComprobantes = useMemo(() => {
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.toLowerCase()
     return comprobantes.filter(
       (c) => c.codigo_sunat.toLowerCase().includes(q) || c.descripcion.toLowerCase().includes(q)
-    );
-  }, [comprobantes, searchTerm]);
+    )
+  }, [comprobantes, searchTerm])
 
   const filteredOperaciones = useMemo(() => {
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.toLowerCase()
     return operaciones.filter(
       (o) =>
         o.codigo_interno.toLowerCase().includes(q) ||
         (o.codigo_sunat && o.codigo_sunat.toLowerCase().includes(q)) ||
         o.descripcion.toLowerCase().includes(q) ||
         o.naturaleza.toLowerCase().includes(q)
-    );
-  }, [operaciones, searchTerm]);
+    )
+  }, [operaciones, searchTerm])
 
   const filteredExistencias = useMemo(() => {
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.toLowerCase()
     return existencias.filter(
       (e) => e.codigo.toLowerCase().includes(q) || e.descripcion.toLowerCase().includes(q)
-    );
-  }, [existencias, searchTerm]);
+    )
+  }, [existencias, searchTerm])
 
   const filteredUnidades = useMemo(() => {
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.toLowerCase()
     return unidades.filter(
       (u) => u.codigo.toLowerCase().includes(q) || u.descripcion.toLowerCase().includes(q)
-    );
-  }, [unidades, searchTerm]);
+    )
+  }, [unidades, searchTerm])
 
   const filteredTc = useMemo(() => {
-    const q = searchTerm.toLowerCase();
+    const q = searchTerm.toLowerCase()
     return tiposCambio.filter(
       (tc) =>
         tc.fecha_publicacion.includes(q) ||
         tc.moneda_codigo.toLowerCase().includes(q) ||
         tc.fuente.toLowerCase().includes(q)
-    );
-  }, [tiposCambio, searchTerm]);
+    )
+  }, [tiposCambio, searchTerm])
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div>
-          <div style={styles.headerTitleRow}>
-            <h1 style={styles.title}>Catálogos SUNAT y Tipo de Cambio</h1>
-            <span style={styles.badgeOfficial}>SUNAT • Tablas Oficiales</span>
-          </div>
-          <p style={styles.subtitle}>
-            Administración centralizada de Tablas 5, 6, 10 y 12 de SUNAT, resolución de Tipo de Cambio SBS/SUNAT y soporte de feriados.
-          </p>
-        </div>
-        <button
-          onClick={cargarDatos}
-          disabled={loading}
-          style={loading ? styles.btnDisabled : styles.btnSecondary}
-          title="Recargar catálogos"
+    <div className="space-y-6">
+      <PageHeader
+        title="Catálogos SUNAT y Tipo de Cambio"
+        description="Administración centralizada de Tablas 5, 6, 10 y 12 de SUNAT, resolución de Tipo de Cambio SBS/SUNAT y soporte de feriados bancarios."
+        icon={<Globe className="h-5 w-5" />}
+        badge={<Badge variant="info">SUNAT • Tablas Oficiales</Badge>}
+        actions={
+          <Button variant="outline" size="sm" onClick={cargarDatos} isLoading={loading}>
+            <RotateCcw className="h-4 w-4 mr-1.5" /> Actualizar
+          </Button>
+        }
+      />
+
+      {error && (
+        <div
+          role="alert"
+          className="flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-700 animate-in fade-in"
         >
-          {loading ? 'Cargando...' : '🔄 Actualizar'}
-        </button>
-      </div>
-
-      {error && <div style={styles.errorBanner}>{error}</div>}
-
-      {/* Tabs navigation */}
-      <div style={styles.tabNav}>
-        <button
-          onClick={() => { setActiveTab('tc'); setSearchTerm(''); }}
-          style={activeTab === 'tc' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          💵 Tipo de Cambio SBS ({tiposCambio.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('comprobantes'); setSearchTerm(''); }}
-          style={activeTab === 'comprobantes' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          📄 Comprobantes ({comprobantes.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('operaciones'); setSearchTerm(''); }}
-          style={activeTab === 'operaciones' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          ⚡ Operaciones ({operaciones.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('existencias'); setSearchTerm(''); }}
-          style={activeTab === 'existencias' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          📦 Existencias ({existencias.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('unidades'); setSearchTerm(''); }}
-          style={activeTab === 'unidades' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          ⚖️ Unidades de Medida ({unidades.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab('monedas'); setSearchTerm(''); }}
-          style={activeTab === 'monedas' ? styles.tabBtnActive : styles.tabBtn}
-        >
-          🪙 Monedas ({monedas.length})
-        </button>
-      </div>
-
-      {/* Main Tab Content */}
-      {activeTab === 'tc' && (
-        <div style={styles.tcSection}>
-          {/* Official Resolver Tester */}
-          <div style={styles.resolverCard}>
-            <div style={styles.resolverCardHeader}>
-              <span style={{ fontSize: '1.5rem' }}>🎯</span>
-              <div>
-                <h2 style={styles.resolverTitle}>Probador de Tipo de Cambio Contable Oficial</h2>
-                <p style={styles.resolverSubtitle}>
-                  Aplica la regla oficial: busca la fecha exacta o, en fines de semana y feriados bancarios, hereda el último tipo de cambio publicado previo.
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleResolver} style={styles.resolverForm}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Moneda</label>
-                <select
-                  value={testMoneda}
-                  onChange={(e) => setTestMoneda(e.target.value)}
-                  style={styles.select}
-                >
-                  <option value="USD">USD - Dólares Americanos</option>
-                  <option value="PEN">PEN - Soles</option>
-                </select>
-              </div>
-
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Fecha a Consultar (Documento)</label>
-                <input
-                  type="date"
-                  value={testFecha}
-                  onChange={(e) => setTestFecha(e.target.value)}
-                  style={styles.input}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={resolviendo}
-                style={resolviendo ? styles.btnDisabled : styles.btnPrimary}
-              >
-                {resolviendo ? 'Consultando...' : '🔍 Resolver Tipo de Cambio'}
-              </button>
-            </form>
-
-            {resolverError && <div style={styles.resolverError}>{resolverError}</div>}
-
-            {resolverResult && (
-              <div style={styles.resolverResultBox}>
-                <div style={styles.resultHeader}>
-                  <span
-                    style={
-                      resolverResult.es_fecha_exacta
-                        ? styles.pillExact
-                        : styles.pillFallback
-                    }
-                  >
-                    {resolverResult.es_fecha_exacta
-                      ? '✓ Fecha Exacta Publicada'
-                      : '⚠️ Fin de Semana / Feriado (Último TC publicado)'}
-                  </span>
-                  <span style={styles.sourceTag}>Fuente: {resolverResult.fuente}</span>
-                </div>
-
-                <div style={styles.resultGrid}>
-                  <div>
-                    <span style={styles.resultLabel}>Fecha Consultada:</span>
-                    <strong style={styles.resultValue}>{resolverResult.fecha_consultada}</strong>
-                  </div>
-                  <div>
-                    <span style={styles.resultLabel}>Fecha Publicación Oficial:</span>
-                    <strong style={styles.resultValue}>{resolverResult.fecha_publicacion}</strong>
-                  </div>
-                  <div style={styles.tcMontoBox}>
-                    <span style={styles.resultLabel}>Compra:</span>
-                    <strong style={styles.tcValorCompra}>
-                      S/ {resolverResult.compra}
-                    </strong>
-                  </div>
-                  <div style={styles.tcMontoBox}>
-                    <span style={styles.resultLabel}>Venta:</span>
-                    <strong style={styles.tcValorVenta}>
-                      S/ {resolverResult.venta}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Exchange Rates List Header & Action */}
-          <div style={styles.listHeaderRow}>
-            <div style={styles.searchBox}>
-              <span style={styles.searchIcon}>🔍</span>
-              <input
-                type="text"
-                placeholder="Buscar por fecha (YYYY-MM-DD), moneda o fuente..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={styles.searchInput}
-              />
-            </div>
-            <button onClick={() => setModalTcOpen(true)} style={styles.btnSuccess}>
-              + Registrar Tipo de Cambio
-            </button>
-          </div>
-
-          {/* Exchange Rates Table */}
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Moneda</th>
-                  <th style={styles.th}>Fecha Publicación</th>
-                  <th style={{ ...styles.th, textAlign: 'right' }}>Compra (S/)</th>
-                  <th style={{ ...styles.th, textAlign: 'right' }}>Venta (S/)</th>
-                  <th style={styles.th}>Fuente</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTc.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={styles.tdEmpty}>
-                      No hay tipos de cambio registrados con este criterio.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTc.map((tc) => (
-                    <tr key={tc.id} style={styles.tr}>
-                      <td style={styles.td}>
-                        <span style={styles.monedaTag}>{tc.moneda_codigo}</span>
-                      </td>
-                      <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>
-                        {tc.fecha_publicacion}
-                      </td>
-                      <td style={{ ...styles.td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-success)' }}>
-                        {tc.compra ?? '—'}
-                      </td>
-                      <td style={{ ...styles.td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-primary)' }}>
-                        {tc.venta ?? '—'}
-                      </td>
-                      <td style={styles.td}>
-                        <span style={styles.fuenteBadge}>{tc.fuente}</span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+          <span className="font-medium leading-relaxed">{error}</span>
         </div>
       )}
 
-      {/* Comprobantes Tab */}
-      {activeTab === 'comprobantes' && (
-        <div style={styles.catalogCard}>
-          <div style={styles.listHeaderRow}>
-            <div style={styles.searchBox}>
-              <span style={styles.searchIcon}>🔍</span>
-              <input
+      {/* Tabs navigation */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(val) => {
+          setActiveTab(val)
+          setSearchTerm('')
+        }}
+      >
+        <TabsList className="flex-wrap h-auto p-1.5 gap-1">
+          <TabsTrigger value="tc" icon={<DollarSign className="h-3.5 w-3.5" />}>
+            Tipo de Cambio SBS ({tiposCambio.length})
+          </TabsTrigger>
+          <TabsTrigger value="comprobantes" icon={<FileText className="h-3.5 w-3.5" />}>
+            Comprobantes (Tabla 10)
+          </TabsTrigger>
+          <TabsTrigger value="operaciones" icon={<Zap className="h-3.5 w-3.5" />}>
+            Operaciones (Tabla 12)
+          </TabsTrigger>
+          <TabsTrigger value="existencias" icon={<Boxes className="h-3.5 w-3.5" />}>
+            Existencias (Tabla 5)
+          </TabsTrigger>
+          <TabsTrigger value="unidades" icon={<Scale className="h-3.5 w-3.5" />}>
+            Unidades (Tabla 6)
+          </TabsTrigger>
+          <TabsTrigger value="monedas" icon={<Coins className="h-3.5 w-3.5" />}>
+            Monedas ({monedas.length})
+          </TabsTrigger>
+        </TabsList>
+
+        {/* TAB: TIPO DE CAMBIO SBS */}
+        <TabsContent value="tc" className="space-y-6">
+          {/* Probador interactivo de resolución TC */}
+          <Card className="border-indigo-100 bg-linear-to-b from-indigo-50/30 to-white shadow-xs">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-2xs">
+                  <CalendarSearch className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Probador de Tipo de Cambio Contable Oficial</CardTitle>
+                  <CardDescription>
+                    Aplica la regla oficial: busca la fecha exacta o, en fines de semana y feriados bancarios, hereda el último tipo de cambio publicado previo.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form onSubmit={handleResolver} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div className="space-y-1.5">
+                  <Label>Moneda Extranjera</Label>
+                  <Select value={testMoneda} onChange={(e) => setTestMoneda(e.target.value)}>
+                    <option value="USD">USD — Dólares Americanos</option>
+                    <option value="EUR">EUR — Euros</option>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Fecha del Documento</Label>
+                  <Input
+                    type="date"
+                    value={testFecha}
+                    onChange={(e) => setTestFecha(e.target.value)}
+                    required
+                    className="font-mono tabular-nums"
+                  />
+                </div>
+                <Button type="submit" variant="primary" isLoading={resolviendo}>
+                  <CalendarSearch className="h-4 w-4 mr-1.5" /> Resolver Tipo de Cambio
+                </Button>
+              </form>
+
+              {resolverError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 font-medium">
+                  {resolverError}
+                </div>
+              )}
+
+              {resolverResult && (
+                <div className="rounded-xl border border-indigo-200/80 bg-white p-4 shadow-xs space-y-3 animate-in fade-in">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100">
+                    <Badge variant={resolverResult.es_fecha_exacta ? 'success' : 'warning'} dot>
+                      {resolverResult.es_fecha_exacta
+                        ? 'Fecha Exacta Publicada'
+                        : 'Fin de Semana / Feriado (Último TC publicado previo)'}
+                    </Badge>
+                    <span className="text-xs text-slate-500 font-medium">
+                      Fuente Oficial: <strong className="text-slate-800">{resolverResult.fuente}</strong>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                    <div>
+                      <span className="text-slate-500 block">Fecha Consultada:</span>
+                      <strong className="font-mono tabular-nums text-slate-900 text-sm">
+                        {resolverResult.fecha_consultada}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Fecha Publicación:</span>
+                      <strong className="font-mono tabular-nums text-slate-900 text-sm">
+                        {resolverResult.fecha_publicacion}
+                      </strong>
+                    </div>
+                    <div className="rounded-lg bg-emerald-50 border border-emerald-200/80 p-2 text-center">
+                      <span className="text-emerald-700 text-[11px] font-semibold block">TC Compra:</span>
+                      <strong className="font-mono tabular-nums text-emerald-800 text-base">
+                        S/ {resolverResult.compra}
+                      </strong>
+                    </div>
+                    <div className="rounded-lg bg-indigo-50 border border-indigo-200/80 p-2 text-center">
+                      <span className="text-indigo-700 text-[11px] font-semibold block">TC Venta:</span>
+                      <strong className="font-mono tabular-nums text-indigo-800 text-base">
+                        S/ {resolverResult.venta}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* List Header & Action */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <Input
+                type="text"
+                placeholder="Buscar por fecha, moneda o fuente..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                leftIcon={<Search className="h-4 w-4" />}
+              />
+            </div>
+            <Button variant="primary" onClick={() => setModalTcOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" /> Registrar Tipo de Cambio
+            </Button>
+          </div>
+
+          {/* Exchange Rates Table */}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Moneda</TableHead>
+                    <TableHead>Fecha Publicación</TableHead>
+                    <TableHead numeric>Compra (S/)</TableHead>
+                    <TableHead numeric>Venta (S/)</TableHead>
+                    <TableHead>Fuente</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredTc.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-slate-400">
+                        No hay tipos de cambio registrados con este criterio.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredTc.map((tc) => (
+                      <TableRow key={tc.id}>
+                        <TableCell>
+                          <Badge variant="neutral" className="font-mono font-bold">
+                            {tc.moneda_codigo}
+                          </Badge>
+                        </TableCell>
+                        <TableCell numeric className="text-slate-700">
+                          {tc.fecha_publicacion}
+                        </TableCell>
+                        <TableCell numeric className="text-emerald-700 font-semibold text-sm">
+                          {tc.compra ?? '—'}
+                        </TableCell>
+                        <TableCell numeric className="text-indigo-700 font-semibold text-sm">
+                          {tc.venta ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-mono text-[10px]">
+                            {tc.fuente}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TAB: COMPROBANTES (Tabla 10) */}
+        <TabsContent value="comprobantes" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <Input
                 type="text"
                 placeholder="Buscar código SUNAT o descripción..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={styles.searchInput}
+                leftIcon={<Search className="h-4 w-4" />}
               />
             </div>
-            <span style={styles.itemCountBadge}>{filteredComprobantes.length} tipos de comprobante</span>
+            <Badge variant="neutral" className="font-mono">
+              {filteredComprobantes.length} tipos de comprobante
+            </Badge>
           </div>
 
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Código SUNAT</th>
-                  <th style={styles.th}>Descripción</th>
-                  <th style={styles.th}>Clasificación</th>
-                  <th style={styles.th}>Efecto Contable</th>
-                  <th style={styles.th}>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredComprobantes.map((c) => (
-                  <tr key={c.id} style={styles.tr}>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                      {c.codigo_sunat}
-                    </td>
-                    <td style={{ ...styles.td, fontWeight: 500 }}>{c.descripcion}</td>
-                    <td style={styles.td}>
-                      {c.es_nota ? (
-                        <span style={styles.badgeNota}>Nota Oficial</span>
-                      ) : (
-                        <span style={styles.badgeStandard}>Comprobante Base</span>
-                      )}
-                    </td>
-                    <td style={styles.td}>
-                      <span
-                        style={
-                          c.efecto_nota === 'CREDITO'
-                            ? styles.badgeCredit
-                            : c.efecto_nota === 'DEBITO'
-                            ? styles.badgeDebit
-                            : styles.badgeNeutral
-                        }
-                      >
-                        {c.efecto_nota}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      <span style={c.activo ? styles.badgeActive : styles.badgeInactive}>
-                        {c.activo ? 'ACTIVO' : 'INACTIVO'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Cód. SUNAT</TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead>Clasificación</TableHead>
+                    <TableHead>Efecto Contable</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredComprobantes.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell numeric className="font-bold text-slate-900">
+                        {c.codigo_sunat}
+                      </TableCell>
+                      <TableCell className="font-medium text-slate-800">{c.descripcion}</TableCell>
+                      <TableCell>
+                        <Badge variant={c.es_nota ? 'info' : 'neutral'}>
+                          {c.es_nota ? 'Nota Oficial' : 'Comprobante Base'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            c.efecto_nota === 'CREDITO'
+                              ? 'destructive'
+                              : c.efecto_nota === 'DEBITO'
+                              ? 'info'
+                              : 'neutral'
+                          }
+                        >
+                          {c.efecto_nota || 'NINGUNO'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={c.activo ? 'success' : 'neutral'} dot>
+                          {c.activo ? 'ACTIVO' : 'INACTIVO'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Operaciones Tab */}
-      {activeTab === 'operaciones' && (
-        <div style={styles.catalogCard}>
-          <div style={styles.listHeaderRow}>
-            <div style={styles.searchBox}>
-              <span style={styles.searchIcon}>🔍</span>
-              <input
+        {/* TAB: OPERACIONES (Tabla 12) */}
+        <TabsContent value="operaciones" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <Input
                 type="text"
                 placeholder="Buscar por código interno, SUNAT o naturaleza..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={styles.searchInput}
+                leftIcon={<Search className="h-4 w-4" />}
               />
             </div>
-            <span style={styles.itemCountBadge}>{filteredOperaciones.length} operaciones</span>
+            <Badge variant="neutral" className="font-mono">
+              {filteredOperaciones.length} operaciones
+            </Badge>
           </div>
 
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Cód. Interno</th>
-                  <th style={styles.th}>Cód. SUNAT</th>
-                  <th style={styles.th}>Descripción</th>
-                  <th style={styles.th}>Naturaleza</th>
-                  <th style={styles.th}>Origen Requerido</th>
-                  <th style={styles.th}>Kardex</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredOperaciones.map((o) => (
-                  <tr key={o.id} style={styles.tr}>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                      {o.codigo_interno}
-                    </td>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)' }}>
-                      {o.codigo_sunat || '—'}
-                    </td>
-                    <td style={styles.td}>{o.descripcion}</td>
-                    <td style={styles.td}>
-                      <span
-                        style={
-                          o.naturaleza === 'ENTRADA'
-                            ? styles.badgeEntrada
-                            : o.naturaleza === 'SALIDA'
-                            ? styles.badgeSalida
-                            : styles.badgeAjuste
-                        }
-                      >
-                        {o.naturaleza}
-                      </span>
-                    </td>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
-                      {o.origen_requerido}
-                    </td>
-                    <td style={styles.td}>
-                      {o.afecta_kardex ? (
-                        <span style={styles.badgeSuccessSm}>AFECTA</span>
-                      ) : (
-                        <span style={styles.badgeNeutralSm}>NO AFECTA</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Cód. Interno</TableHead>
+                    <TableHead className="w-24">Cód. SUNAT</TableHead>
+                    <TableHead>Descripción</TableHead>
+                    <TableHead>Naturaleza</TableHead>
+                    <TableHead>Origen Requerido</TableHead>
+                    <TableHead>Afecta Kardex</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredOperaciones.map((o) => (
+                    <TableRow key={o.id}>
+                      <TableCell numeric className="font-bold text-slate-900">
+                        {o.codigo_interno}
+                      </TableCell>
+                      <TableCell numeric className="text-slate-600">
+                        {o.codigo_sunat || '—'}
+                      </TableCell>
+                      <TableCell className="font-medium text-slate-800">{o.descripcion}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            o.naturaleza === 'ENTRADA'
+                              ? 'info'
+                              : o.naturaleza === 'SALIDA'
+                              ? 'warning'
+                              : 'destructive'
+                          }
+                        >
+                          {o.naturaleza}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <code className="text-[11px] font-mono text-slate-600">
+                          {o.origen_requerido || 'NINGUNO'}
+                        </code>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={o.afecta_kardex ? 'success' : 'neutral'} dot>
+                          {o.afecta_kardex ? 'AFECTA' : 'NO AFECTA'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Existencias Tab */}
-      {activeTab === 'existencias' && (
-        <div style={styles.catalogCard}>
-          <div style={styles.listHeaderRow}>
-            <div style={styles.searchBox}>
-              <span style={styles.searchIcon}>🔍</span>
-              <input
+        {/* TAB: EXISTENCIAS (Tabla 5) */}
+        <TabsContent value="existencias" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <Input
                 type="text"
                 placeholder="Buscar código o descripción de existencia..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={styles.searchInput}
+                leftIcon={<Search className="h-4 w-4" />}
               />
             </div>
-            <span style={styles.itemCountBadge}>{filteredExistencias.length} tipos (Tabla 5)</span>
+            <Badge variant="neutral" className="font-mono">
+              {filteredExistencias.length} tipos (Tabla 5 SUNAT)
+            </Badge>
           </div>
 
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={{ ...styles.th, width: '120px' }}>Código</th>
-                  <th style={styles.th}>Descripción Oficial Tabla 5 SUNAT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredExistencias.map((e) => (
-                  <tr key={e.codigo} style={styles.tr}>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                      {e.codigo}
-                    </td>
-                    <td style={{ ...styles.td, fontWeight: 500 }}>{e.descripcion}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28">Código</TableHead>
+                    <TableHead>Descripción Oficial Tabla 5 SUNAT</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredExistencias.map((e) => (
+                    <TableRow key={e.codigo}>
+                      <TableCell numeric className="font-bold text-slate-900 text-sm">
+                        {e.codigo}
+                      </TableCell>
+                      <TableCell className="font-medium text-slate-800">{e.descripcion}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Unidades Tab */}
-      {activeTab === 'unidades' && (
-        <div style={styles.catalogCard}>
-          <div style={styles.listHeaderRow}>
-            <div style={styles.searchBox}>
-              <span style={styles.searchIcon}>🔍</span>
-              <input
+        {/* TAB: UNIDADES (Tabla 6) */}
+        <TabsContent value="unidades" className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="w-full sm:w-80">
+              <Input
                 type="text"
                 placeholder="Buscar código o unidad..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={styles.searchInput}
+                leftIcon={<Search className="h-4 w-4" />}
               />
             </div>
-            <span style={styles.itemCountBadge}>{filteredUnidades.length} unidades (Tabla 6)</span>
+            <Badge variant="neutral" className="font-mono">
+              {filteredUnidades.length} unidades (Tabla 6 SUNAT)
+            </Badge>
           </div>
 
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={{ ...styles.th, width: '140px' }}>Código SUNAT</th>
-                  <th style={styles.th}>Descripción Oficial de Unidad de Medida</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUnidades.map((u) => (
-                  <tr key={u.codigo} style={styles.tr}>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                      <span style={styles.codePill}>{u.codigo}</span>
-                    </td>
-                    <td style={{ ...styles.td, fontWeight: 500 }}>{u.descripcion}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-32">Código SUNAT</TableHead>
+                    <TableHead>Descripción Oficial de Unidad de Medida</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredUnidades.map((u) => (
+                    <TableRow key={u.codigo}>
+                      <TableCell>
+                        <Badge variant="info" className="font-mono font-bold">
+                          {u.codigo}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium text-slate-800">{u.descripcion}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Monedas Tab */}
-      {activeTab === 'monedas' && (
-        <div style={styles.catalogCard}>
-          <div style={styles.tableCard}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={{ ...styles.th, width: '120px' }}>Código</th>
-                  <th style={styles.th}>Nombre Oficial de la Moneda</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monedas.map((m) => (
-                  <tr key={m.codigo} style={styles.tr}>
-                    <td style={{ ...styles.td, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                      <span style={styles.monedaTag}>{m.codigo}</span>
-                    </td>
-                    <td style={{ ...styles.td, fontWeight: 500 }}>{m.nombre}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+        {/* TAB: MONEDAS */}
+        <TabsContent value="monedas" className="space-y-4">
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28">Código ISO</TableHead>
+                    <TableHead>Nombre Oficial de la Moneda</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {monedas.map((m) => (
+                    <TableRow key={m.codigo}>
+                      <TableCell>
+                        <Badge variant="neutral" className="font-mono font-bold text-xs">
+                          {m.codigo}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium text-slate-800">{m.nombre}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Modal Registrar Tipo de Cambio */}
       {modalTcOpen && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalBox}>
-            <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>Registrar Tipo de Cambio</h3>
-              <button onClick={() => setModalTcOpen(false)} style={styles.modalCloseBtn}>
-                ✕
-              </button>
+        <Modal
+          isOpen={modalTcOpen}
+          onClose={() => setModalTcOpen(false)}
+          title="Registrar Tipo de Cambio Oficial"
+          description="Publicación oficial SBS/SUNAT para valorización contable."
+          icon={<DollarSign className="h-5 w-5" />}
+          footer={
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setModalTcOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" onClick={handleCrearTc} isLoading={guardandoTc}>
+                Guardar Tipo de Cambio
+              </Button>
+            </div>
+          }
+        >
+          <form onSubmit={handleCrearTc} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label required>Moneda</Label>
+              <Select
+                value={nuevoTc.moneda_codigo}
+                onChange={(e) => setNuevoTc({ ...nuevoTc, moneda_codigo: e.target.value })}
+                required
+              >
+                <option value="USD">USD — Dólares Americanos</option>
+                <option value="EUR">EUR — Euros</option>
+              </Select>
             </div>
 
-            <form onSubmit={handleCrearTc} style={styles.modalForm}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Moneda</label>
-                <select
-                  value={nuevoTc.moneda_codigo}
-                  onChange={(e) => setNuevoTc({ ...nuevoTc, moneda_codigo: e.target.value })}
-                  style={styles.select}
-                  required
-                >
-                  <option value="USD">USD - Dólares Americanos</option>
-                  <option value="EUR">EUR - Euros</option>
-                </select>
-              </div>
+            <div className="space-y-1.5">
+              <Label required>Fecha de Publicación</Label>
+              <Input
+                type="date"
+                value={nuevoTc.fecha_publicacion}
+                onChange={(e) => setNuevoTc({ ...nuevoTc, fecha_publicacion: e.target.value })}
+                required
+                className="font-mono tabular-nums"
+              />
+            </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Fecha de Publicación</label>
-                <input
-                  type="date"
-                  value={nuevoTc.fecha_publicacion}
-                  onChange={(e) => setNuevoTc({ ...nuevoTc, fecha_publicacion: e.target.value })}
-                  style={styles.input}
-                  required
-                />
-              </div>
-
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Compra (S/)</label>
-                  <input
-                    type="number"
-                    step="0.00000001"
-                    min="0.00000001"
-                    placeholder="Ej. 3.74200000"
-                    value={nuevoTc.compra}
-                    onChange={(e) => setNuevoTc({ ...nuevoTc, compra: e.target.value })}
-                    style={{ ...styles.input, fontVariantNumeric: 'tabular-nums' }}
-                    required
-                  />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Venta (S/)</label>
-                  <input
-                    type="number"
-                    step="0.00000001"
-                    min="0.00000001"
-                    placeholder="Ej. 3.75100000"
-                    value={nuevoTc.venta}
-                    onChange={(e) => setNuevoTc({ ...nuevoTc, venta: e.target.value })}
-                    style={{ ...styles.input, fontVariantNumeric: 'tabular-nums' }}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Fuente Oficial</label>
-                <input
-                  type="text"
-                  value={nuevoTc.fuente}
-                  onChange={(e) => setNuevoTc({ ...nuevoTc, fuente: e.target.value })}
-                  style={styles.input}
-                  placeholder="SBS / SUNAT"
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label required>Compra (S/)</Label>
+                <Input
+                  type="number"
+                  step="0.00000001"
+                  min="0.00000001"
+                  placeholder="3.74200000"
+                  value={nuevoTc.compra}
+                  onChange={(e) => setNuevoTc({ ...nuevoTc, compra: e.target.value })}
+                  className="font-mono tabular-nums"
                   required
                 />
               </div>
 
-              <div style={styles.modalActions}>
-                <button
-                  type="button"
-                  onClick={() => setModalTcOpen(false)}
-                  style={styles.btnSecondary}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={guardandoTc}
-                  style={guardandoTc ? styles.btnDisabled : styles.btnSuccess}
-                >
-                  {guardandoTc ? 'Guardando...' : 'Guardar Tipo de Cambio'}
-                </button>
+              <div className="space-y-1.5">
+                <Label required>Venta (S/)</Label>
+                <Input
+                  type="number"
+                  step="0.00000001"
+                  min="0.00000001"
+                  placeholder="3.75100000"
+                  value={nuevoTc.venta}
+                  onChange={(e) => setNuevoTc({ ...nuevoTc, venta: e.target.value })}
+                  className="font-mono tabular-nums"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label required>Fuente Oficial</Label>
+              <Input
+                type="text"
+                value={nuevoTc.fuente}
+                onChange={(e) => setNuevoTc({ ...nuevoTc, fuente: e.target.value })}
+                placeholder="SBS / SUNAT"
+                required
+              />
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
-  );
-};
+  )
+}
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1.5rem',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    flexWrap: 'wrap',
-    gap: '1rem',
-  },
-  headerTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-    flexWrap: 'wrap',
-  },
-  title: {
-    fontSize: '1.6rem',
-    fontWeight: 800,
-    color: 'var(--text-primary)',
-    letterSpacing: '-0.5px',
-  },
-  subtitle: {
-    fontSize: '0.875rem',
-    color: 'var(--text-secondary)',
-    marginTop: '0.25rem',
-  },
-  badgeOfficial: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.65rem',
-    borderRadius: '6px',
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    color: 'var(--accent-primary)',
-    border: '1px solid rgba(59, 130, 246, 0.3)',
-    fontFamily: 'var(--font-mono)',
-  },
-  errorBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    border: '1px solid var(--accent-danger)',
-    color: '#fca5a5',
-    padding: '0.75rem 1rem',
-    borderRadius: '8px',
-    fontSize: '0.875rem',
-  },
-  tabNav: {
-    display: 'flex',
-    gap: '0.5rem',
-    borderBottom: '1px solid var(--border-color)',
-    paddingBottom: '0.25rem',
-    overflowX: 'auto',
-  },
-  tabBtn: {
-    padding: '0.6rem 1rem',
-    borderRadius: '8px',
-    color: 'var(--text-secondary)',
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-    transition: 'all 0.2s',
-  },
-  tabBtnActive: {
-    padding: '0.6rem 1rem',
-    borderRadius: '8px',
-    color: 'var(--text-primary)',
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    fontSize: '0.875rem',
-    fontWeight: 700,
-    whiteSpace: 'nowrap',
-    boxShadow: 'var(--shadow-sm)',
-  },
-  tcSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1.5rem',
-  },
-  resolverCard: {
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '12px',
-    padding: '1.5rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1.25rem',
-    boxShadow: 'var(--shadow-md)',
-  },
-  resolverCardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-  },
-  resolverTitle: {
-    fontSize: '1.15rem',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-  },
-  resolverSubtitle: {
-    fontSize: '0.825rem',
-    color: 'var(--text-secondary)',
-    marginTop: '0.15rem',
-  },
-  resolverForm: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '1rem',
-    alignItems: 'flex-end',
-  },
-  formGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.35rem',
-    flex: '1 1 200px',
-  },
-  formRow: {
-    display: 'flex',
-    gap: '1rem',
-    flexWrap: 'wrap',
-  },
-  label: {
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    color: 'var(--text-secondary)',
-  },
-  input: {
-    backgroundColor: 'var(--bg-primary)',
-    border: '1px solid var(--border-color)',
-    color: 'var(--text-primary)',
-    borderRadius: '8px',
-    padding: '0.55rem 0.85rem',
-    fontSize: '0.9rem',
-    outline: 'none',
-  },
-  select: {
-    backgroundColor: 'var(--bg-primary)',
-    border: '1px solid var(--border-color)',
-    color: 'var(--text-primary)',
-    borderRadius: '8px',
-    padding: '0.55rem 0.85rem',
-    fontSize: '0.9rem',
-    outline: 'none',
-  },
-  resolverError: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    border: '1px solid rgba(239, 68, 68, 0.3)',
-    color: '#f87171',
-    padding: '0.75rem 1rem',
-    borderRadius: '8px',
-    fontSize: '0.875rem',
-  },
-  resolverResultBox: {
-    backgroundColor: 'var(--bg-primary)',
-    border: '1px solid rgba(59, 130, 246, 0.3)',
-    borderRadius: '10px',
-    padding: '1.25rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-  },
-  resultHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '0.5rem',
-  },
-  pillExact: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.65rem',
-    borderRadius: '999px',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: 'var(--accent-success)',
-    border: '1px solid rgba(16, 185, 129, 0.3)',
-  },
-  pillFallback: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.65rem',
-    borderRadius: '999px',
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    color: 'var(--accent-warning)',
-    border: '1px solid rgba(245, 158, 11, 0.3)',
-  },
-  sourceTag: {
-    fontSize: '0.75rem',
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--text-muted)',
-  },
-  resultGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '1rem',
-    alignItems: 'center',
-  },
-  resultLabel: {
-    display: 'block',
-    fontSize: '0.75rem',
-    color: 'var(--text-secondary)',
-    marginBottom: '0.2rem',
-  },
-  resultValue: {
-    fontSize: '1rem',
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--text-primary)',
-  },
-  tcMontoBox: {
-    backgroundColor: 'var(--bg-secondary)',
-    padding: '0.6rem 0.9rem',
-    borderRadius: '8px',
-    border: '1px solid var(--border-color)',
-  },
-  tcValorCompra: {
-    fontSize: '1.25rem',
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--accent-success)',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  tcValorVenta: {
-    fontSize: '1.25rem',
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--accent-primary)',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  listHeaderRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '1rem',
-  },
-  searchBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '8px',
-    padding: '0.5rem 0.85rem',
-    flex: '1 1 300px',
-  },
-  searchIcon: {
-    fontSize: '0.9rem',
-    opacity: 0.7,
-  },
-  searchInput: {
-    backgroundColor: 'transparent',
-    border: 'none',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    width: '100%',
-    outline: 'none',
-  },
-  itemCountBadge: {
-    fontSize: '0.8rem',
-    color: 'var(--text-secondary)',
-    fontFamily: 'var(--font-mono)',
-  },
-  tableCard: {
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '10px',
-    overflowX: 'auto',
-    boxShadow: 'var(--shadow-sm)',
-  },
-  catalogCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    textAlign: 'left',
-    fontSize: '0.875rem',
-  },
-  th: {
-    padding: '0.75rem 1rem',
-    borderBottom: '1px solid var(--border-color)',
-    color: 'var(--text-secondary)',
-    fontWeight: 600,
-    fontSize: '0.8rem',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  tr: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-    transition: 'background-color 0.15s',
-  },
-  td: {
-    padding: '0.85rem 1rem',
-    color: 'var(--text-primary)',
-  },
-  tdEmpty: {
-    padding: '2.5rem',
-    textAlign: 'center',
-    color: 'var(--text-muted)',
-    fontSize: '0.9rem',
-  },
-  monedaTag: {
-    fontFamily: 'var(--font-mono)',
-    fontWeight: 700,
-    backgroundColor: 'rgba(59, 130, 246, 0.12)',
-    color: 'var(--accent-primary)',
-    padding: '0.2rem 0.5rem',
-    borderRadius: '4px',
-    fontSize: '0.8rem',
-  },
-  fuenteBadge: {
-    fontSize: '0.75rem',
-    padding: '0.2rem 0.5rem',
-    borderRadius: '4px',
-    backgroundColor: 'var(--bg-primary)',
-    border: '1px solid var(--border-color)',
-    color: 'var(--text-secondary)',
-  },
-  codePill: {
-    fontFamily: 'var(--font-mono)',
-    fontWeight: 700,
-    backgroundColor: 'var(--bg-tertiary)',
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    fontSize: '0.8rem',
-  },
-  badgeNota: {
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    color: 'var(--accent-warning)',
-  },
-  badgeStandard: {
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    color: 'var(--accent-primary)',
-  },
-  badgeCredit: {
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: 'var(--accent-success)',
-  },
-  badgeDebit: {
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    color: 'var(--accent-danger)',
-  },
-  badgeNeutral: {
-    fontSize: '0.75rem',
-    padding: '0.2rem 0.55rem',
-    borderRadius: '4px',
-    backgroundColor: 'var(--bg-tertiary)',
-    color: 'var(--text-muted)',
-  },
-  badgeActive: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.2rem 0.5rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: 'var(--accent-success)',
-  },
-  badgeInactive: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.2rem 0.5rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    color: 'var(--accent-danger)',
-  },
-  badgeEntrada: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.6rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: 'var(--accent-success)',
-  },
-  badgeSalida: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.6rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    color: 'var(--accent-danger)',
-  },
-  badgeAjuste: {
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    padding: '0.25rem 0.6rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    color: 'var(--accent-warning)',
-  },
-  badgeSuccessSm: {
-    fontSize: '0.7rem',
-    fontWeight: 700,
-    padding: '0.15rem 0.45rem',
-    borderRadius: '4px',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    color: 'var(--accent-success)',
-  },
-  badgeNeutralSm: {
-    fontSize: '0.7rem',
-    fontWeight: 600,
-    padding: '0.15rem 0.45rem',
-    borderRadius: '4px',
-    backgroundColor: 'var(--bg-tertiary)',
-    color: 'var(--text-muted)',
-  },
-  btnPrimary: {
-    backgroundColor: 'var(--accent-primary)',
-    color: '#ffffff',
-    padding: '0.55rem 1.15rem',
-    borderRadius: '8px',
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    boxShadow: 'var(--shadow-sm)',
-    transition: 'background-color 0.15s',
-  },
-  btnSuccess: {
-    backgroundColor: 'var(--accent-success)',
-    color: '#ffffff',
-    padding: '0.55rem 1.15rem',
-    borderRadius: '8px',
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    boxShadow: 'var(--shadow-sm)',
-    transition: 'background-color 0.15s',
-  },
-  btnSecondary: {
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    color: 'var(--text-primary)',
-    padding: '0.55rem 1rem',
-    borderRadius: '8px',
-    fontWeight: 600,
-    fontSize: '0.875rem',
-  },
-  btnDisabled: {
-    backgroundColor: 'var(--bg-tertiary)',
-    color: 'var(--text-muted)',
-    padding: '0.55rem 1.15rem',
-    borderRadius: '8px',
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    cursor: 'not-allowed',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-    padding: '1rem',
-  },
-  modalBox: {
-    backgroundColor: 'var(--bg-secondary)',
-    border: '1px solid var(--border-color)',
-    borderRadius: '12px',
-    width: '100%',
-    maxWidth: '480px',
-    padding: '1.5rem',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1.25rem',
-    boxShadow: 'var(--shadow-lg)',
-  },
-  modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: '1.2rem',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-  },
-  modalCloseBtn: {
-    fontSize: '1.2rem',
-    color: 'var(--text-muted)',
-  },
-  modalForm: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '0.75rem',
-    marginTop: '0.5rem',
-  },
-};
-
-export default CatalogosPage;
+export default CatalogosPage

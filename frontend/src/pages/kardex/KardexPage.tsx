@@ -11,25 +11,47 @@ import { getProductos, getAlmacenes, type Producto, type Almacen } from '../../a
 import { obtenerPeriodos, type Periodo } from '../../api/periodos';
 import { obtenerTiposOperacion, type TipoOperacion } from '../../api/catalogos';
 import { filtrosKardexDesdeFormulario } from '../../utils/kardexFiltros';
+import {
+  BookOpenCheck,
+  FileDown,
+  Package,
+  Scale,
+  Coins,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Search,
+  Filter,
+  RotateCcw,
+  Loader2,
+  Inbox,
+  AlertCircle,
+} from 'lucide-react';
+import { PageHeader } from '../../components/ui/page-header';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, KpiCard } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Select } from '../../components/ui/select';
+import { Label } from '../../components/ui/label';
 
 const formatQty = (val: string | null | undefined): string => {
   if (val === null || val === undefined || val === '') return '—';
   const num = Number(val);
-  if (isNaN(num)) return val;
+  if (isNaN(num)) return String(val);
   return num.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 };
 
 const formatCost = (val: string | null | undefined): string => {
   if (val === null || val === undefined || val === '') return '—';
   const num = Number(val);
-  if (isNaN(num)) return val;
+  if (isNaN(num)) return String(val);
   return num.toLocaleString('es-PE', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
 };
 
 const formatMoney = (val: string | null | undefined): string => {
   if (val === null || val === undefined || val === '') return '—';
   const num = Number(val);
-  if (isNaN(num)) return val;
+  if (isNaN(num)) return String(val);
   return num.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
@@ -160,326 +182,327 @@ export const KardexPage: React.FC = () => {
   }, [productoId, productos]);
 
   return (
-    <div style={styles.page}>
+    <div className="space-y-6">
       {/* 1. Encabezado principal */}
-      <header style={styles.header}>
-        <div>
-          <div style={styles.badgeRow}>
-            <span style={styles.badgePrimary}>MÓDULO KARDEX VALORIZADO</span>
-            <span style={styles.badgeNeutral}>Fase 8 · Bloque 5</span>
-            <span style={styles.badgeSuccess}>SUNAT FORMATO 13.1</span>
+      <PageHeader
+        title="Consulta de Kardex Permanente Valorizado"
+        description={`Control contable con Costo Promedio Ponderado Móvil (CPP Global en PEN) · ${
+          empresaActiva?.razon_social ?? 'Empresa Activa'
+        }${empresaActiva?.ruc ? ` · RUC: ${empresaActiva.ruc}` : ''}`}
+        icon={BookOpenCheck}
+        badge={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge variant="info">Fase 8 · Bloque 5</Badge>
+            <Badge variant="success" dot>SUNAT Formato 13.1</Badge>
           </div>
-          <h1 style={styles.title}>Consulta de Kardex Permanente Valorizado</h1>
-          <p style={styles.subtitle}>
-            Control contable por método Promedio Ponderado Móvil (CPP Global en PEN) —{' '}
-            <strong style={{ color: '#0f172a' }}>{empresaActiva?.razon_social ?? 'Empresa Activa'}</strong>
-            {empresaActiva?.ruc ? ` (RUC: ${empresaActiva.ruc})` : ''}
-          </p>
-        </div>
-
-        <div style={styles.headerActions}>
-          <button
+        }
+        actions={
+          <Button
             type="button"
             onClick={handleExportarExcel}
             disabled={exporting || loading}
-            style={{
-              ...styles.btnExport,
-              opacity: exporting || loading ? 0.7 : 1,
-              cursor: exporting || loading ? 'not-allowed' : 'pointer',
-            }}
+            variant="success"
+            className="shadow-sm"
             title="Descargar libro Excel con 4 hojas oficiales (Kardex, Movimientos, Incidencias, Saldos)"
           >
-            <span>{exporting ? '⏳' : '📥'}</span>
-            <span>{exporting ? 'Generando Excel...' : 'Exportar a Excel (.xlsx)'}</span>
-          </button>
-        </div>
-      </header>
+            {exporting ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-1.5" />
+            )}
+            {exporting ? 'Generando Excel...' : 'Exportar Excel Oficial (.xlsx)'}
+          </Button>
+        }
+      />
 
       {/* 2. Tarjetas KPI de Resumen Superior */}
-      <div style={styles.kpiGrid}>
-        <div style={styles.kpiCard}>
-          <div style={styles.kpiHeader}>
-            <span style={styles.kpiLabel}>STOCK TOTAL EMPRESA</span>
-            <span style={{ ...styles.kpiIcon, backgroundColor: '#e0f2fe', color: '#0284c7' }}>📦</span>
-          </div>
-          <div style={styles.kpiValue}>
-            {loading ? '...' : formatQty(resumen?.saldo_final_cantidad)}
-          </div>
-          <div style={styles.kpiFooter}>
-            {productoSeleccionado
-              ? `${productoSeleccionado.codigo_interno} (Unidades Base)`
-              : 'Balance acumulado a la fecha'}
-          </div>
-        </div>
-
-        <div style={styles.kpiCard}>
-          <div style={styles.kpiHeader}>
-            <span style={styles.kpiLabel}>CPP VIGENTE (PEN)</span>
-            <span style={{ ...styles.kpiIcon, backgroundColor: '#fef3c7', color: '#d97706' }}>⚖️</span>
-          </div>
-          <div style={styles.kpiValue}>
-            {loading ? '...' : resumen?.cpp_final ? `S/ ${formatCost(resumen.cpp_final)}` : 'S/ 0.000000'}
-          </div>
-          <div style={styles.kpiFooter}>Costo Promedio Ponderado Móvil</div>
-        </div>
-
-        <div style={styles.kpiCard}>
-          <div style={styles.kpiHeader}>
-            <span style={styles.kpiLabel}>SALDO VALORIZADO</span>
-            <span style={{ ...styles.kpiIcon, backgroundColor: '#dcfce7', color: '#16a34a' }}>💰</span>
-          </div>
-          <div style={styles.kpiValue}>
-            {loading ? '...' : `S/ ${formatMoney(resumen?.saldo_final_valor)}`}
-          </div>
-          <div style={styles.kpiFooter}>Valor contable del inventario</div>
-        </div>
-
-        <div style={styles.kpiCard}>
-          <div style={styles.kpiHeader}>
-            <span style={styles.kpiLabel}>TOTAL ENTRADAS</span>
-            <span style={{ ...styles.kpiIcon, backgroundColor: '#eff6ff', color: '#2563eb' }}>⬇️</span>
-          </div>
-          <div style={styles.kpiValue}>
-            {loading ? '...' : formatQty(resumen?.total_entradas_cantidad)}
-          </div>
-          <div style={styles.kpiFooter}>
-            {loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_entradas_valor)}`}
-          </div>
-        </div>
-
-        <div style={styles.kpiCard}>
-          <div style={styles.kpiHeader}>
-            <span style={styles.kpiLabel}>TOTAL SALIDAS</span>
-            <span style={{ ...styles.kpiIcon, backgroundColor: '#fdf2f8', color: '#db2777' }}>⬆️</span>
-          </div>
-          <div style={styles.kpiValue}>
-            {loading ? '...' : formatQty(resumen?.total_salidas_cantidad)}
-          </div>
-          <div style={styles.kpiFooter}>
-            {loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_salidas_valor)}`}
-          </div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <KpiCard
+          title="Stock Total Empresa"
+          value={loading ? '...' : formatQty(resumen?.saldo_final_cantidad)}
+          subtitle={
+            productoSeleccionado
+              ? `${productoSeleccionado.codigo_interno} (Unidad Base)`
+              : 'Balance físico acumulado'
+          }
+          icon={Package}
+        />
+        <KpiCard
+          title="CPP Vigente (PEN)"
+          value={loading ? '...' : resumen?.cpp_final ? `S/ ${formatCost(resumen.cpp_final)}` : 'S/ 0.000000'}
+          subtitle="Costo Promedio Ponderado Móvil (6 dec.)"
+          icon={Scale}
+        />
+        <KpiCard
+          title="Saldo Valorizado"
+          value={loading ? '...' : `S/ ${formatMoney(resumen?.saldo_final_valor)}`}
+          subtitle="Valor monetario contable en PEN"
+          icon={Coins}
+        />
+        <KpiCard
+          title="Total Entradas"
+          value={loading ? '...' : formatQty(resumen?.total_entradas_cantidad)}
+          subtitle={loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_entradas_valor)}`}
+          icon={ArrowDownLeft}
+        />
+        <KpiCard
+          title="Total Salidas"
+          value={loading ? '...' : formatQty(resumen?.total_salidas_cantidad)}
+          subtitle={loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_salidas_valor)}`}
+          icon={ArrowUpRight}
+        />
       </div>
 
-      {/* 3. Barra de Filtros Oficiales (Sección 42 del Manual) */}
-      <form style={styles.filterCard} onSubmit={handleActualizarConsulta}>
-        <div style={styles.filterHeader}>
-          <span style={styles.filterTitle}>🔍 Filtros de Consulta Oficial</span>
-          <span style={styles.filterSubtitle}>
-            Consulte por producto, período contable, almacén o rango de fechas
-          </span>
-        </div>
-
-        <div style={styles.filterGrid}>
-          {/* Producto */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Producto</label>
-            <select
-              style={styles.select}
-              name="producto_id"
-              value={productoId}
-              onChange={(e) => setProductoId(e.target.value)}
-            >
-              <option value="">Todos los productos</option>
-              {productos.map((prod) => (
-                <option key={prod.id} value={prod.id}>
-                  {prod.codigo_interno} — {prod.descripcion}
-                </option>
-              ))}
-            </select>
+      {/* 3. Barra de Filtros Oficiales */}
+      <Card>
+        <CardHeader className="pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                <Filter className="h-4 w-4 text-indigo-600" />
+                Filtros de Consulta Contable
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Filtre por producto, período contable, almacén o rango de fechas
+              </CardDescription>
+            </div>
+            {productoSeleccionado && (
+              <Badge variant="neutral" className="text-xs font-mono">
+                {productoSeleccionado.codigo_interno} — {productoSeleccionado.descripcion}
+              </Badge>
+            )}
           </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <form onSubmit={handleActualizarConsulta} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              {/* Producto */}
+              <div className="lg:col-span-2 space-y-1.5">
+                <Label htmlFor="kardex-producto">Producto</Label>
+                <Select
+                  id="kardex-producto"
+                  name="producto_id"
+                  value={productoId}
+                  onChange={(e) => setProductoId(e.target.value)}
+                >
+                  <option value="">Todos los productos</option>
+                  {productos.map((prod) => (
+                    <option key={prod.id} value={prod.id}>
+                      {prod.codigo_interno} — {prod.descripcion}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-          {/* Período */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Período Contable</label>
-            <select
-              style={styles.select}
-              name="periodo_id"
-              value={periodoId}
-              onChange={(e) => setPeriodoId(e.target.value)}
-            >
-              <option value="">Todos los períodos</option>
-              {periodos.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.anio}-{String(p.mes).padStart(2, '0')} ({p.estado})
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Período */}
+              <div className="space-y-1.5">
+                <Label htmlFor="kardex-periodo">Período Contable</Label>
+                <Select
+                  id="kardex-periodo"
+                  name="periodo_id"
+                  value={periodoId}
+                  onChange={(e) => setPeriodoId(e.target.value)}
+                >
+                  <option value="">Todos los períodos</option>
+                  {periodos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.anio}-{String(p.mes).padStart(2, '0')} ({p.estado})
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-          {/* Almacén */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Almacén</label>
-            <select
-              style={styles.select}
-              name="almacen_id"
-              value={almacenId}
-              onChange={(e) => setAlmacenId(e.target.value)}
-            >
-              <option value="">Todos los almacenes (Consolidado)</option>
-              {almacenes.map((alm) => (
-                <option key={alm.id} value={alm.id}>
-                  {alm.codigo} — {alm.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Almacén */}
+              <div className="space-y-1.5">
+                <Label htmlFor="kardex-almacen">Almacén</Label>
+                <Select
+                  id="kardex-almacen"
+                  name="almacen_id"
+                  value={almacenId}
+                  onChange={(e) => setAlmacenId(e.target.value)}
+                >
+                  <option value="">Todos (Consolidado)</option>
+                  {almacenes.map((alm) => (
+                    <option key={alm.id} value={alm.id}>
+                      {alm.codigo} — {alm.nombre}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-          {/* Tipo de Operación */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Tipo de Operación</label>
-            <select
-              style={styles.select}
-              name="tipo_operacion_id"
-              value={tipoOperacionId}
-              onChange={(e) => setTipoOperacionId(e.target.value)}
-            >
-              <option value="">Todas las operaciones</option>
-              {tiposOperacion.map((op) => (
-                <option key={op.id} value={op.id}>
-                  {op.codigo_sunat || op.codigo_interno} — {op.descripcion}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Tipo de Operación */}
+              <div className="space-y-1.5">
+                <Label htmlFor="kardex-operacion">Tipo de Operación</Label>
+                <Select
+                  id="kardex-operacion"
+                  name="tipo_operacion_id"
+                  value={tipoOperacionId}
+                  onChange={(e) => setTipoOperacionId(e.target.value)}
+                >
+                  <option value="">Todas las operaciones</option>
+                  {tiposOperacion.map((op) => (
+                    <option key={op.id} value={op.id}>
+                      {op.codigo_sunat || op.codigo_interno} — {op.descripcion}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-          {/* Fecha Desde */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Fecha Desde</label>
-            <input
-              type="date"
-              name="fecha_desde"
-              style={styles.input}
-              value={fechaDesde}
-              onChange={(e) => setFechaDesde(e.target.value)}
-            />
-          </div>
+              {/* Fechas */}
+              <div className="space-y-1.5">
+                <Label htmlFor="kardex-desde">Fecha Desde</Label>
+                <Input
+                  id="kardex-desde"
+                  type="date"
+                  name="fecha_desde"
+                  value={fechaDesde}
+                  onChange={(e) => setFechaDesde(e.target.value)}
+                />
+              </div>
 
-          {/* Fecha Hasta */}
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Fecha Hasta</label>
-            <input
-              type="date"
-              name="fecha_hasta"
-              style={styles.input}
-              value={fechaHasta}
-              onChange={(e) => setFechaHasta(e.target.value)}
-            />
-          </div>
-        </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kardex-hasta">Fecha Hasta</Label>
+                <Input
+                  id="kardex-hasta"
+                  type="date"
+                  name="fecha_hasta"
+                  value={fechaHasta}
+                  onChange={(e) => setFechaHasta(e.target.value)}
+                />
+              </div>
+            </div>
 
-        <div style={styles.filterActions}>
-          <button
-            type="submit"
-            disabled={loading}
-            style={styles.btnPrimary}
-          >
-            {loading ? 'Consultando...' : '🔄 Actualizar Consulta'}
-          </button>
-          <button
-            type="button"
-            onClick={handleLimpiarFiltros}
-            disabled={loading}
-            style={styles.btnSecondary}
-          >
-            Limpiar Filtros
-          </button>
-        </div>
-      </form>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleLimpiarFiltros}
+                disabled={loading}
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                Limpiar Filtros
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                ) : (
+                  <Search className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {loading ? 'Consultando...' : 'Actualizar Consulta'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* 4. Mensaje de Error */}
       {error && (
-        <div style={styles.errorBox}>
-          <span>⚠️ {error}</span>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex items-start gap-2.5">
+          <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Error al consultar Kardex Valorizado</p>
+            <p className="mt-0.5">{error}</p>
+          </div>
         </div>
       )}
 
       {/* 5. Tabla Oficial de Kardex Valorizado */}
-      <div style={styles.tableCard}>
-        <div style={styles.tableToolbar}>
+      <Card className="overflow-hidden">
+        <CardHeader className="py-3 px-4 border-b border-slate-200 bg-slate-50/50 flex flex-row items-center justify-between">
           <div>
-            <h2 style={styles.tableTitle}>Movimientos Contables Registrados</h2>
-            <span style={styles.tableMeta}>
-              {movimientos.length} movimiento(s) ordenados cronológicamente por motor Kardex
+            <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <BookOpenCheck className="h-4 w-4 text-slate-700" />
+              Movimientos Contables Registrados
+            </CardTitle>
+            <CardDescription className="text-xs">
+              <span className="font-mono font-semibold text-slate-900">{movimientos.length}</span>{' '}
+              movimiento(s) valorizados cronológicamente por el motor CPP
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Entrada
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span className="h-2 w-2 rounded-full bg-rose-500" />
+              Salida
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-600">
+              <span className="h-2 w-2 rounded-full bg-indigo-500" />
+              Ajuste Valor
             </span>
           </div>
-          <div style={styles.legend}>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, backgroundColor: '#16a34a' }} /> Entrada
-            </span>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, backgroundColor: '#dc2626' }} /> Salida
-            </span>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, backgroundColor: '#2563eb' }} /> Ajuste Valor
-            </span>
-          </div>
-        </div>
+        </CardHeader>
 
         {loading ? (
-          <div style={styles.loadingBox}>
-            <div style={styles.spinner} />
-            <p style={{ marginTop: '12px', color: '#475569', fontSize: '14px' }}>
-              Procesando y valorizando movimientos de Kardex...
-            </p>
+          <div className="py-20 flex flex-col items-center justify-center text-slate-500">
+            <Loader2 className="h-8 w-8 animate-spin text-slate-900 mb-3" />
+            <p className="text-sm font-medium">Procesando y valorizando movimientos de Kardex...</p>
           </div>
         ) : movimientos.length === 0 ? (
-          <div style={styles.emptyBox}>
-            <div style={{ fontSize: '40px', marginBottom: '8px' }}>📭</div>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', margin: 0 }}>
-              No se encontraron movimientos registrados
-            </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+          <div className="py-16 text-center">
+            <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
+              <Inbox className="h-6 w-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-900">No se encontraron movimientos registrados</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
               No hay operaciones registradas para los filtros seleccionados o el producto aún no tiene movimientos confirmados.
             </p>
           </div>
         ) : (
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse">
               <thead>
-                {/* Nivel 1: Agrupación oficial */}
-                <tr>
-                  <th colSpan={5} style={{ ...styles.thGroup, ...styles.thGroupOp }}>
-                    DATOS DE LA OPERACIÓN
+                {/* Nivel 1: Agrupación oficial con estilo B2B */}
+                <tr className="text-[11px] font-bold uppercase tracking-wider text-center border-b border-slate-200">
+                  <th colSpan={5} className="py-2 px-3 bg-slate-100 text-slate-700 border-r border-slate-200">
+                    Datos de la Operación
                   </th>
-                  <th colSpan={3} style={{ ...styles.thGroup, ...styles.thGroupEnt }}>
-                    ENTRADAS
+                  <th colSpan={3} className="py-2 px-3 bg-emerald-50/80 text-emerald-900 border-r border-emerald-100">
+                    Entradas
                   </th>
-                  <th colSpan={3} style={{ ...styles.thGroup, ...styles.thGroupSal }}>
-                    SALIDAS
+                  <th colSpan={3} className="py-2 px-3 bg-amber-50/80 text-amber-900 border-r border-amber-100">
+                    Salidas
                   </th>
-                  <th colSpan={3} style={{ ...styles.thGroup, ...styles.thGroupSaldo }}>
-                    SALDO VALORIZADO
+                  <th colSpan={3} className="py-2 px-3 bg-indigo-50/80 text-indigo-950 font-extrabold">
+                    Saldo Final Valorizado
                   </th>
                 </tr>
 
                 {/* Nivel 2: Subcolumnas */}
-                <tr>
-                  <th style={styles.thSub}>Fecha</th>
-                  <th style={styles.thSub}>Documento Ref.</th>
-                  <th style={styles.thSub}>Tipo Operación</th>
-                  <th style={styles.thSub}>Naturaleza</th>
-                  <th style={styles.thSub}>Almacén</th>
+                <tr className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
+                  <th className="py-2 px-3 text-center w-24">Fecha</th>
+                  <th className="py-2 px-3">Documento Ref.</th>
+                  <th className="py-2 px-3">Tipo Operación</th>
+                  <th className="py-2 px-3 text-center w-24">Naturaleza</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Almacén</th>
 
                   {/* Entradas */}
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Cantidad</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Costo Unit.</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Valor Total</th>
+                  <th className="py-2 px-3 text-right bg-emerald-50/40">Cantidad</th>
+                  <th className="py-2 px-3 text-right bg-emerald-50/40">Costo Unit.</th>
+                  <th className="py-2 px-3 text-right bg-emerald-50/40 border-r border-emerald-100">Valor Total</th>
 
                   {/* Salidas */}
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Cantidad</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Costo Unit.</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Valor Total</th>
+                  <th className="py-2 px-3 text-right bg-amber-50/40">Cantidad</th>
+                  <th className="py-2 px-3 text-right bg-amber-50/40">Costo Unit.</th>
+                  <th className="py-2 px-3 text-right bg-amber-50/40 border-r border-amber-100">Valor Total</th>
 
                   {/* Saldo Final */}
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Cantidad</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>C.P.P.</th>
-                  <th style={{ ...styles.thSub, ...styles.textRight }}>Valor Total</th>
+                  <th className="py-2 px-3 text-right bg-indigo-50/40">Cantidad</th>
+                  <th className="py-2 px-3 text-right bg-indigo-50/40">C.P.P.</th>
+                  <th className="py-2 px-3 text-right bg-indigo-50/40 font-bold text-slate-900">Valor Total</th>
                 </tr>
               </thead>
 
-              <tbody>
-                {movimientos.map((mov, idx) => {
+              <tbody className="divide-y divide-slate-100">
+                {movimientos.map((mov) => {
                   const isEntrada = mov.naturaleza === 'ENTRADA';
                   const isSalida = mov.naturaleza === 'SALIDA';
                   const isAjuste = mov.naturaleza === 'AJUSTE_VALOR';
@@ -487,101 +510,88 @@ export const KardexPage: React.FC = () => {
                   return (
                     <tr
                       key={mov.id}
-                      style={{
-                        backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
-                      }}
+                      className="hover:bg-slate-50/80 transition-colors"
                     >
                       {/* Fecha */}
-                      <td style={{ ...styles.td, textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      <td className="py-2 px-3 text-center font-mono tabular-nums whitespace-nowrap text-slate-700">
                         {mov.fecha}
                       </td>
 
                       {/* Documento Ref */}
-                      <td style={{ ...styles.td, fontWeight: 500 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span>{mov.documento_referencia || '—'}</span>
+                      <td className="py-2 px-3 font-medium text-slate-900">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono tabular-nums">{mov.documento_referencia || '—'}</span>
                           {mov.es_extorno && (
-                            <span style={styles.tagWarning} title="Movimiento de extorno">
-                              EXTORNO
-                            </span>
+                            <Badge variant="warning" size="xs">EXTORNO</Badge>
                           )}
                           {mov.generado_por_motor && (
-                            <span style={styles.tagInfo} title="Ajuste automático generado por el motor">
-                              MOTOR
-                            </span>
+                            <Badge variant="info" size="xs">MOTOR</Badge>
                           )}
                         </div>
                       </td>
 
                       {/* Tipo Operación */}
-                      <td style={styles.td} title={mov.tipo_operacion_descripcion}>
-                        <span style={{ fontWeight: 600, color: '#1e293b' }}>
-                          {mov.tipo_operacion_codigo}
-                        </span>{' '}
-                        <span style={{ color: '#475569', fontSize: '11px' }}>
-                          {mov.tipo_operacion_descripcion}
-                        </span>
+                      <td className="py-2 px-3 max-w-[200px]" title={mov.tipo_operacion_descripcion}>
+                        <div className="truncate">
+                          <span className="font-mono font-semibold text-slate-900">{mov.tipo_operacion_codigo}</span>{' '}
+                          <span className="text-slate-500 text-[11px]">{mov.tipo_operacion_descripcion}</span>
+                        </div>
                       </td>
 
                       {/* Naturaleza */}
-                      <td style={{ ...styles.td, textAlign: 'center' }}>
-                        <span
-                          style={{
-                            ...styles.badgeNaturaleza,
-                            backgroundColor: isEntrada
-                              ? '#dcfce7'
-                              : isSalida
-                              ? '#fee2e2'
-                              : '#dbeafe',
-                            color: isEntrada
-                              ? '#166534'
-                              : isSalida
-                              ? '#991b1b'
-                              : '#1e40af',
-                          }}
+                      <td className="py-2 px-3 text-center">
+                        <Badge
+                          variant={isEntrada ? 'success' : isSalida ? 'destructive' : 'info'}
+                          size="xs"
                         >
                           {mov.naturaleza}
-                        </span>
+                        </Badge>
                       </td>
 
                       {/* Almacén */}
-                      <td style={styles.td}>
-                        <span style={{ fontSize: '12px', color: '#334155' }}>
-                          {mov.almacen_codigo} - {mov.almacen_nombre}
-                        </span>
+                      <td className="py-2 px-3 border-r border-slate-200 text-slate-600 truncate max-w-[150px]">
+                        <span className="font-mono">{mov.almacen_codigo}</span> - {mov.almacen_nombre}
                       </td>
 
                       {/* Bloque Entradas */}
-                      <td style={{ ...styles.td, ...styles.numCell, color: isEntrada || (isAjuste && mov.entrada_valor) ? '#166534' : '#64748b' }}>
+                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 ${
+                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-semibold' : 'text-slate-400'
+                      }`}>
                         {formatQty(mov.entrada_cantidad)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell }}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 text-slate-600">
                         {formatCost(mov.entrada_costo_unitario)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell, fontWeight: 600, color: isEntrada || (isAjuste && mov.entrada_valor) ? '#166534' : '#64748b' }}>
-                        {formatMoney(mov.entrada_valor)}
+                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 border-r border-emerald-100 ${
+                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-bold' : 'text-slate-400'
+                      }`}>
+                        {mov.entrada_valor ? `S/ ${formatMoney(mov.entrada_valor)}` : '—'}
                       </td>
 
                       {/* Bloque Salidas */}
-                      <td style={{ ...styles.td, ...styles.numCell, color: isSalida || (isAjuste && mov.salida_valor) ? '#991b1b' : '#64748b' }}>
+                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 ${
+                        isSalida || (isAjuste && mov.salida_valor) ? 'text-rose-700 font-semibold' : 'text-slate-400'
+                      }`}>
                         {formatQty(mov.salida_cantidad)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell }}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 text-slate-600">
                         {formatCost(mov.salida_costo_unitario)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell, fontWeight: 600, color: isSalida || (isAjuste && mov.salida_valor) ? '#991b1b' : '#64748b' }}>
-                        {formatMoney(mov.salida_valor)}
+                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 border-r border-amber-100 ${
+                        isSalida || (isAjuste && mov.salida_valor) ? 'text-rose-700 font-bold' : 'text-slate-400'
+                      }`}>
+                        {mov.salida_valor ? `S/ ${formatMoney(mov.salida_valor)}` : '—'}
                       </td>
 
                       {/* Bloque Saldo Final */}
-                      <td style={{ ...styles.td, ...styles.numCell, fontWeight: 600, color: '#0f172a' }}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 bg-indigo-50/20">
                         {formatQty(mov.saldo_cantidad)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell, color: '#0f172a' }}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-800 bg-indigo-50/20">
                         {formatCost(mov.cpp)}
                       </td>
-                      <td style={{ ...styles.td, ...styles.numCell, fontWeight: 700, color: '#0f172a' }}>
-                        {formatMoney(mov.saldo_valor)}
+                      <td className="py-2 px-3 text-right font-mono tabular-nums font-bold text-slate-950 bg-indigo-50/20">
+                        S/ {formatMoney(mov.saldo_valor)}
                       </td>
                     </tr>
                   );
@@ -591,33 +601,33 @@ export const KardexPage: React.FC = () => {
               {/* Pie de tabla con totales oficiales */}
               {resumen && (
                 <tfoot>
-                  <tr style={styles.tfootRow}>
-                    <td colSpan={5} style={{ ...styles.tdFoot, textAlign: 'right', fontWeight: 700 }}>
+                  <tr className="bg-slate-100/90 font-semibold border-t-2 border-slate-900 text-xs">
+                    <td colSpan={5} className="py-2.5 px-3 text-right font-bold text-slate-900 border-r border-slate-200">
                       TOTALES DEL PERÍODO:
                     </td>
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 700 }}>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-800 bg-emerald-50/50">
                       {formatQty(resumen.total_entradas_cantidad)}
                     </td>
-                    <td style={{ ...styles.tdFoot, textAlign: 'center', color: '#94a3b8' }}>—</td>
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 700, color: '#166534' }}>
+                    <td className="py-2.5 px-3 text-center text-slate-400 bg-emerald-50/50">—</td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-800 bg-emerald-50/50 border-r border-emerald-200">
                       S/ {formatMoney(resumen.total_entradas_valor)}
                     </td>
 
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 700 }}>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-rose-800 bg-amber-50/50">
                       {formatQty(resumen.total_salidas_cantidad)}
                     </td>
-                    <td style={{ ...styles.tdFoot, textAlign: 'center', color: '#94a3b8' }}>—</td>
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 700, color: '#991b1b' }}>
+                    <td className="py-2.5 px-3 text-center text-slate-400 bg-amber-50/50">—</td>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-rose-800 bg-amber-50/50 border-r border-amber-200">
                       S/ {formatMoney(resumen.total_salidas_valor)}
                     </td>
 
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 800 }}>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-slate-950 bg-indigo-50/50">
                       {formatQty(resumen.saldo_final_cantidad)}
                     </td>
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 700 }}>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900 bg-indigo-50/50">
                       {formatCost(resumen.cpp_final)}
                     </td>
-                    <td style={{ ...styles.tdFoot, ...styles.numCell, fontWeight: 800, color: '#0f172a' }}>
+                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-slate-950 bg-indigo-50/50">
                       S/ {formatMoney(resumen.saldo_final_valor)}
                     </td>
                   </tr>
@@ -626,379 +636,7 @@ export const KardexPage: React.FC = () => {
             </table>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    padding: '24px 32px',
-    maxWidth: '1600px',
-    margin: '0 auto',
-    color: '#0f172a',
-    fontFamily: 'inherit',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '20px',
-    flexWrap: 'wrap',
-    gap: '16px',
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-    marginBottom: '8px',
-  },
-  badgePrimary: {
-    fontSize: '11px',
-    fontWeight: 700,
-    letterSpacing: '0.05em',
-    padding: '3px 8px',
-    borderRadius: '4px',
-    backgroundColor: '#0f172a',
-    color: '#ffffff',
-  },
-  badgeNeutral: {
-    fontSize: '11px',
-    fontWeight: 600,
-    padding: '3px 8px',
-    borderRadius: '4px',
-    backgroundColor: '#f1f5f9',
-    color: '#475569',
-    border: '1px solid #cbd5e1',
-  },
-  badgeSuccess: {
-    fontSize: '11px',
-    fontWeight: 700,
-    padding: '3px 8px',
-    borderRadius: '4px',
-    backgroundColor: '#dcfce7',
-    color: '#166534',
-    border: '1px solid #bbf7d0',
-  },
-  title: {
-    fontSize: '24px',
-    fontWeight: 800,
-    color: '#0f172a',
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontSize: '13px',
-    color: '#475569',
-    margin: '4px 0 0',
-  },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  btnExport: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '10px 18px',
-    fontSize: '13px',
-    fontWeight: 700,
-    borderRadius: '6px',
-    backgroundColor: '#166534',
-    color: '#ffffff',
-    border: 'none',
-    boxShadow: '0 2px 4px rgba(22, 101, 52, 0.25)',
-    transition: 'all 0.15s ease',
-  },
-  kpiGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-    gap: '14px',
-    marginBottom: '20px',
-  },
-  kpiCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: '8px',
-    padding: '14px 16px',
-    border: '1px solid #e2e8f0',
-    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
-  },
-  kpiHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '6px',
-  },
-  kpiLabel: {
-    fontSize: '11px',
-    fontWeight: 700,
-    color: '#64748b',
-    letterSpacing: '0.04em',
-  },
-  kpiIcon: {
-    width: '26px',
-    height: '26px',
-    borderRadius: '6px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '13px',
-  },
-  kpiValue: {
-    fontSize: '20px',
-    fontWeight: 800,
-    color: '#0f172a',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  kpiFooter: {
-    fontSize: '11px',
-    color: '#64748b',
-    marginTop: '4px',
-  },
-  filterCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: '8px',
-    padding: '16px 20px',
-    border: '1px solid #e2e8f0',
-    marginBottom: '20px',
-    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
-  },
-  filterHeader: {
-    marginBottom: '14px',
-  },
-  filterTitle: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: '#0f172a',
-    marginRight: '8px',
-  },
-  filterSubtitle: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  filterGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '12px',
-    marginBottom: '14px',
-  },
-  fieldGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  label: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#334155',
-  },
-  select: {
-    padding: '8px 10px',
-    fontSize: '12px',
-    color: '#0f172a',
-    backgroundColor: '#ffffff',
-    border: '1px solid #cbd5e1',
-    borderRadius: '5px',
-    outline: 'none',
-  },
-  input: {
-    padding: '8px 10px',
-    fontSize: '12px',
-    color: '#0f172a',
-    backgroundColor: '#ffffff',
-    border: '1px solid #cbd5e1',
-    borderRadius: '5px',
-    outline: 'none',
-  },
-  filterActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '10px',
-    borderTop: '1px solid #f1f5f9',
-    paddingTop: '12px',
-  },
-  btnPrimary: {
-    padding: '8px 16px',
-    fontSize: '12px',
-    fontWeight: 700,
-    backgroundColor: '#0f172a',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  btnSecondary: {
-    padding: '8px 16px',
-    fontSize: '12px',
-    fontWeight: 600,
-    backgroundColor: '#f1f5f9',
-    color: '#334155',
-    border: '1px solid #cbd5e1',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  errorBox: {
-    backgroundColor: '#fef2f2',
-    color: '#991b1b',
-    border: '1px solid #fecaca',
-    borderRadius: '6px',
-    padding: '12px 16px',
-    fontSize: '13px',
-    marginBottom: '16px',
-  },
-  tableCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-    overflow: 'hidden',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
-  },
-  tableToolbar: {
-    padding: '14px 20px',
-    borderBottom: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  tableTitle: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#0f172a',
-    margin: 0,
-  },
-  tableMeta: {
-    fontSize: '12px',
-    color: '#64748b',
-  },
-  legend: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '14px',
-  },
-  legendItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px',
-    fontSize: '11px',
-    color: '#475569',
-    fontWeight: 600,
-  },
-  legendDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-  },
-  loadingBox: {
-    padding: '60px 20px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  spinner: {
-    width: '32px',
-    height: '32px',
-    border: '3px solid #e2e8f0',
-    borderTop: '3px solid #0f172a',
-    borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite',
-  },
-  emptyBox: {
-    padding: '60px 20px',
-    textAlign: 'center',
-  },
-  tableWrapper: {
-    overflowX: 'auto',
-    width: '100%',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '12px',
-  },
-  thGroup: {
-    padding: '8px 12px',
-    fontSize: '11px',
-    fontWeight: 800,
-    letterSpacing: '0.04em',
-    textAlign: 'center',
-    color: '#ffffff',
-    borderBottom: '1px solid #cbd5e1',
-  },
-  thGroupOp: {
-    backgroundColor: '#1e293b',
-  },
-  thGroupEnt: {
-    backgroundColor: '#1e3a8a',
-  },
-  thGroupSal: {
-    backgroundColor: '#7c2d12',
-  },
-  thGroupSaldo: {
-    backgroundColor: '#065f46',
-  },
-  thSub: {
-    backgroundColor: '#f1f5f9',
-    color: '#1e293b',
-    padding: '8px 10px',
-    fontWeight: 700,
-    fontSize: '11px',
-    textAlign: 'left',
-    borderBottom: '2px solid #cbd5e1',
-    borderRight: '1px solid #e2e8f0',
-    whiteSpace: 'nowrap',
-  },
-  td: {
-    padding: '8px 10px',
-    borderBottom: '1px solid #e2e8f0',
-    borderRight: '1px solid #f1f5f9',
-    color: '#0f172a',
-  },
-  numCell: {
-    textAlign: 'right',
-    fontVariantNumeric: 'tabular-nums',
-    whiteSpace: 'nowrap',
-  },
-  textRight: {
-    textAlign: 'right',
-  },
-  badgeNaturaleza: {
-    display: 'inline-block',
-    fontSize: '10px',
-    fontWeight: 700,
-    padding: '2px 6px',
-    borderRadius: '4px',
-    letterSpacing: '0.02em',
-  },
-  tagWarning: {
-    fontSize: '9px',
-    fontWeight: 800,
-    backgroundColor: '#fef3c7',
-    color: '#92400e',
-    padding: '1px 4px',
-    borderRadius: '3px',
-    border: '1px solid #fde68a',
-  },
-  tagInfo: {
-    fontSize: '9px',
-    fontWeight: 800,
-    backgroundColor: '#f3e8ff',
-    color: '#6b21a8',
-    padding: '1px 4px',
-    borderRadius: '3px',
-    border: '1px solid #e9d5ff',
-  },
-  tfootRow: {
-    backgroundColor: '#f1f5f9',
-    borderTop: '2px solid #0f172a',
-    borderBottom: '3px double #0f172a',
-  },
-  tdFoot: {
-    padding: '10px',
-    fontSize: '12px',
-    color: '#0f172a',
-  },
 };
