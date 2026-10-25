@@ -32,6 +32,7 @@ import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
+import { fechaCalendarioLocal } from '../../utils/date'
 
 export const IncidenciasPage: React.FC = () => {
   const { empresaActiva, usuario } = useAuth()
@@ -45,9 +46,7 @@ export const IncidenciasPage: React.FC = () => {
 
   // Formulario de Recálculo Manual
   const [recalculoProducto, setRecalculoProducto] = useState<string>('')
-  const [recalculoFecha, setRecalculoFecha] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  )
+  const [recalculoFecha, setRecalculoFecha] = useState<string>(() => fechaCalendarioLocal())
   const [ejecutandoRecalculo, setEjecutandoRecalculo] = useState<boolean>(false)
 
   // Modal de Detalle de Recálculo

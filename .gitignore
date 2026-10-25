@@ -12,6 +12,7 @@ frontend/dist/
 # Entornos y secretos
 .env
 *.env.local
+backend/.secret_key.dev
 
 # IDEs y Sistema
 .vscode/

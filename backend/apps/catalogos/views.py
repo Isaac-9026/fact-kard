@@ -1,4 +1,6 @@
 from datetime import date
+
+from django.db import transaction
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,6 +10,8 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRespon
 from rest_framework.permissions import IsAuthenticated
 from apps.usuarios.permissions import EsAdminOEsAdminGlobal
 from apps.auditoria.services import registrar_auditoria
+from apps.empresas.models import Empresa
+from apps.usuarios.models import UsuarioEmpresa
 
 from apps.catalogos.models import (
     Moneda,
@@ -73,23 +77,15 @@ class TipoCambioListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        instance = serializer.save()
-        empresa_id_raw = (
-            self.request.headers.get('X-Empresa-Id') or
-            self.request.META.get('HTTP_X_EMPRESA_ID')
-        )
-        empresa_id = None
-        if empresa_id_raw:
-            try:
-                empresa_id = int(empresa_id_raw)
-            except (ValueError, TypeError):
-                pass
-        if empresa_id and hasattr(self.request, 'user') and getattr(self.request.user, 'is_authenticated', False):
+        # BE-001: el TipoCambio y su auditoría se guardan en una sola transacción.
+        # Si la auditoría falla, el TipoCambio no queda persistido (rollback).
+        with transaction.atomic():
+            instance = serializer.save()
             registrar_auditoria(
-                empresa_id=empresa_id,
+                empresa_id=self._empresa_id_auditoria(),
                 usuario_id=self.request.user.id,
                 accion='CREAR',
-                tabla='TIPO_CAMBIO',
+                entidad='TIPO_CAMBIO',
                 registro_id=instance.id,
                 valor_anterior=None,
                 valor_nuevo={
@@ -101,6 +97,27 @@ class TipoCambioListCreateView(generics.ListCreateAPIView):
                 },
                 motivo='Registro contable oficial de tipo de cambio SBS',
             )
+
+    def _empresa_id_auditoria(self):
+        """
+        El tipo de cambio es global. Se asocia la auditoría a la empresa del header
+        solo si el usuario tiene una asignación activa en ella; si no, queda sin empresa.
+        """
+        empresa_id_raw = (
+            self.request.headers.get('X-Empresa-Id') or
+            self.request.META.get('HTTP_X_EMPRESA_ID')
+        )
+        try:
+            empresa_id = int(empresa_id_raw)
+        except (TypeError, ValueError):
+            return None
+        usuario = self.request.user
+        if getattr(usuario, 'es_admin_global', False):
+            return empresa_id if Empresa.objects.filter(pk=empresa_id).exists() else None
+        asignado = UsuarioEmpresa.objects.filter(
+            usuario_id=usuario.id, empresa_id=empresa_id, activo=True,
+        ).exists()
+        return empresa_id if asignado else None
 
 
 class TipoCambioResolverView(APIView):

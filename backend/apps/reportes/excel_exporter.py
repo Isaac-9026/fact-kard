@@ -3,6 +3,7 @@ from decimal import Decimal
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from rest_framework.exceptions import ValidationError
 
 from apps.empresas.models import Empresa, Periodo
 from apps.inventario.models import Producto, Almacen
@@ -68,6 +69,30 @@ def ajustar_ancho_columnas(ws, min_width=12):
         ws.column_dimensions[col_letter].width = max(max_len + 3, min_width)
 
 
+def resolver_filtros_excel_kardex(*, empresa_id, periodo_id=None, producto_id=None, almacen_id=None):
+    """
+    SEC-003: resuelve los filtros del encabezado SOLO dentro de la empresa activa.
+    Un ID de otra empresa (o inexistente) se rechaza con 400 sin revelar ningún dato.
+    """
+    periodo = producto = almacen = None
+    errores = {}
+    if periodo_id:
+        periodo = Periodo.objects.filter(pk=periodo_id, empresa_id=empresa_id).first()
+        if periodo is None:
+            errores['periodo_id'] = 'El período no existe o no pertenece a la empresa activa.'
+    if producto_id:
+        producto = Producto.objects.filter(pk=producto_id, empresa_id=empresa_id).first()
+        if producto is None:
+            errores['producto_id'] = 'El producto no existe o no pertenece a la empresa activa.'
+    if almacen_id:
+        almacen = Almacen.objects.filter(pk=almacen_id, empresa_id=empresa_id).first()
+        if almacen is None:
+            errores['almacen_id'] = 'El almacén no existe o no pertenece a la empresa activa.'
+    if errores:
+        raise ValidationError(errores)
+    return periodo, producto, almacen
+
+
 def generar_libro_excel_kardex(
     empresa_id: int,
     periodo_id: int = None,
@@ -84,6 +109,13 @@ def generar_libro_excel_kardex(
     3. Incidencias (incidencias de período/empresa)
     4. Resumen de Saldos (resumen por producto y establecimiento)
     """
+    periodo_filtro, producto_filtro, almacen_filtro = resolver_filtros_excel_kardex(
+        empresa_id=empresa_id,
+        periodo_id=periodo_id,
+        producto_id=producto_id,
+        almacen_id=almacen_id,
+    )
+
     empresa = Empresa.objects.filter(pk=empresa_id).first()
     razon_social = empresa.razon_social if empresa else f"Empresa #{empresa_id}"
     ruc = empresa.ruc if empresa else "S/N"
@@ -118,19 +150,16 @@ def generar_libro_excel_kardex(
 
     # Filtros informativos
     periodo_txt = "Todos"
-    if periodo_id:
-        p = Periodo.objects.filter(pk=periodo_id).first()
-        periodo_txt = f"{p.anio}-{p.mes:02d}" if p else str(periodo_id)
+    if periodo_filtro:
+        periodo_txt = f"{periodo_filtro.anio}-{periodo_filtro.mes:02d}"
 
     prod_txt = "Todos los productos"
-    if producto_id:
-        pr = Producto.objects.filter(pk=producto_id).first()
-        prod_txt = f"{pr.codigo_interno} - {pr.descripcion}" if pr else str(producto_id)
+    if producto_filtro:
+        prod_txt = f"{producto_filtro.codigo_interno} - {producto_filtro.descripcion}"
 
     almacen_txt = "Todos los almacenes"
-    if almacen_id:
-        alm = Almacen.objects.filter(pk=almacen_id).first()
-        almacen_txt = f"{alm.codigo} - {alm.nombre}" if alm else str(almacen_id)
+    if almacen_filtro:
+        almacen_txt = f"{almacen_filtro.codigo} - {almacen_filtro.nombre}"
 
     ws1["A3"] = f"Período: {periodo_txt} | Producto: {prod_txt} | Almacén: {almacen_txt}"
     ws1["A3"].font = HEADER_VAL_FONT

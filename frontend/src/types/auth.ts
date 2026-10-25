@@ -29,6 +29,7 @@ export interface AuthContextType {
   empresasDisponibles: EmpresaAsociada[];
   token: string | null;
   isAuthenticated: boolean;
+  verificandoSesion: boolean;
   login: (token: string, usuario: Usuario, empresas: EmpresaAsociada[]) => void;
   logout: () => void;
   registrarEmpresaDisponible: (empresa: EmpresaAsociada) => void;

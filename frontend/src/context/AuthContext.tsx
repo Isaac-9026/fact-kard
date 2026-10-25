@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getMeApi } from '../api/auth';
+import { registrarManejadorSesionInvalida, reiniciarControlSesion } from '../api/http';
 import type { Usuario, EmpresaAsociada, EmpresaActiva, AuthContextType } from '../types/auth';
 import { reconciliarEstadoEmpresas } from './authState';
 
@@ -8,6 +9,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const refrescoEmpresasEnCurso = useRef<Promise<EmpresaAsociada[]> | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
+  // FE-002: con un token guardado, no se muestra contenido privado hasta que /me lo valide.
+  const [verificandoSesion, setVerificandoSesion] = useState<boolean>(() => Boolean(localStorage.getItem('token')));
   const [usuario, setUsuario] = useState<Usuario | null>(() => {
     const saved = localStorage.getItem('usuario');
     if (!saved) return null;
@@ -87,11 +90,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [persistirEstadoEmpresas]);
 
   useEffect(() => {
-    if (!token) return;
-    void refrescarEmpresasDisponibles().catch(() => undefined);
+    if (!token) {
+      setVerificandoSesion(false);
+      return;
+    }
+    void refrescarEmpresasDisponibles()
+      .catch(() => undefined)
+      .finally(() => setVerificandoSesion(false));
   }, [refrescarEmpresasDisponibles, token]);
 
   const login = (newToken: string, newUsuario: Usuario, empresas: EmpresaAsociada[]) => {
+    reiniciarControlSesion();
+    setVerificandoSesion(false);
     setToken(newToken);
     setUsuario(newUsuario);
     setEmpresasDisponibles(empresas);
@@ -122,7 +132,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
+    setVerificandoSesion(false);
     setToken(null);
     setUsuario(null);
     setEmpresaActiva(null);
@@ -135,7 +146,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem('usuario');
     localStorage.removeItem('empresas_disponibles');
     localStorage.removeItem('empresa_activa');
-  };
+  }, []);
+
+  // FE-002: un 401 de la sesión vigente limpia la sesión; RutaProtegida redirige a /login.
+  useEffect(() => registrarManejadorSesionInvalida(logout), [logout]);
 
   const registrarEmpresaDisponible = (empresa: EmpresaAsociada) => {
     setEmpresasDisponibles((actuales) => {
@@ -175,6 +189,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         empresasDisponibles,
         token,
         isAuthenticated: !!token,
+        verificandoSesion,
         login,
         logout,
         registrarEmpresaDisponible,

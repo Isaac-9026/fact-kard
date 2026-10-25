@@ -40,6 +40,12 @@ import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
+import { fechaCalendarioLocal } from '../../utils/date'
+import {
+  nuevoTipoCambioInicial,
+  payloadTipoCambio,
+  type NuevoTipoCambioForm,
+} from '../../utils/tipoCambioForm'
 
 export const CatalogosPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('tc')
@@ -57,20 +63,14 @@ export const CatalogosPage: React.FC = () => {
 
   // Resolver tester state
   const [testMoneda, setTestMoneda] = useState('USD')
-  const [testFecha, setTestFecha] = useState(() => new Date().toISOString().split('T')[0])
+  const [testFecha, setTestFecha] = useState(() => fechaCalendarioLocal())
   const [resolviendo, setResolviendo] = useState(false)
   const [resolverError, setResolverError] = useState<string | null>(null)
   const [resolverResult, setResolverResult] = useState<TipoCambioResolverResult | null>(null)
 
   // New TC modal/form state
   const [modalTcOpen, setModalTcOpen] = useState(false)
-  const [nuevoTc, setNuevoTc] = useState({
-    moneda_codigo: 'USD',
-    fecha_publicacion: new Date().toISOString().split('T')[0],
-    compra: '',
-    venta: '',
-    fuente: 'SBS',
-  })
+  const [nuevoTc, setNuevoTc] = useState<NuevoTipoCambioForm>(() => nuevoTipoCambioInicial())
   const [guardandoTc, setGuardandoTc] = useState(false)
 
   // Initial load
@@ -125,25 +125,21 @@ export const CatalogosPage: React.FC = () => {
 
   const handleCrearTc = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (guardandoTc) return
+    let payload
+    try {
+      payload = payloadTipoCambio(nuevoTc)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Fecha de publicación inválida.')
+      return
+    }
     setGuardandoTc(true)
     setError(null)
     try {
-      const creado = await crearTipoCambio({
-        moneda_codigo: nuevoTc.moneda_codigo,
-        fecha_publicacion: nuevoTc.fecha_publicacion,
-        compra: nuevoTc.compra,
-        venta: nuevoTc.venta,
-        fuente: nuevoTc.fuente || 'SBS',
-      })
+      const creado = await crearTipoCambio(payload)
       setTiposCambio((prev) => [creado, ...prev])
       setModalTcOpen(false)
-      setNuevoTc({
-        moneda_codigo: 'USD',
-        fecha_publicacion: new Date().toISOString().split('T')[0],
-        compra: '',
-        venta: '',
-        fuente: 'SBS',
-      })
+      setNuevoTc(nuevoTipoCambioInicial())
     } catch (err: unknown) {
       const respData = (err as { response?: { data?: Record<string, string[] | string> } })?.response?.data
       let msg = 'Error al registrar el tipo de cambio.'
@@ -687,7 +683,10 @@ export const CatalogosPage: React.FC = () => {
               <Label required>Moneda</Label>
               <Select
                 value={nuevoTc.moneda_codigo}
-                onChange={(e) => setNuevoTc({ ...nuevoTc, moneda_codigo: e.target.value })}
+                onChange={(e) => {
+                  const valor = e.target.value
+                  setNuevoTc((prev) => ({ ...prev, moneda_codigo: valor }))
+                }}
                 required
               >
                 <option value="USD">USD — Dólares Americanos</option>
@@ -700,7 +699,10 @@ export const CatalogosPage: React.FC = () => {
               <Input
                 type="date"
                 value={nuevoTc.fecha_publicacion}
-                onChange={(e) => setNuevoTc({ ...nuevoTc, fecha_publicacion: e.target.value })}
+                onChange={(e) => {
+                  const valor = e.target.value
+                  setNuevoTc((prev) => ({ ...prev, fecha_publicacion: valor }))
+                }}
                 required
                 className="font-mono tabular-nums"
               />
@@ -715,7 +717,10 @@ export const CatalogosPage: React.FC = () => {
                   min="0.00000001"
                   placeholder="3.74200000"
                   value={nuevoTc.compra}
-                  onChange={(e) => setNuevoTc({ ...nuevoTc, compra: e.target.value })}
+                  onChange={(e) => {
+                    const valor = e.target.value
+                    setNuevoTc((prev) => ({ ...prev, compra: valor }))
+                  }}
                   className="font-mono tabular-nums"
                   required
                 />
@@ -729,7 +734,10 @@ export const CatalogosPage: React.FC = () => {
                   min="0.00000001"
                   placeholder="3.75100000"
                   value={nuevoTc.venta}
-                  onChange={(e) => setNuevoTc({ ...nuevoTc, venta: e.target.value })}
+                  onChange={(e) => {
+                    const valor = e.target.value
+                    setNuevoTc((prev) => ({ ...prev, venta: valor }))
+                  }}
                   className="font-mono tabular-nums"
                   required
                 />
@@ -741,7 +749,10 @@ export const CatalogosPage: React.FC = () => {
               <Input
                 type="text"
                 value={nuevoTc.fuente}
-                onChange={(e) => setNuevoTc({ ...nuevoTc, fuente: e.target.value })}
+                onChange={(e) => {
+                  const valor = e.target.value
+                  setNuevoTc((prev) => ({ ...prev, fuente: valor }))
+                }}
                 placeholder="SBS / SUNAT"
                 required
               />

@@ -343,15 +343,22 @@ def crear_documento(
             except Producto.DoesNotExist:
                 raise ValidationError({'detalles': f"Línea {linea_num}: El producto no existe o no pertenece a la empresa activa."})
 
+        # SEC-004: la unidad debe pertenecer a un producto de la empresa activa
+        # y solo se acepta junto con su producto.
         producto_unidad = None
         pu_val = linea_data.get('producto_unidad') or linea_data.get('producto_unidad_id')
         if isinstance(pu_val, ProductoUnidad):
             producto_unidad = pu_val
+            if producto_unidad.producto.empresa_id != empresa_id:
+                raise ValidationError({'detalles': f"Línea {linea_num}: La unidad de producto no existe o no pertenece a la empresa activa."})
         elif pu_val:
             try:
-                producto_unidad = ProductoUnidad.objects.get(id=pu_val)
-            except ProductoUnidad.DoesNotExist:
-                raise ValidationError({'detalles': f"Línea {linea_num}: La unidad de producto no existe."})
+                producto_unidad = ProductoUnidad.objects.get(id=pu_val, producto__empresa_id=empresa_id)
+            except (ProductoUnidad.DoesNotExist, ValueError, TypeError):
+                raise ValidationError({'detalles': f"Línea {linea_num}: La unidad de producto no existe o no pertenece a la empresa activa."})
+
+        if producto_unidad and not producto:
+            raise ValidationError({'detalles': f"Línea {linea_num}: Debe indicar el producto al que pertenece la unidad seleccionada."})
 
         if producto and producto_unidad and producto_unidad.producto_id != producto.id:
             raise ValidationError(
@@ -408,15 +415,24 @@ def crear_documento(
                 costo_unitario_pen = Decimal('0.00000000')
 
         # Detalle de Origen (para notas)
+        # SEC-005: el detalle de origen solo aplica a notas, debe ser de la empresa
+        # activa y pertenecer al documento de origen de la nota.
         detalle_origen = None
         det_origen_val = linea_data.get('detalle_origen') or linea_data.get('detalle_origen_id')
+        if det_origen_val and not tipo_comprobante.es_nota:
+            raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen solo se admite en Notas de Crédito o Débito."})
         if isinstance(det_origen_val, DocumentoDetalle):
             detalle_origen = det_origen_val
+            if detalle_origen.documento.empresa_id != empresa_id:
+                raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen no existe o no pertenece a la empresa activa."})
         elif det_origen_val:
             try:
-                detalle_origen = DocumentoDetalle.objects.get(id=det_origen_val)
-            except DocumentoDetalle.DoesNotExist:
-                raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen no existe."})
+                detalle_origen = DocumentoDetalle.objects.get(id=det_origen_val, documento__empresa_id=empresa_id)
+            except (DocumentoDetalle.DoesNotExist, ValueError, TypeError):
+                raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen no existe o no pertenece a la empresa activa."})
+
+        if detalle_origen and not documento_origen:
+            raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen requiere un documento de origen."})
 
         if detalle_origen and documento_origen and detalle_origen.documento_id != documento_origen.id:
             raise ValidationError(
