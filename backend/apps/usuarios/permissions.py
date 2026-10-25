@@ -81,3 +81,53 @@ class EsAdminEmpresa(BasePermission):
             return True
 
         raise PermissionDenied(self.message)
+
+
+class EsAdminGlobal(BasePermission):
+    """
+    Permiso reusable de DRF que exige privilegios globales de superadministrador ('es_admin_global=True').
+    """
+    message = "Operación restringida: se requieren privilegios de Administrador Global del sistema."
+
+    def has_permission(self, request, view):
+        usuario = getattr(request, 'user', None)
+        if not usuario or not getattr(usuario, 'is_authenticated', False) or not getattr(usuario, 'activo', False):
+            raise NotAuthenticated("Se requiere autenticación para acceder a este recurso.")
+
+        if getattr(usuario, 'es_admin_global', False):
+            return True
+
+        raise PermissionDenied(self.message)
+
+
+class EsAdminOEsAdminGlobal(BasePermission):
+    """
+    Permiso reusable de DRF que exige que el usuario sea Administrador Global
+    o Administrador de al menos una empresa activa.
+    """
+    message = "Operación restringida: se requieren privilegios de Administrador para registrar tipos de cambio."
+
+    def has_permission(self, request, view):
+        usuario = getattr(request, 'user', None)
+        if not usuario or not getattr(usuario, 'is_authenticated', False) or not getattr(usuario, 'activo', False):
+            raise NotAuthenticated("Se requiere autenticación para acceder a este recurso.")
+
+        if getattr(usuario, 'es_admin_global', False):
+            return True
+
+        # Verificar si tiene rol ADMIN en la empresa del header
+        empresa_id_raw = request.headers.get('X-Empresa-Id') or request.META.get('HTTP_X_EMPRESA_ID')
+        if empresa_id_raw:
+            try:
+                empresa_id = int(empresa_id_raw)
+                ue = UsuarioEmpresa.objects.filter(usuario=usuario, empresa_id=empresa_id, activo=True).first()
+                if ue and ue.rol == 'ADMIN':
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        # Verificar si tiene rol ADMIN en alguna empresa activa
+        if UsuarioEmpresa.objects.filter(usuario=usuario, rol='ADMIN', activo=True).exists():
+            return True
+
+        raise PermissionDenied(self.message)

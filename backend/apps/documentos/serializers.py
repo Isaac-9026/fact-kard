@@ -192,6 +192,19 @@ class DocumentoCreateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id']
 
+    def validate(self, attrs):
+        periodo = attrs.get('periodo')
+        fecha_emision = attrs.get('fecha_emision')
+        if periodo and fecha_emision:
+            if not (periodo.fecha_inicio <= fecha_emision <= periodo.fecha_fin):
+                raise serializers.ValidationError({
+                    'fecha_emision': (
+                        f"La fecha de emisión ({fecha_emision}) no corresponde al rango del período "
+                        f"contable seleccionado ({periodo.fecha_inicio} al {periodo.fecha_fin})."
+                    )
+                })
+        return attrs
+
     def create(self, validated_data):
         detalles_data = validated_data.pop('detalles', [])
         empresa_id = self.context['request'].empresa_id

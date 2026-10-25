@@ -461,7 +461,7 @@ class TransferenciaConfirmarView(TransferenciaMixin, generics.GenericAPIView):
 class ProductoEquivalenciaMixin(AuditoriaMixin, EmpresaActivaMixin):
     serializer_class = ProductoEquivalenciaSerializer
     entidad_auditoria = 'PRODUCTO_EQUIVALENCIA'
-    admin_write_required = False
+    admin_write_required = True
 
     def get_queryset(self):
         empresa_id = self.request.empresa_id

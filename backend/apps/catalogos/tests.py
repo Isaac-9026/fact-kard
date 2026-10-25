@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from apps.catalogos.models import (
     Moneda,
@@ -104,7 +105,24 @@ class CatalogosModelTest(TestCase):
 class TipoCambioResolverApiTest(TestCase):
     def setUp(self):
         from rest_framework.test import APIClient
+        from apps.usuarios.models import Usuario
         self.client = APIClient()
+        self.admin_user = Usuario.objects.create(
+            username='admin_tc',
+            email='admin_tc@factkard.pe',
+            password_hash='hash',
+            es_admin_global=True,
+            activo=True,
+        )
+        self.normal_user = Usuario.objects.create(
+            username='operador_tc',
+            email='operador_tc@factkard.pe',
+            password_hash='hash',
+            es_admin_global=False,
+            activo=True,
+        )
+        self.client.force_authenticate(user=self.admin_user)
+
         self.moneda_usd = Moneda.objects.create(codigo='USD', nombre='Dólares Americanos')
         self.moneda_pen = Moneda.objects.create(codigo='PEN', nombre='Soles')
 
@@ -116,6 +134,27 @@ class TipoCambioResolverApiTest(TestCase):
             venta=Decimal('3.75100000'),
             fuente='SBS'
         )
+
+    def test_c01_acceso_anonimo_retorna_401(self):
+        anon_client = APIClient()
+        resp_get = anon_client.get('/api/catalogos/tipos-cambio/')
+        self.assertEqual(resp_get.status_code, 401)
+        resp_resolver = anon_client.get('/api/catalogos/tipo-cambio/resolver/', {'moneda': 'USD', 'fecha': '2026-10-16'})
+        self.assertEqual(resp_resolver.status_code, 401)
+        resp_post = anon_client.post('/api/catalogos/tipos-cambio/', {}, format='json')
+        self.assertEqual(resp_post.status_code, 401)
+
+    def test_c01_usuario_sin_rol_admin_no_puede_crear_tipo_cambio(self):
+        self.client.force_authenticate(user=self.normal_user)
+        payload = {
+            'moneda_codigo': 'USD',
+            'fecha_publicacion': '2026-10-20',
+            'compra': '3.75000000',
+            'venta': '3.76000000',
+            'fuente': 'SBS',
+        }
+        resp = self.client.post('/api/catalogos/tipos-cambio/', payload, format='json')
+        self.assertEqual(resp.status_code, 403)
 
     def test_resolucion_fecha_exacta(self):
         response = self.client.get(

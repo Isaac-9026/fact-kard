@@ -5,6 +5,10 @@ from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, ValidationError
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 
+from rest_framework.permissions import IsAuthenticated
+from apps.usuarios.permissions import EsAdminOEsAdminGlobal
+from apps.auditoria.services import registrar_auditoria
+
 from apps.catalogos.models import (
     Moneda,
     TipoCambio,
@@ -51,6 +55,12 @@ class UnidadMedidaListView(generics.ListAPIView):
 
 class TipoCambioListCreateView(generics.ListCreateAPIView):
     serializer_class = TipoCambioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), EsAdminOEsAdminGlobal()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         qs = TipoCambio.objects.all().order_by('-fecha_publicacion', 'moneda_codigo')
@@ -61,6 +71,36 @@ class TipoCambioListCreateView(generics.ListCreateAPIView):
         if fecha:
             qs = qs.filter(fecha_publicacion=fecha)
         return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        empresa_id_raw = (
+            self.request.headers.get('X-Empresa-Id') or
+            self.request.META.get('HTTP_X_EMPRESA_ID')
+        )
+        empresa_id = None
+        if empresa_id_raw:
+            try:
+                empresa_id = int(empresa_id_raw)
+            except (ValueError, TypeError):
+                pass
+        if empresa_id and hasattr(self.request, 'user') and getattr(self.request.user, 'is_authenticated', False):
+            registrar_auditoria(
+                empresa_id=empresa_id,
+                usuario_id=self.request.user.id,
+                accion='CREAR',
+                tabla='TIPO_CAMBIO',
+                registro_id=instance.id,
+                valor_anterior=None,
+                valor_nuevo={
+                    'moneda_codigo': instance.moneda_codigo_id,
+                    'fecha_publicacion': str(instance.fecha_publicacion),
+                    'compra': str(instance.compra),
+                    'venta': str(instance.venta),
+                    'fuente': instance.fuente,
+                },
+                motivo='Registro contable oficial de tipo de cambio SBS',
+            )
 
 
 class TipoCambioResolverView(APIView):

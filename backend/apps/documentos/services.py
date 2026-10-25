@@ -221,6 +221,17 @@ def crear_documento(
     if isinstance(fecha_emision, str):
         fecha_emision = date.fromisoformat(fecha_emision)
 
+    if not fecha_emision:
+        raise ValidationError({'fecha_emision': 'La fecha de emisión es obligatoria.'})
+
+    if not (periodo.fecha_inicio <= fecha_emision <= periodo.fecha_fin):
+        raise ValidationError({
+            'fecha_emision': (
+                f"La fecha de emisión ({fecha_emision}) no corresponde al rango del período "
+                f"contable seleccionado ({periodo.fecha_inicio} al {periodo.fecha_fin})."
+            )
+        })
+
     tipo_cambio = None
     fecha_tc = None
     monto_tc = None
@@ -307,6 +318,17 @@ def crear_documento(
                 tipo_op = TipoOperacion.objects.get(id=tipo_op_val)
             except TipoOperacion.DoesNotExist:
                 raise ValidationError({'detalles': f"Línea {linea_num}: El tipo de operación no existe."})
+
+        # A-05: Validar tipo de operación contra clase y si es nota
+        if tipo_comprobante.es_nota:
+            if tipo_op.naturaleza not in ('AJUSTE_VALOR', 'ENTRADA', 'SALIDA'):
+                raise ValidationError({'detalles': f"Línea {linea_num}: La operación '{tipo_op.codigo_interno}' no es válida para comprobantes de tipo Nota."})
+        elif clase == 'COMPRA':
+            if tipo_op.naturaleza != 'ENTRADA':
+                raise ValidationError({'detalles': f"Línea {linea_num}: Un comprobante de compra debe usar una operación de naturaleza ENTRADA."})
+        elif clase == 'VENTA':
+            if tipo_op.naturaleza != 'SALIDA':
+                raise ValidationError({'detalles': f"Línea {linea_num}: Un comprobante de venta debe usar una operación de naturaleza SALIDA."})
 
         # Producto y Unidad
         producto = None

@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import F
 from rest_framework import generics, status
-from rest_framework.exceptions import NotAuthenticated, NotFound, ValidationError
+from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -49,6 +49,8 @@ def _empresa_activa(request):
     ).select_related('empresa').first()
     if asignacion is None:
         raise NotFound('Empresa no encontrada.')
+    request.empresa_id = empresa_id
+    request.rol_empresa = asignacion.rol
     return asignacion.empresa
 
 
@@ -103,6 +105,8 @@ class ConfigEmpresaView(APIView):
 
     def patch(self, request):
         config = self.get_object(request)
+        if getattr(request, 'rol_empresa', None) != 'ADMIN' and not getattr(request.user, 'es_admin_global', False):
+            raise PermissionDenied("Se requieren privilegios de Administrador para modificar la configuración de la empresa.")
         serializer = ConfigEmpresaSerializer(
             config,
             data=request.data,
@@ -116,17 +120,21 @@ class ConfigEmpresaView(APIView):
 
 class EstablecimientoListCreateView(generics.ListCreateAPIView):
     serializer_class = EstablecimientoSerializer
+    permission_classes = [TieneEmpresaActiva]
 
     def get_queryset(self):
         empresa = _empresa_activa(self.request)
         return Establecimiento.objects.filter(empresa_id=empresa.id).order_by('codigo_sunat')
 
     def perform_create(self, serializer):
+        if getattr(self.request, 'rol_empresa', None) != 'ADMIN' and not getattr(self.request.user, 'es_admin_global', False):
+            raise PermissionDenied("Se requieren privilegios de Administrador para crear establecimientos.")
         serializer.save(empresa=_empresa_activa(self.request))
 
 
 class EstablecimientoDetailView(generics.UpdateAPIView):
     serializer_class = EstablecimientoSerializer
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
     http_method_names = ('patch', 'options')
 
     def get_queryset(self):
@@ -145,6 +153,8 @@ class PeriodoListCreateView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
+        if getattr(request, 'rol_empresa', None) != 'ADMIN' and not getattr(request.user, 'es_admin_global', False):
+            raise PermissionDenied("Se requieren privilegios de Administrador para crear períodos contables.")
         serializer = PeriodoCreateSerializer(
             data=request.data,
             context={'empresa_id': request.empresa_id}
@@ -262,13 +272,22 @@ class ConfigIgvPeriodoView(APIView):
         return Response(ConfigIgvPeriodoSerializer(config).data)
 
     def post(self, request, periodo_id):
+        if getattr(request, 'rol_empresa', None) != 'ADMIN' and not getattr(request.user, 'es_admin_global', False):
+            raise PermissionDenied("Se requieren privilegios de Administrador para configurar el IGV del período.")
         periodo = self.get_periodo(request, periodo_id)
+        if periodo.estado != 'ABIERTO':
+            raise ValidationError({'periodo': 'No se puede modificar la configuración de IGV de un período cerrado.'})
         config = ConfigIgvPeriodo.objects.filter(
             empresa_id=request.empresa_id,
             periodo=periodo
         ).first()
 
-        serializer = ConfigIgvPeriodoSerializer(config, data=request.data, partial=bool(config))
+        serializer = ConfigIgvPeriodoSerializer(
+            config,
+            data=request.data,
+            partial=bool(config),
+            context={'empresa_id': request.empresa_id},
+        )
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
@@ -323,6 +342,8 @@ class ConfigIgvListCreateView(APIView):
         return Response(ConfigIgvPeriodoSerializer(configs, many=True).data)
 
     def post(self, request):
+        if getattr(request, 'rol_empresa', None) != 'ADMIN' and not getattr(request.user, 'es_admin_global', False):
+            raise PermissionDenied("Se requieren privilegios de Administrador para configurar el IGV del período.")
         periodo_id = request.data.get('periodo') or request.data.get('periodo_id')
         if not periodo_id:
             raise ValidationError({'periodo': 'El ID del período es obligatorio.'})
@@ -332,14 +353,21 @@ class ConfigIgvListCreateView(APIView):
             empresa_id=request.empresa_id
         ).first()
         if not periodo:
-            raise NotFound('Período no encontrado en la empresa activa.')
+            raise ValidationError({'periodo': 'El período no existe o no pertenece a la empresa activa.'})
+        if periodo.estado != 'ABIERTO':
+            raise ValidationError({'periodo': 'No se puede configurar el IGV de un período cerrado.'})
 
         config = ConfigIgvPeriodo.objects.filter(
             empresa_id=request.empresa_id,
             periodo=periodo
         ).first()
 
-        serializer = ConfigIgvPeriodoSerializer(config, data=request.data, partial=bool(config))
+        serializer = ConfigIgvPeriodoSerializer(
+            config,
+            data=request.data,
+            partial=bool(config),
+            context={'empresa_id': request.empresa_id},
+        )
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():

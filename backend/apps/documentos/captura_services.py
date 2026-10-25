@@ -80,6 +80,14 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
         serie = id_doc[:4].upper()
         numero = id_doc[4:] if len(id_doc) > 4 else id_doc
 
+    # 2.1 Documento de referencia (para notas de crédito / débito)
+    doc_modificado = (
+        _find_text(root, 'BillingReference/InvoiceDocumentReference/ID')
+        or _find_text(root, 'InvoiceDocumentReference/ID')
+        or _find_text(root, 'DiscrepancyResponse/ReferenceID')
+        or ''
+    )
+
     # 3. Fecha de emisión
     fecha_str = _find_text(root, 'IssueDate')
     fecha_emision = None
@@ -215,6 +223,7 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
             'subtotal': str(subtotal),
             'igv': str(igv),
             'total': str(total),
+            'doc_modificado': doc_modificado,
         },
         'detalles': detalles,
         'confianza_global': Decimal('100.0000'),
@@ -544,11 +553,42 @@ def generar_borrador_desde_captura(
     if not tipo_comp:
         tipo_comp = TipoComprobante.objects.filter(codigo_sunat='01').first()
 
-    # 3. Serie y Número
+    # 3. Serie y Número normalizados con función centralizada de documentos (A-06)
+    from apps.documentos.services import normalizar_numero, normalizar_serie, validar_duplicado_documento
     serie_raw = cabecera.get('serie', 'F001').strip()
     num_raw = cabecera.get('numero', '1').strip()
-    serie_norm = serie_raw.upper()
-    num_norm = num_raw.zfill(8)
+    serie_norm = normalizar_serie(serie_raw)
+    num_norm = normalizar_numero(num_raw)
+
+    # Validar duplicados contra la clave lógica oficial de la empresa (A-06)
+    validar_duplicado_documento(
+        empresa_id=empresa_id,
+        ruc_emisor=ruc_emisor,
+        tipo_comprobante_id=tipo_comp.id,
+        serie_normalizada=serie_norm,
+        numero_normalizado=num_norm,
+    )
+
+    # 3.1 Documento de origen para notas (NC / ND)
+    documento_origen = None
+    if tipo_comp.es_nota:
+        ref_doc = cabecera.get('doc_modificado') or cabecera.get('documento_modificado')
+        if ref_doc:
+            ref_serie = ''
+            ref_num = ''
+            if '-' in ref_doc:
+                partes_ref = ref_doc.split('-', 1)
+                ref_serie = normalizar_serie(partes_ref[0])
+                ref_num = normalizar_numero(partes_ref[1])
+            else:
+                ref_serie = normalizar_serie(ref_doc[:4])
+                ref_num = normalizar_numero(ref_doc[4:])
+            documento_origen = Documento.objects.filter(
+                empresa_id=empresa_id,
+                ruc_emisor=ruc_emisor,
+                serie_normalizada=ref_serie,
+                numero_normalizado=ref_num,
+            ).first()
 
     # 4. Fecha de emisión
     fecha_str = cabecera.get('fecha_emision')
@@ -575,11 +615,29 @@ def generar_borrador_desde_captura(
     if not periodo:
         raise ValidationError({'periodo': 'No existe un período contable ABIERTO para registrar el comprobante.'})
 
-    # 6. Moneda
+    # 6. Moneda y Tipo de Cambio
     moneda_cod = cabecera.get('moneda', 'PEN').strip().upper()
     moneda = Moneda.objects.filter(codigo=moneda_cod).first()
     if not moneda:
         moneda = Moneda.objects.get(codigo='PEN')
+
+    tipo_cambio = None
+    fecha_tc = None
+    monto_tc = None
+    fuente_tc = None
+    if moneda.codigo == 'USD':
+        try:
+            from apps.documentos.services import resolver_tipo_cambio_usd
+            tc = resolver_tipo_cambio_usd(fecha_emision)
+            tipo_cambio = tc
+            fecha_tc = tc.fecha_publicacion
+            monto_tc = tc.venta
+            fuente_tc = tc.fuente
+        except Exception:
+            tipo_cambio = None
+            fecha_tc = None
+            monto_tc = None
+            fuente_tc = None
 
     # 7. Totales
     def parse_dec(val: str, default: Decimal = DECIMAL_CERO) -> Decimal:
@@ -603,10 +661,18 @@ def generar_borrador_desde_captura(
     if not almacen:
         raise ValidationError({'almacen': 'La empresa no cuenta con un almacén activo disponible.'})
 
-    # 9. Tipo de operación de compra por defecto
-    tipo_op = TipoOperacion.objects.filter(codigo_interno='COMPRA').first()
-    if not tipo_op:
-        tipo_op = TipoOperacion.objects.filter(naturaleza='ENTRADA', es_interna=False).first()
+    # 9. Tipo de operación de compra / ajuste por defecto según comprobante (A-06)
+    if tipo_comp.es_nota:
+        if getattr(tipo_comp, 'efecto_nota', None) == 'CREDITO':
+            tipo_op = TipoOperacion.objects.filter(codigo_interno='NC_COMPRA').first()
+        else:
+            tipo_op = TipoOperacion.objects.filter(codigo_interno='ND_COMPRA').first()
+        if not tipo_op:
+            tipo_op = TipoOperacion.objects.filter(naturaleza='AJUSTE_VALOR', es_interna=False).first()
+    else:
+        tipo_op = TipoOperacion.objects.filter(codigo_interno='COMPRA').first()
+        if not tipo_op:
+            tipo_op = TipoOperacion.objects.filter(naturaleza='ENTRADA', es_interna=False).first()
 
     # 10. Crear Documento en BORRADOR estricto
     documento = Documento.objects.create(
@@ -622,9 +688,14 @@ def generar_borrador_desde_captura(
         numero_normalizado=num_norm,
         fecha_emision=fecha_emision,
         moneda_codigo=moneda,
+        tipo_cambio=tipo_cambio,
+        fecha_tc=fecha_tc,
+        monto_tc=monto_tc,
+        fuente_tc=fuente_tc,
         subtotal=subtotal,
         igv=igv,
         total=total,
+        documento_origen=documento_origen,
         origen_captura=captura.tipo,
         estado='BORRADOR',
         estado_revision='PENDIENTE',
@@ -632,6 +703,30 @@ def generar_borrador_desde_captura(
     )
 
     incidencias_creadas: List[Dict[str, Any]] = []
+
+    if tipo_comp.es_nota and not documento_origen:
+        inc_origen = Incidencia.objects.create(
+            empresa_id=empresa_id,
+            periodo=periodo,
+            documento=documento,
+            producto=None,
+            tipo='DOCUMENTO_ORIGEN_PENDIENTE',
+            severidad='ADVERTENCIA',
+            bloquea_cierre=True,
+            estado='PENDIENTE',
+            descripcion=(
+                f"La Nota {serie_norm}-{num_norm} del proveedor {tercero.razon_social} "
+                f"no tiene comprobante de origen vinculado. Debe asociarse antes de confirmar."
+            ),
+            detalle={'captura_id': captura.id, 'referencia': cabecera.get('doc_modificado', '')},
+        )
+        incidencias_creadas.append({
+            'incidencia_id': inc_origen.id,
+            'tipo': 'DOCUMENTO_ORIGEN_PENDIENTE',
+        })
+
+    from apps.documentos.services import obtener_porcentaje_credito_fiscal
+    porcentaje_cf = obtener_porcentaje_credito_fiscal(empresa_id, periodo)
 
     # 11. Crear Líneas de DocumentoDetalle
     for index, (linea_num, line_fields) in enumerate(sorted(detalles.items()), start=1):
@@ -678,6 +773,22 @@ def generar_borrador_desde_captura(
 
         igv_linea = (val_linea * Decimal('0.18')).quantize(Q8, rounding=ROUND_HALF_UP)
 
+        # Cálculo de Costo Unitario PEN (C-04: factor de empaque, moneda USD e IGV no recuperable)
+        valor_linea_calc = cant * precio
+        porcentaje_no_recup = (Decimal('100.0000') - porcentaje_cf) / Decimal('100.0000')
+        igv_no_recuperable = igv_linea * porcentaje_no_recup
+        costo_linea_doc = valor_linea_calc + igv_no_recuperable
+
+        if moneda.codigo == 'USD' and monto_tc:
+            costo_linea_pen = costo_linea_doc * monto_tc
+        else:
+            costo_linea_pen = costo_linea_doc
+
+        if cant_base > DECIMAL_CERO:
+            costo_unitario_pen = (costo_linea_pen / cant_base).quantize(Q8, rounding=ROUND_HALF_UP)
+        else:
+            costo_unitario_pen = DECIMAL_CERO
+
         det = DocumentoDetalle.objects.create(
             documento=documento,
             linea=index,
@@ -693,8 +804,8 @@ def generar_borrador_desde_captura(
             cantidad_base=cant_base,
             precio_unitario=precio,
             igv=igv_linea,
-            porcentaje_credito_fiscal_aplicado=Decimal('100.0000'),
-            costo_unitario_pen=precio,
+            porcentaje_credito_fiscal_aplicado=porcentaje_cf,
+            costo_unitario_pen=costo_unitario_pen,
             es_bonificacion=False,
         )
 

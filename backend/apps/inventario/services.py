@@ -72,7 +72,9 @@ def confirmar_saldo_inicial(*, saldo_id, empresa_id, usuario):
         raise ValidationError({'detail': 'Saldo inicial no encontrado.'})
     if saldo_inicial.estado != 'BORRADOR':
         raise ValidationError({'estado': 'Solo puede confirmarse un saldo inicial BORRADOR.'})
-    if saldo_inicial.periodo.estado != 'ABIERTO':
+    from apps.empresas.models import Periodo
+    periodo = Periodo.objects.select_for_update().get(id=saldo_inicial.periodo_id, empresa_id=empresa_id)
+    if periodo.estado != 'ABIERTO':
         raise ValidationError({'periodo': 'El período debe estar ABIERTO.'})
 
     saldo = _bloquear_saldo(empresa_id, saldo_inicial.producto_id)
@@ -124,7 +126,9 @@ def confirmar_nota_interna(*, nota_id, empresa_id, usuario):
         raise ValidationError({'detail': 'Nota interna no encontrada.'})
     if nota.estado != 'BORRADOR':
         raise ValidationError({'estado': 'Solo puede confirmarse una nota interna BORRADOR.'})
-    if nota.periodo.estado != 'ABIERTO' or not (nota.periodo.fecha_inicio <= nota.fecha <= nota.periodo.fecha_fin):
+    from apps.empresas.models import Periodo
+    periodo = Periodo.objects.select_for_update().get(id=nota.periodo_id, empresa_id=empresa_id)
+    if periodo.estado != 'ABIERTO' or not (periodo.fecha_inicio <= nota.fecha <= periodo.fecha_fin):
         raise ValidationError({'periodo': 'La fecha debe pertenecer a un período ABIERTO.'})
 
     naturaleza = nota.tipo_operacion.naturaleza
@@ -196,7 +200,7 @@ def confirmar_transferencia(*, transferencia_id, empresa_id, usuario):
         raise ValidationError({'estado': 'Solo puede confirmarse una transferencia BORRADOR.'})
 
     from apps.empresas.models import Periodo
-    periodo = Periodo.objects.filter(
+    periodo = Periodo.objects.select_for_update().filter(
         empresa_id=empresa_id, estado='ABIERTO', fecha_inicio__lte=transferencia.fecha,
         fecha_fin__gte=transferencia.fecha,
     ).first()

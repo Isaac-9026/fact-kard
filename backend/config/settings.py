@@ -125,6 +125,9 @@ REST_FRAMEWORK = {
         'apps.usuarios.authentication.UsuarioTokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
 
 # DRF Spectacular (Swagger / OpenAPI 3)

@@ -110,7 +110,23 @@ class ConfigIgvPeriodoSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ('id', 'empresa', 'creado_por', 'creado_en')
 
+    def validate_periodo(self, value):
+        empresa_id = self.context.get('empresa_id')
+        if empresa_id and value.empresa_id != empresa_id:
+            raise serializers.ValidationError("El período no pertenece a la empresa activa.")
+        if self.instance and self.instance.periodo_id != value.id:
+            raise serializers.ValidationError("No se puede cambiar el período asignado a esta configuración.")
+        if value.estado != 'ABIERTO':
+            raise serializers.ValidationError("No se puede configurar el IGV de un período cerrado.")
+        return value
+
     def validate(self, attrs):
+        periodo = attrs.get('periodo') or (self.instance.periodo if self.instance else None)
+        if periodo and periodo.estado != 'ABIERTO':
+            raise serializers.ValidationError({
+                'periodo': 'No se puede configurar ni modificar el IGV de un período cerrado.'
+            })
+
         metodo = attrs.get('metodo')
         if not metodo and self.instance:
             metodo = self.instance.metodo

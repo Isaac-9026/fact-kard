@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoOperacion
-from apps.empresas.models import ConfigEmpresa
+from apps.empresas.models import ConfigEmpresa, Periodo
 from apps.kardex.models import (
     Incidencia, Movimiento, Recalculo, RecalculoDetalle, SaldoCppActual,
     StockAlmacen, ValorizacionMovimiento,
@@ -205,6 +205,33 @@ def aplicar_movimiento(*, empresa_id, producto_id, almacen_id, periodo, tipo_ope
 @transaction.atomic
 def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario_id=None):
     _saldo(empresa_id, producto_id)
+    stocks = {}
+    movimientos_base = Movimiento.objects.filter(
+        empresa_id=empresa_id, producto_id=producto_id,
+    ).select_related('tipo_operacion', 'periodo').order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
+
+    movimientos_anteriores = list(movimientos_base.filter(fecha_movimiento__lt=fecha_desde))
+    movimientos_afectados = list(movimientos_base.filter(fecha_movimiento__gte=fecha_desde))
+
+    # C-03: Prohibir recálculo que altere movimientos o comience en períodos cerrados
+    periodos_cerrados = set(
+        m.periodo for m in movimientos_afectados if m.periodo and m.periodo.estado == 'CERRADO'
+    )
+    periodo_desde_cerrado = Periodo.objects.filter(
+        empresa_id=empresa_id,
+        estado='CERRADO',
+        fecha_inicio__lte=fecha_desde,
+        fecha_fin__gte=fecha_desde,
+    ).first()
+    if periodo_desde_cerrado:
+        periodos_cerrados.add(periodo_desde_cerrado)
+
+    if periodos_cerrados:
+        nombres = ", ".join(f"{p.anio}-{p.mes:02d}" for p in sorted(periodos_cerrados, key=lambda p: (p.anio, p.mes)))
+        raise ValidationError({
+            'recalculo': f"No se puede recalcular porque afectaría los períodos cerrados: {nombres}. Debe reabrir el período oficialmente antes de recalcular."
+        })
+
     version = (Recalculo.objects.filter(empresa_id=empresa_id, producto_id=producto_id).aggregate(
         valor=Max('version'),
     )['valor'] or 0) + 1
@@ -212,13 +239,6 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
         empresa_id=empresa_id, producto_id=producto_id, fecha_desde=fecha_desde,
         version=version, estado='EN_PROCESO', ejecutado_por_id=usuario_id,
     )
-    stocks = {}
-    movimientos_base = Movimiento.objects.filter(
-        empresa_id=empresa_id, producto_id=producto_id,
-    ).select_related('tipo_operacion').order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
-
-    movimientos_anteriores = list(movimientos_base.filter(fecha_movimiento__lt=fecha_desde))
-    movimientos_afectados = list(movimientos_base.filter(fecha_movimiento__gte=fecha_desde))
 
     # Los movimientos anteriores solo reconstruyen el punto de partida. Su
     # valorización es historia consolidada y no debe versionarse nuevamente.
@@ -331,7 +351,9 @@ def confirmar_documento_motor(*, documento_id, empresa_id, usuario_id):
         raise ValidationError({'estado': 'Solo puede confirmarse un documento BORRADOR.'})
     if documento.estado_revision != 'REVISADO':
         raise ValidationError({'estado_revision': 'El documento debe estar REVISADO.'})
-    if documento.periodo.estado != 'ABIERTO':
+    # A-04: Bloquear el período con select_for_update para evitar condición de carrera frente al cierre
+    periodo = Periodo.objects.select_for_update().get(id=documento.periodo_id, empresa_id=empresa_id)
+    if periodo.estado != 'ABIERTO':
         raise ValidationError({'periodo': 'El período debe estar ABIERTO.'})
     for detalle in documento.detalles.all():
         if not detalle.afecta_kardex_aplicado or detalle.producto_id is None:
@@ -348,8 +370,24 @@ def confirmar_documento_motor(*, documento_id, empresa_id, usuario_id):
             costo = origen.valorizacion.costo_unitario_pen
         valor_ajuste = None
         if detalle.tipo_operacion.naturaleza == 'AJUSTE_VALOR':
-            importe = q8((detalle.precio_unitario or ZERO) * (documento.monto_tc or Decimal('1')))
-            valor_ajuste = -abs(importe) if documento.tipo_comprobante.efecto_nota == 'CREDITO' else abs(importe)
+            # A-05: Multiplicar precio por cantidad si existe e incorporar IGV no recuperable
+            if detalle.cantidad_original and detalle.cantidad_original > ZERO:
+                valor_base = (detalle.precio_unitario or ZERO) * detalle.cantidad_original
+            else:
+                valor_base = detalle.precio_unitario or ZERO
+
+            porcentaje_cf = detalle.porcentaje_credito_fiscal_aplicado
+            if porcentaje_cf is not None and porcentaje_cf < Decimal('100.0000'):
+                porcentaje_no_recup = (Decimal('100.0000') - porcentaje_cf) / Decimal('100.0000')
+                igv_no_recuperable = (detalle.igv or ZERO) * porcentaje_no_recup
+            else:
+                igv_no_recuperable = ZERO
+
+            costo_linea_doc = valor_base + igv_no_recuperable
+            monto_tc = documento.monto_tc if (documento.moneda_codigo_id == 'USD' and documento.monto_tc) else Decimal('1')
+            importe = q8(costo_linea_doc * monto_tc)
+            efecto = getattr(documento.tipo_comprobante, 'efecto_nota', 'NINGUNO')
+            valor_ajuste = -abs(importe) if efecto == 'CREDITO' else abs(importe)
         aplicar_movimiento(
             empresa_id=empresa_id, producto_id=detalle.producto_id,
             almacen_id=detalle.almacen_id, periodo=documento.periodo,
@@ -372,7 +410,8 @@ def anular_documento_motor(*, documento_id, empresa_id, usuario_id, motivo):
     ).first()
     if documento is None:
         raise ValidationError({'detail': 'El documento no existe o no pertenece a la empresa activa.'})
-    if documento.periodo.estado != 'ABIERTO':
+    periodo = Periodo.objects.select_for_update().get(id=documento.periodo_id, empresa_id=empresa_id)
+    if periodo.estado != 'ABIERTO':
         _incidencia(empresa_id=empresa_id, periodo_id=documento.periodo_id,
                     tipo='ANULACION_PERIODO_CERRADO', documento_id=documento.id,
                     descripcion='Se intentó anular un documento de período cerrado.')
@@ -381,21 +420,45 @@ def anular_documento_motor(*, documento_id, empresa_id, usuario_id, motivo):
         for original in Movimiento.objects.filter(
             empresa_id=empresa_id, documento_detalle__documento=documento,
         ).select_related('tipo_operacion', 'valorizacion'):
-            tipo = TipoOperacion.objects.filter(
-                naturaleza='SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA',
-                origen_requerido='MOV_EXTORNADO', activo=True,
-            ).first()
-            if tipo is None:
-                raise ValidationError({'tipo_operacion': 'Falta el tipo de operación de extorno.'})
-            aplicar_movimiento(
-                empresa_id=empresa_id, producto_id=original.producto_id,
-                almacen_id=original.almacen_id, periodo=documento.periodo,
-                tipo_operacion=tipo, fecha=documento.fecha_emision,
-                cantidad=original.cantidad_base, usuario_id=usuario_id,
-                costo_unitario=original.valorizacion.costo_unitario_pen,
-                valor_ajuste=-(original.valor_ajuste_pen or ZERO), es_extorno=True,
-                movimiento_extornado=original,
-            )
+            if original.naturaleza == 'AJUSTE_VALOR':
+                tipo = TipoOperacion.objects.filter(
+                    naturaleza='AJUSTE_VALOR', activo=True,
+                ).filter(
+                    Q(origen_requerido='MOV_EXTORNADO') | Q(id=original.tipo_operacion_id)
+                ).first() or original.tipo_operacion
+                monto_ajuste_original = original.valor_ajuste_pen
+                if monto_ajuste_original is None and hasattr(original, 'valorizacion'):
+                    monto_ajuste_original = original.valorizacion.valor_movimiento_pen
+                aplicar_movimiento(
+                    empresa_id=empresa_id, producto_id=original.producto_id,
+                    almacen_id=original.almacen_id, periodo=documento.periodo,
+                    tipo_operacion=tipo, fecha=documento.fecha_emision,
+                    cantidad=ZERO, usuario_id=usuario_id,
+                    costo_unitario=ZERO,
+                    valor_ajuste=-(monto_ajuste_original or ZERO), es_extorno=True,
+                    movimiento_extornado=original,
+                )
+            else:
+                tipo = TipoOperacion.objects.filter(
+                    naturaleza='SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA',
+                    origen_requerido='MOV_EXTORNADO', activo=True,
+                ).first()
+                if tipo is None:
+                    tipo = TipoOperacion.objects.filter(
+                        naturaleza='SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA',
+                        activo=True,
+                    ).first()
+                if tipo is None:
+                    raise ValidationError({'tipo_operacion': 'Falta el tipo de operación de extorno.'})
+                aplicar_movimiento(
+                    empresa_id=empresa_id, producto_id=original.producto_id,
+                    almacen_id=original.almacen_id, periodo=documento.periodo,
+                    tipo_operacion=tipo, fecha=documento.fecha_emision,
+                    cantidad=original.cantidad_base, usuario_id=usuario_id,
+                    costo_unitario=original.valorizacion.costo_unitario_pen,
+                    valor_ajuste=None, es_extorno=True,
+                    movimiento_extornado=original,
+                )
     documento.estado='ANULADO'; documento.save(update_fields=['estado'])
     registrar_auditoria(empresa_id, usuario_id, 'ANULAR', 'DOCUMENTO', documento.id,
                         {'estado': 'CONFIRMADO'}, {'estado': 'ANULADO'}, motivo)

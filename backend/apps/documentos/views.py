@@ -30,7 +30,7 @@ from apps.documentos.captura_services import (
     corregir_campo_captura,
     generar_borrador_desde_captura,
 )
-from apps.usuarios.permissions import TieneEmpresaActiva
+from apps.usuarios.permissions import EsAdminEmpresa, TieneEmpresaActiva
 
 
 class DocumentoListCreateView(generics.ListCreateAPIView):
@@ -169,7 +169,7 @@ class DocumentoConfirmarView(APIView):
     Valida y confirma un documento comercial.
     Exige que el comprobante esté en estado de revisión REVISADO y en período ABIERTO.
     """
-    permission_classes = [TieneEmpresaActiva]
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
 
     @extend_schema(
         summary="Confirmar documento",
@@ -189,7 +189,7 @@ class DocumentoAnularView(APIView):
     """
     Anula un documento comercial con motivo obligatorio y registro en Auditoría.
     """
-    permission_classes = [TieneEmpresaActiva]
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
 
     @extend_schema(
         summary="Anular documento",
