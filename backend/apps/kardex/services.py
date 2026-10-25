@@ -208,7 +208,10 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
     stocks = {}
     movimientos_base = Movimiento.objects.filter(
         empresa_id=empresa_id, producto_id=producto_id,
-    ).select_related('tipo_operacion', 'periodo').order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
+    ).select_related(
+        'tipo_operacion', 'periodo', 'saldo_inicial', 'nota_interna_detalle',
+        'movimiento_origen__valorizacion', 'movimiento_extornado__valorizacion',
+    ).order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
 
     movimientos_anteriores = list(movimientos_base.filter(fecha_movimiento__lt=fecha_desde))
     movimientos_afectados = list(movimientos_base.filter(fecha_movimiento__gte=fecha_desde))
@@ -280,14 +283,33 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
                             producto_id=producto_id, movimiento_id=movimiento.id,
                             tipo='STOCK_INSUFICIENTE', descripcion='El recálculo detectó stock negativo posterior.')
         elif movimiento.naturaleza == 'ENTRADA':
-            costo = anterior.costo_unitario_pen if anterior else ZERO
-            movimiento_valor = q8(movimiento.cantidad_base * costo)
-            cantidad = q8(cantidad + movimiento.cantidad_base); valor = q8(valor + movimiento_valor)
+            if movimiento.saldo_inicial_id and movimiento.saldo_inicial:
+                movimiento_valor = q8(movimiento.saldo_inicial.valor_total_pen)
+                costo = cpp(movimiento_valor, movimiento.cantidad_base)
+            elif movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
+                costo = q8(movimiento.movimiento_origen.valorizacion.costo_unitario_pen)
+                movimiento_valor = q8(movimiento.cantidad_base * costo)
+            else:
+                costo = anterior.costo_unitario_pen if anterior else ZERO
+                movimiento_valor = q8(movimiento.cantidad_base * costo)
+            cantidad = q8(cantidad + movimiento.cantidad_base)
+            valor = q8(valor + movimiento_valor)
             stocks[movimiento.almacen_id] = stocks.get(movimiento.almacen_id, ZERO) + movimiento.cantidad_base
         elif movimiento.naturaleza == 'SALIDA':
-            costo = anterior.costo_unitario_pen if movimiento.movimiento_origen_id and anterior else cpp_vigente
+            if movimiento.nota_interna_detalle_id and movimiento.nota_interna_detalle.costo_unitario_pen is not None:
+                costo = q8(movimiento.nota_interna_detalle.costo_unitario_pen)
+            elif (movimiento.movimiento_origen_id or movimiento.es_extorno or movimiento.movimiento_extornado_id) and anterior:
+                if movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
+                    costo = q8(movimiento.movimiento_origen.valorizacion.costo_unitario_pen)
+                elif movimiento.movimiento_extornado_id and movimiento.movimiento_extornado and hasattr(movimiento.movimiento_extornado, 'valorizacion'):
+                    costo = q8(movimiento.movimiento_extornado.valorizacion.costo_unitario_pen)
+                else:
+                    costo = anterior.costo_unitario_pen
+            else:
+                costo = cpp_vigente
             movimiento_valor = q8(movimiento.cantidad_base * costo)
-            cantidad = q8(cantidad - movimiento.cantidad_base); valor = q8(valor - movimiento_valor)
+            cantidad = q8(cantidad - movimiento.cantidad_base)
+            valor = q8(valor - movimiento_valor)
             stocks[movimiento.almacen_id] = stocks.get(movimiento.almacen_id, ZERO) - movimiento.cantidad_base
             if stocks[movimiento.almacen_id] < ZERO:
                 _incidencia(empresa_id=empresa_id, periodo_id=movimiento.periodo_id,

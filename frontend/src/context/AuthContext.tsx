@@ -29,7 +29,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [empresaActiva, setEmpresaActiva] = useState<EmpresaActiva | null>(() => {
-    const saved = localStorage.getItem('empresa_activa');
+    const saved = sessionStorage.getItem('empresa_activa') || localStorage.getItem('empresa_activa');
     if (!saved) return null;
     try {
       const activaGuardada = JSON.parse(saved) as EmpresaActiva;
@@ -50,9 +50,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setEmpresaActiva((actual) => {
       const siguiente = reconciliarEstadoEmpresas(empresas, actual).empresaActiva;
       if (siguiente) {
+        sessionStorage.setItem('empresa_id', String(siguiente.id));
+        sessionStorage.setItem('empresa_activa', JSON.stringify(siguiente));
         localStorage.setItem('empresa_id', String(siguiente.id));
         localStorage.setItem('empresa_activa', JSON.stringify(siguiente));
       } else {
+        sessionStorage.removeItem('empresa_id');
+        sessionStorage.removeItem('empresa_activa');
         localStorage.removeItem('empresa_id');
         localStorage.removeItem('empresa_activa');
       }
@@ -124,6 +128,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setEmpresaActiva(null);
     setEmpresasDisponibles([]);
 
+    sessionStorage.removeItem('empresa_id');
+    sessionStorage.removeItem('empresa_activa');
     localStorage.removeItem('token');
     localStorage.removeItem('empresa_id');
     localStorage.removeItem('usuario');
@@ -154,6 +160,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         rol: encontrada.rol,
       };
       setEmpresaActiva(basicActiva);
+      sessionStorage.setItem('empresa_id', String(empresaId));
+      sessionStorage.setItem('empresa_activa', JSON.stringify(basicActiva));
       localStorage.setItem('empresa_id', String(empresaId));
       localStorage.setItem('empresa_activa', JSON.stringify(basicActiva));
     }

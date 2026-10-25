@@ -9,11 +9,13 @@ from apps.catalogos.models import Moneda, TipoCambio, TipoComprobante, TipoExist
 from apps.documentos.captura_services import generar_borrador_desde_captura
 from apps.documentos.models import CapturaCampo, Documento, DocumentoCaptura, DocumentoDetalle
 from apps.documentos.services import crear_documento
-from apps.empresas.models import ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.models import CierrePeriodo, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.services import cerrar_periodo, reabrir_periodo
 from apps.inventario.models import Almacen, Producto, ProductoEquivalencia, ProductoUnidad, SaldoInicial, Tercero
 from apps.inventario.services import confirmar_saldo_inicial
 from apps.kardex.models import Movimiento, SaldoCppActual, StockAlmacen, ValorizacionMovimiento
 from apps.kardex.services import anular_documento_motor, confirmar_documento_motor, ejecutar_recalculo_producto
+from apps.reportes.formato131_service import generar_formato_131
 from apps.usuarios.models import Usuario, UsuarioEmpresa
 
 
@@ -556,3 +558,85 @@ class AuditoriaSeguridadKardexTest(TestCase):
                 usuario=self.usuario_admin,
             )
         self.assertIn('Ya existe un comprobante', str(ctx.exception))
+
+    def test_a07_reapertura_periodo_marca_cierre_no_vigente(self):
+        """A-07: Al reabrir un período cerrado, su snapshot oficial CierrePeriodo pasa a vigente=False."""
+        cierre, _ = cerrar_periodo(
+            empresa_id=self.empresa.id,
+            periodo_id=self.periodo_enero.id,
+            usuario=self.usuario_admin,
+        )
+        self.assertTrue(cierre.vigente)
+
+        reabrir_periodo(
+            empresa_id=self.empresa.id,
+            periodo_id=self.periodo_enero.id,
+            usuario=self.usuario_admin,
+            motivo='Corrección tributaria auditoría',
+        )
+        cierre.refresh_from_db()
+        self.assertFalse(cierre.vigente)
+
+    def test_a07_formato131_incluye_producto_con_stock_sin_movimientos(self):
+        """A-07: Un producto con saldo físico previo debe figurar en el Formato 13.1 aunque no tenga movimientos en el mes."""
+        prod2 = Producto.objects.create(
+            empresa=self.empresa,
+            codigo_interno='PROD-SIN-MOV',
+            descripcion='Producto Stock Estático',
+            tipo_existencia_codigo=self.tipo_existencia,
+        )
+        ProductoUnidad.objects.create(
+            producto=prod2,
+            unidad_codigo=self.und_base,
+            factor_a_base=Decimal('1.00000000'),
+            es_base=True,
+        )
+        # Crear saldo en enero previo a febrero
+        SaldoCppActual.objects.create(
+            empresa=self.empresa,
+            producto=prod2,
+            cantidad_total=Decimal('50.00000000'),
+            valor_total_pen=Decimal('500.00000000'),
+            cpp_pen=Decimal('10.00000000'),
+        )
+        StockAlmacen.objects.create(
+            empresa=self.empresa,
+            almacen=self.almacen,
+            producto=prod2,
+            cantidad_actual=Decimal('50.00000000'),
+        )
+        # Movimiento de entrada en enero
+        tipo_op = TipoOperacion.objects.get(codigo_interno='SALDO_INICIAL')
+        mov = Movimiento.objects.create(
+            empresa=self.empresa,
+            producto=prod2,
+            almacen=self.almacen,
+            periodo=self.periodo_enero,
+            tipo_operacion=tipo_op,
+            fecha_movimiento=datetime.date(2026, 1, 1),
+            prioridad_dia=1,
+            secuencia=1,
+            naturaleza='ENTRADA',
+            cantidad_base=Decimal('50.00000000'),
+        )
+        ValorizacionMovimiento.objects.create(
+            movimiento=mov,
+            costo_unitario_pen=Decimal('10.00000000'),
+            valor_movimiento_pen=Decimal('500.00000000'),
+            saldo_cantidad_empresa=Decimal('50.00000000'),
+            saldo_valor_empresa=Decimal('500.00000000'),
+            cpp_empresa=Decimal('10.00000000'),
+        )
+
+        # Generar Formato 13.1 para FEBRERO (en febrero no hay movimientos de prod2)
+        resultado = generar_formato_131(
+            empresa_id=self.empresa.id,
+            periodo_id=self.periodo_febrero.id,
+        )
+        codigos_reportados = [r['cabecera']['codigo_existencia'] for r in resultado['reportes']]
+        self.assertIn('PROD-SIN-MOV', codigos_reportados)
+
+        reporte_prod2 = next(r for r in resultado['reportes'] if r['cabecera']['codigo_existencia'] == 'PROD-SIN-MOV')
+        self.assertEqual(reporte_prod2['saldo_inicial'], '50.00000000')
+        self.assertEqual(len(reporte_prod2['movimientos']), 0)
+        self.assertEqual(reporte_prod2['saldo_final']['cantidad'], '50.00000000')

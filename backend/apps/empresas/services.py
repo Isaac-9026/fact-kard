@@ -184,10 +184,13 @@ def reabrir_periodo(*, empresa_id, periodo_id, usuario, motivo):
     periodo.estado = 'ABIERTO'; periodo.reabierto_por = usuario; periodo.reabierto_en = timezone.now(); periodo.motivo_reapertura = motivo
     periodo.save(update_fields=['estado', 'reabierto_por', 'reabierto_en', 'motivo_reapertura'])
     registrar_auditoria(empresa_id, usuario.id, 'REABRIR', 'periodo', periodo.id, {'estado': anterior}, {'estado': 'ABIERTO', 'motivo_reapertura': motivo}, motivo)
+    CierrePeriodo.objects.filter(periodo_id=periodo.id, vigente=True).update(vigente=False)
     posteriores = list(Periodo.objects.select_for_update().filter(empresa_id=empresa_id, orden__gt=periodo.orden, estado='CERRADO').order_by('orden'))
     for posterior in posteriores:
         posterior.estado = 'DESACTUALIZADO'
         posterior.motivo_desactualizado = f'Reapertura de período anterior {periodo.anio}-{periodo.mes:02d}: {motivo}'
         posterior.save(update_fields=['estado', 'motivo_desactualizado'])
         registrar_auditoria(empresa_id, usuario.id, 'DESACTUALIZAR', 'periodo', posterior.id, {'estado': 'CERRADO'}, {'estado': 'DESACTUALIZADO', 'motivo': posterior.motivo_desactualizado}, f'Desactualizado por reapertura de período {periodo.anio}-{periodo.mes:02d}')
+    if posteriores:
+        CierrePeriodo.objects.filter(periodo_id__in=[p.id for p in posteriores], vigente=True).update(vigente=False)
     return periodo, len(posteriores)

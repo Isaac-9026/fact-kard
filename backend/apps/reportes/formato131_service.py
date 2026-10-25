@@ -91,6 +91,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
     movimientos = Movimiento.objects.filter(
         empresa_id=empresa_id,
         periodo_id=periodo.id,
+        fecha_movimiento__gte=periodo.fecha_inicio,
+        fecha_movimiento__lte=periodo.fecha_fin,
     ).select_related(
         'almacen__establecimiento', 'producto__tipo_existencia_codigo',
         'tipo_operacion', 'valorizacion',
@@ -110,6 +112,28 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
     for movimiento in movimientos:
         agrupados[(movimiento.almacen.establecimiento_id, movimiento.producto_id)].append(movimiento)
 
+    # Identificar productos que tienen saldo anterior en establecimientos aunque no hayan tenido movimientos en el mes
+    from apps.kardex.models import StockAlmacen
+    stocks_qs = StockAlmacen.objects.filter(empresa_id=empresa_id).select_related('almacen')
+    if establecimiento:
+        stocks_qs = stocks_qs.filter(almacen__establecimiento_id=establecimiento.id)
+    if producto:
+        stocks_qs = stocks_qs.filter(producto_id=producto.id)
+
+    pares_conocidos = set(agrupados.keys())
+    for st in stocks_qs:
+        par = (st.almacen.establecimiento_id, st.producto_id)
+        if par not in pares_conocidos:
+            cant_ant = _cantidad_anterior(
+                empresa_id=empresa_id,
+                producto_id=st.producto_id,
+                establecimiento_id=st.almacen.establecimiento_id,
+                fecha_inicio=periodo.fecha_inicio,
+            )
+            if cant_ant != ZERO:
+                agrupados[par] = []
+                pares_conocidos.add(par)
+
     cierre = CierrePeriodo.objects.filter(periodo_id=periodo.id, vigente=True).prefetch_related('detalles').first()
     cierre_detalles = {
         (detalle.establecimiento_id, detalle.producto_id): detalle
@@ -117,23 +141,32 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
     } if cierre else {}
 
     reportes = []
+    from apps.kardex.models import SaldoCppActual
     for (estab_id, prod_id), movimientos_grupo in sorted(
         agrupados.items(), key=lambda item: (
-            item[1][0].almacen.establecimiento.codigo_sunat,
-            item[1][0].producto.codigo_interno,
+            item[1][0].almacen.establecimiento.codigo_sunat if item[1] else Establecimiento.objects.get(pk=item[0][0]).codigo_sunat,
+            item[1][0].producto.codigo_interno if item[1] else Producto.objects.get(pk=item[0][1]).codigo_interno,
         ),
     ):
-        prod = movimientos_grupo[0].producto
-        estab = movimientos_grupo[0].almacen.establecimiento
+        if movimientos_grupo:
+            prod = movimientos_grupo[0].producto
+            estab = movimientos_grupo[0].almacen.establecimiento
+        else:
+            prod = Producto.objects.select_related('tipo_existencia_codigo').get(pk=prod_id)
+            estab = Establecimiento.objects.get(pk=estab_id)
+
         unidad_base = prod.unidades.select_related('unidad_codigo').filter(es_base=True).first()
         if not unidad_base:
             raise ValidationError({'producto_id': f'El producto {prod.codigo_interno} no tiene unidad base.'})
-        saldo_fisico = _cantidad_anterior(
+        saldo_inicial_cantidad = _cantidad_anterior(
             empresa_id=empresa_id,
             producto_id=prod_id,
             establecimiento_id=estab_id,
             fecha_inicio=periodo.fecha_inicio,
         )
+        saldo_fisico = saldo_inicial_cantidad
+        saldo_cpp_obj = SaldoCppActual.objects.filter(empresa_id=empresa_id, producto_id=prod_id).first()
+        cpp_global = q8(saldo_cpp_obj.cpp_pen if saldo_cpp_obj else ZERO)
         filas = []
         for movimiento in movimientos_grupo:
             valorizacion = getattr(movimiento, 'valorizacion', None)
@@ -186,11 +219,21 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
 
         microdiferencia = ZERO
         detalle_cierre = cierre_detalles.get((estab_id, prod_id))
-        if detalle_cierre and filas:
+        if detalle_cierre:
             oficial = q8(detalle_cierre.saldo_valor_pen)
-            calculado = q8(Decimal(filas[-1]['saldo_final']['costo_total']))
-            microdiferencia = q8(oficial - calculado)
-            filas[-1]['saldo_final']['costo_total'] = texto_decimal(oficial)
+            if filas:
+                calculado = q8(Decimal(filas[-1]['saldo_final']['costo_total']))
+                microdiferencia = q8(oficial - calculado)
+                filas[-1]['saldo_final']['costo_total'] = texto_decimal(oficial)
+            else:
+                calculado = q8(saldo_fisico * cpp_global)
+                microdiferencia = q8(oficial - calculado)
+
+        saldo_final_resumen = {
+            'cantidad': texto_decimal(saldo_fisico),
+            'costo_unitario': texto_decimal(cpp_global),
+            'costo_total': texto_decimal(saldo_fisico * cpp_global),
+        } if not filas else filas[-1]['saldo_final']
 
         reportes.append({
             'cabecera': {
@@ -208,6 +251,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 },
                 'metodo_valuacion': metodo,
             },
+            'saldo_inicial': texto_decimal(saldo_inicial_cantidad),
+            'saldo_final': saldo_final_resumen,
             'movimientos': filas,
             'microdiferencia_cierre': texto_decimal(microdiferencia),
         })
