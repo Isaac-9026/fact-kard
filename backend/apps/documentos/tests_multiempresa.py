@@ -31,6 +31,11 @@ class DocumentosMultiempresaTests(TestCase):
             codigo_interno='COMPRA_LOCAL', codigo_sunat='02', descripcion='COMPRA NACIONAL',
             naturaleza='ENTRADA', es_interna=False, afecta_kardex=True, origen_requerido='DOCUMENTO',
         )
+        # CON-007: una NC de compra devuelve al proveedor (SALIDA con detalle_origen).
+        self.tipo_op_devolucion = TipoOperacion.objects.create(
+            codigo_interno='DEVOLUCION_COMPRA', codigo_sunat='06', descripcion='DEVOLUCION A PROVEEDOR',
+            naturaleza='SALIDA', es_interna=False, afecta_kardex=True, origen_requerido='MOV_ORIGEN',
+        )
 
         self.a = self._crear_empresa('20100000011', 'EMPRESA A S.A.C.', 'A')
         self.b = self._crear_empresa('20100000022', 'EMPRESA B S.A.C.', 'B')
@@ -86,6 +91,7 @@ class DocumentosMultiempresaTests(TestCase):
             serie=serie, serie_normalizada=serie, numero='1', numero_normalizado='1',
             fecha_emision='2026-01-10', moneda_codigo=self.pen, subtotal=Decimal('100'),
             igv=Decimal('18'), total=Decimal('118'),
+            estado='CONFIRMADO',  # CON-007: las notas solo se emiten sobre documentos CONFIRMADOS.
         )
         detalle = DocumentoDetalle.objects.create(
             documento=factura, linea=1, producto=datos['producto'], producto_unidad=datos['pu_base'],
@@ -177,7 +183,7 @@ class DocumentosMultiempresaTests(TestCase):
     def test_sec005_detalle_origen_de_otra_empresa_en_nota_rechazado(self):
         antes = Documento.objects.filter(empresa=self.a['empresa']).count()
         respuesta = self._post(self._documento(
-            self._linea(detalle_origen=self.detalle_b.id),
+            self._linea(detalle_origen=self.detalle_b.id, tipo_operacion=self.tipo_op_devolucion.id),
             tipo=self.tipo_nc, numero='200', documento_origen=self.factura_a,
         ))
         self.assertEqual(respuesta.status_code, 400)
@@ -197,7 +203,7 @@ class DocumentosMultiempresaTests(TestCase):
         otra_factura_a, otro_detalle_a = self._crear_factura(self.a, serie='FA02')
         antes = Documento.objects.filter(empresa=self.a['empresa']).count()
         respuesta = self._post(self._documento(
-            self._linea(detalle_origen=otro_detalle_a.id),
+            self._linea(detalle_origen=otro_detalle_a.id, tipo_operacion=self.tipo_op_devolucion.id),
             tipo=self.tipo_nc, numero='201', documento_origen=self.factura_a,
         ))
         self.assertEqual(respuesta.status_code, 400)
@@ -205,7 +211,7 @@ class DocumentosMultiempresaTests(TestCase):
 
     def test_sec005_nota_con_detalle_origen_propio_sigue_funcionando(self):
         respuesta = self._post(self._documento(
-            self._linea(detalle_origen=self.detalle_a.id),
+            self._linea(detalle_origen=self.detalle_a.id, tipo_operacion=self.tipo_op_devolucion.id),
             tipo=self.tipo_nc, numero='202', documento_origen=self.factura_a,
         ))
         self.assertEqual(respuesta.status_code, 201, respuesta.data)

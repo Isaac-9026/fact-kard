@@ -163,15 +163,38 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
         return None
 
 
+class DocumentoDetalleEntradaSerializer(serializers.Serializer):
+    """
+    CON-009: línea de detalle tipada. DecimalField de DRF rechaza texto, NaN e
+    Infinity con 400. Las reglas que dependen de la naturaleza de la operación o
+    de la tasa de IGV se validan en el servicio (crear_documento).
+    """
+    linea = serializers.IntegerField(required=False, min_value=1)
+    producto = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    producto_unidad = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    almacen = serializers.IntegerField(min_value=1)
+    tipo_operacion = serializers.IntegerField(min_value=1)
+    equivalencia = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    detalle_origen = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    descripcion_original = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=500)
+    cantidad_original = serializers.DecimalField(max_digits=20, decimal_places=8, min_value=Decimal('0'))
+    factor_conversion = serializers.DecimalField(
+        max_digits=20, decimal_places=8, required=False, allow_null=True, min_value=Decimal('0.00000001'),
+    )
+    precio_unitario = serializers.DecimalField(
+        max_digits=20, decimal_places=8, required=False, default=Decimal('0'), min_value=Decimal('0'),
+    )
+    igv = serializers.DecimalField(
+        max_digits=20, decimal_places=8, required=False, default=Decimal('0'), min_value=Decimal('0'),
+    )
+    es_bonificacion = serializers.BooleanField(required=False, default=False)
+
+
 class DocumentoCreateSerializer(serializers.ModelSerializer):
     ruc_emisor = serializers.CharField(max_length=11, required=False, allow_blank=True, allow_null=True)
     serie = serializers.CharField(max_length=30, required=True)
     numero = serializers.CharField(max_length=50, required=True)
-    detalles = serializers.ListField(
-        child=serializers.DictField(),
-        write_only=True,
-        required=True
-    )
+    detalles = DocumentoDetalleEntradaSerializer(many=True, write_only=True, allow_empty=False)
 
     class Meta:
         model = Documento
@@ -206,7 +229,7 @@ class DocumentoCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        detalles_data = validated_data.pop('detalles', [])
+        detalles_data = [dict(linea) for linea in validated_data.pop('detalles', [])]
         empresa_id = self.context['request'].empresa_id
         usuario_id = self.context['request'].user.id
 

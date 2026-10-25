@@ -315,8 +315,18 @@ class AuditoriaSeguridadKardexTest(TestCase):
         tipo_op_nc = TipoOperacion.objects.get(codigo_interno='NC_COMPRA')
 
         # Partimos con saldo: 100 unid, 1000 PEN, CPP 10.00
+        # CON-007: toda nota referencia un documento de origen CONFIRMADO del mismo tercero.
+        factura_origen = Documento.objects.create(
+            empresa=self.empresa, clase='COMPRA', periodo=self.periodo_enero, tercero=self.tercero,
+            ruc_emisor=self.tercero.numero_documento, tipo_comprobante=self.tipo_factura,
+            serie='F001', serie_normalizada='F001', numero='00000049', numero_normalizado='49',
+            fecha_emision=datetime.date(2026, 1, 5), moneda_codigo=self.moneda_pen,
+            subtotal=Decimal('1000.00000000'), igv=Decimal('180.00000000'), total=Decimal('1180.00000000'),
+            estado='CONFIRMADO', estado_revision='REVISADO', creado_por=self.usuario_admin,
+        )
         # Creamos una Nota de Crédito comercial de ajuste de valor por S/ 200
         doc_nc = Documento.objects.create(
+            documento_origen=factura_origen,
             empresa=self.empresa,
             clase='COMPRA',
             periodo=self.periodo_enero,

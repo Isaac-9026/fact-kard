@@ -68,7 +68,18 @@ def generar_excel_formato_131(**filtros):
             celda.fill = PatternFill('solid', fgColor=AZUL_CLARO)
             celda.alignment = Alignment(horizontal='center', wrap_text=True)
             celda.border = BORDER
-        for fila, movimiento in enumerate(reporte['movimientos'], start=13):
+        # CON-010: saldo inicial valorizado (cantidad, costo unitario y costo total).
+        inicial = reporte.get('saldo_inicial_valorizado') or {}
+        hoja.cell(13, 1, 'SALDO INICIAL').font = Font(bold=True)
+        hoja.merge_cells(start_row=13, start_column=1, end_row=13, end_column=11)
+        for desplazamiento, clave in enumerate(('cantidad', 'costo_unitario', 'costo_total')):
+            celda = hoja.cell(13, 12 + desplazamiento, Decimal(inicial[clave]) if clave in inicial else None)
+            celda.number_format = FORMATO_NUMERO
+            celda.font = Font(bold=True)
+            celda.fill = PatternFill('solid', fgColor=AZUL_CLARO)
+        for celda in hoja[13]:
+            celda.border = BORDER
+        for fila, movimiento in enumerate(reporte['movimientos'], start=14):
             valores = [movimiento['fecha_emision'], movimiento['documento']['tipo_documento'],
                        movimiento['documento']['serie'], movimiento['documento']['numero'],
                        movimiento['tipo_operacion']]
@@ -85,7 +96,7 @@ def generar_excel_formato_131(**filtros):
         for columna, ancho in enumerate((12, 9, 12, 14, 18, 14, 16, 16, 14, 16, 16, 14, 16, 16), start=1):
             hoja.column_dimensions[get_column_letter(columna)].width = ancho
         hoja.print_title_rows = '11:12'
-        hoja.print_area = f'A1:N{max(12, 12 + len(reporte["movimientos"]))}'
+        hoja.print_area = f'A1:N{13 + len(reporte["movimientos"])}'
     if not data['reportes']:
         hoja = libro.create_sheet('Formato 13.1')
         hoja['A1'] = 'No existen movimientos para los filtros seleccionados.'

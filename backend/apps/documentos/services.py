@@ -1,5 +1,5 @@
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, List, Any, Optional
 
 from django.db import transaction
@@ -9,8 +9,53 @@ from rest_framework.exceptions import ValidationError
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoCambio, TipoComprobante, TipoOperacion, Moneda
 from apps.documentos.models import Documento, DocumentoDetalle
+from apps.documentos.reglas import (
+    validar_cantidades_devolucion,
+    validar_documento_origen,
+    validar_linea_nota,
+    validar_naturaleza_linea,
+)
 from apps.empresas.models import Empresa, Periodo, ConfigIgvPeriodo
 from apps.inventario.models import Almacen, Producto, ProductoUnidad, Tercero, ProductoEquivalencia
+
+
+# CON-009: tasa general del IGV (Perú). No existe aún un campo de afectación por
+# línea; por eso se acepta IGV 0 (exonerado/inafecto/exportación) o el 18 % de la base.
+TASA_IGV = Decimal('0.18')
+TOLERANCIA_IGV = Decimal('0.01')
+
+
+def decimal_contable(valor, *, campo, linea_num, defecto):
+    """Convierte a Decimal finito; texto, NaN o Infinity → 400 (nunca 500)."""
+    if valor is None or (isinstance(valor, str) and not valor.strip()):
+        return defecto
+    if isinstance(valor, bool):
+        raise ValidationError({'detalles': f"Línea {linea_num}: '{campo}' debe ser numérico."})
+    try:
+        numero = valor if isinstance(valor, Decimal) else Decimal(str(valor).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValidationError({'detalles': f"Línea {linea_num}: '{campo}' debe ser un número válido."})
+    if not numero.is_finite():
+        raise ValidationError({'detalles': f"Línea {linea_num}: '{campo}' debe ser un número finito."})
+    return numero
+
+
+def validar_igv_linea(*, igv, precio_unitario, cantidad_original, naturaleza, es_bonificacion, linea_num):
+    if es_bonificacion or igv == Decimal('0'):
+        return
+    # Mismo criterio de base imponible que usa el motor para los ajustes de valor.
+    if naturaleza == 'AJUSTE_VALOR' and cantidad_original == Decimal('0'):
+        base = precio_unitario
+    else:
+        base = precio_unitario * cantidad_original
+    esperado = (base * TASA_IGV).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if abs(igv - esperado) > TOLERANCIA_IGV:
+        raise ValidationError({
+            'detalles': (
+                f"Línea {linea_num}: el IGV {igv.normalize():f} no corresponde a la base {base.normalize():f} "
+                f"(18 % = {esperado:f}). Envíe 0 si la línea es exonerada o inafecta."
+            )
+        })
 
 
 def normalizar_serie(serie: Optional[str]) -> str:
@@ -28,6 +73,11 @@ def normalizar_numero(numero: Optional[str]) -> str:
     return limpio if limpio else "0"
 
 
+# CON-006: monedas que el sistema sabe valorizar en PEN. Otra moneda no tiene
+# conversión y su costo terminaría registrándose como si fuera PEN.
+MONEDAS_SOPORTADAS = ('PEN', 'USD')
+
+
 def resolver_tipo_cambio_usd(fecha_emision: date) -> TipoCambio:
     """
     Resuelve el tipo de cambio venta oficial para USD a la fecha de emisión
@@ -41,10 +91,13 @@ def resolver_tipo_cambio_usd(fecha_emision: date) -> TipoCambio:
         .order_by('-fecha_publicacion', '-id')
         .first()
     )
-    if not tc or tc.venta is None:
-        raise ValidationError(
-            f"No existe tipo de cambio registrado para USD a la fecha {fecha_emision.isoformat()} ni en fechas anteriores."
-        )
+    if not tc or tc.venta is None or tc.venta <= 0:
+        raise ValidationError({
+            'tipo_cambio': (
+                f"No existe tipo de cambio registrado para USD a la fecha {fecha_emision.isoformat()} "
+                "ni en fechas anteriores. Registre el TC antes de continuar."
+            )
+        })
     return tc
 
 
@@ -196,12 +249,12 @@ def crear_documento(
             raise ValidationError({'documento_origen': 'El documento de origen no pertenece a la empresa activa.'})
     elif doc_origen_val:
         try:
-            documento_origen = Documento.objects.get(id=doc_origen_val, empresa_id=empresa_id)
-        except Documento.DoesNotExist:
+            # CON-007: se bloquea el origen para validar estado y cantidades sin carreras.
+            documento_origen = Documento.objects.select_for_update().select_related('tipo_comprobante').get(
+                id=doc_origen_val, empresa_id=empresa_id,
+            )
+        except (Documento.DoesNotExist, ValueError, TypeError):
             raise ValidationError({'documento_origen': 'El documento de origen no existe o no pertenece a la empresa activa.'})
-
-    if tipo_comprobante.es_nota and not documento_origen:
-        raise ValidationError({'documento_origen': 'Las Notas de Crédito o Débito deben estar vinculadas a un documento de origen.'})
 
     # 8. Moneda y Tipo de Cambio
     moneda_raw = datos_cabecera.get('moneda_codigo')
@@ -212,6 +265,10 @@ def crear_documento(
     else:
         moneda_codigo = str(moneda_raw or 'PEN').strip().upper()
 
+    if moneda_codigo not in MONEDAS_SOPORTADAS:
+        raise ValidationError({
+            'moneda_codigo': f"La moneda '{moneda_codigo}' no está soportada para valorizar (solo PEN o USD)."
+        })
     try:
         moneda = Moneda.objects.get(codigo=moneda_codigo)
     except Moneda.DoesNotExist:
@@ -231,6 +288,14 @@ def crear_documento(
                 f"contable seleccionado ({periodo.fecha_inicio} al {periodo.fecha_fin})."
             )
         })
+
+    # CON-007: reglas de la nota frente a su documento de origen (estado, clase,
+    # tercero, moneda, fecha). Centralizadas en apps.documentos.reglas.
+    validar_documento_origen(
+        empresa_id=empresa_id, clase=clase, tipo_comprobante=tipo_comprobante,
+        tercero_id=tercero.id if tercero else None, ruc_emisor=ruc_emisor,
+        moneda_codigo=moneda_codigo, fecha_emision=fecha_emision, origen=documento_origen,
+    )
 
     tipo_cambio = None
     fecha_tc = None
@@ -293,6 +358,7 @@ def crear_documento(
 
     subtotal_acum = Decimal('0.00000000')
     igv_acum = Decimal('0.00000000')
+    lineas_devolucion = []
 
     for idx, linea_data in enumerate(detalles_datos, start=1):
         linea_num = linea_data.get('linea') or idx
@@ -319,16 +385,10 @@ def crear_documento(
             except TipoOperacion.DoesNotExist:
                 raise ValidationError({'detalles': f"Línea {linea_num}: El tipo de operación no existe."})
 
-        # A-05: Validar tipo de operación contra clase y si es nota
-        if tipo_comprobante.es_nota:
-            if tipo_op.naturaleza not in ('AJUSTE_VALOR', 'ENTRADA', 'SALIDA'):
-                raise ValidationError({'detalles': f"Línea {linea_num}: La operación '{tipo_op.codigo_interno}' no es válida para comprobantes de tipo Nota."})
-        elif clase == 'COMPRA':
-            if tipo_op.naturaleza != 'ENTRADA':
-                raise ValidationError({'detalles': f"Línea {linea_num}: Un comprobante de compra debe usar una operación de naturaleza ENTRADA."})
-        elif clase == 'VENTA':
-            if tipo_op.naturaleza != 'SALIDA':
-                raise ValidationError({'detalles': f"Línea {linea_num}: Un comprobante de venta debe usar una operación de naturaleza SALIDA."})
+        # CON-007: matriz única clase × comprobante × naturaleza (apps.documentos.reglas).
+        validar_naturaleza_linea(
+            clase=clase, tipo_comprobante=tipo_comprobante, tipo_operacion=tipo_op, linea_num=linea_num,
+        )
 
         # Producto y Unidad
         producto = None
@@ -365,30 +425,47 @@ def crear_documento(
                 {'detalles': f"Línea {linea_num}: La unidad {producto_unidad.unidad_codigo_id} no pertenece al producto {producto.codigo_interno}."}
             )
 
-        # Factor de conversión y cantidades
-        cantidad_original_raw = linea_data.get('cantidad_original')
-        cantidad_original = Decimal(str(cantidad_original_raw)) if cantidad_original_raw is not None else Decimal('0.00000000')
-
+        # Factor de conversión y cantidades (CON-009: Decimal finito y rangos válidos)
+        cantidad_original = decimal_contable(
+            linea_data.get('cantidad_original'), campo='cantidad_original', linea_num=linea_num, defecto=None,
+        )
+        if cantidad_original is None:
+            raise ValidationError({'detalles': f"Línea {linea_num}: La cantidad es obligatoria."})
         if cantidad_original < Decimal('0'):
             raise ValidationError({'detalles': f"Línea {linea_num}: La cantidad original no puede ser negativa."})
+        if tipo_op.naturaleza != 'AJUSTE_VALOR' and cantidad_original <= Decimal('0'):
+            raise ValidationError({
+                'detalles': f"Línea {linea_num}: La cantidad debe ser mayor que cero para una operación de {tipo_op.naturaleza}."
+            })
 
         if producto_unidad:
             factor_conversion = producto_unidad.factor_a_base
         else:
-            fc_raw = linea_data.get('factor_conversion')
-            factor_conversion = Decimal(str(fc_raw)) if fc_raw else Decimal('1.00000000')
+            factor_conversion = decimal_contable(
+                linea_data.get('factor_conversion'), campo='factor_conversion', linea_num=linea_num,
+                defecto=Decimal('1.00000000'),
+            )
+            if factor_conversion <= Decimal('0'):
+                raise ValidationError({'detalles': f"Línea {linea_num}: El factor de conversión debe ser mayor que cero."})
 
         cantidad_base = (cantidad_original * factor_conversion).quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
         cantidad_base = cantidad_base.quantize(Decimal('0.00000001'))
 
-        # Precios e IGV
-        precio_unit_raw = linea_data.get('precio_unitario')
-        precio_unitario = Decimal(str(precio_unit_raw)) if precio_unit_raw is not None else Decimal('0.00000000')
-
-        igv_linea_raw = linea_data.get('igv')
-        igv_linea = Decimal(str(igv_linea_raw)) if igv_linea_raw is not None else Decimal('0.00000000')
+        # Precios e IGV (CON-009: el backend valida el IGV; no lo acepta a ciegas)
+        precio_unitario = decimal_contable(
+            linea_data.get('precio_unitario'), campo='precio_unitario', linea_num=linea_num, defecto=Decimal('0'),
+        )
+        if precio_unitario < Decimal('0'):
+            raise ValidationError({'detalles': f"Línea {linea_num}: El precio unitario no puede ser negativo."})
+        igv_linea = decimal_contable(linea_data.get('igv'), campo='igv', linea_num=linea_num, defecto=Decimal('0'))
+        if igv_linea < Decimal('0'):
+            raise ValidationError({'detalles': f"Línea {linea_num}: El IGV no puede ser negativo."})
 
         es_bonificacion = bool(linea_data.get('es_bonificacion', False))
+        validar_igv_linea(
+            igv=igv_linea, precio_unitario=precio_unitario, cantidad_original=cantidad_original,
+            naturaleza=tipo_op.naturaleza, es_bonificacion=es_bonificacion, linea_num=linea_num,
+        )
 
         # Cálculo de Costo Unitario PEN
         costo_unitario_pen = None
@@ -415,8 +492,7 @@ def crear_documento(
                 costo_unitario_pen = Decimal('0.00000000')
 
         # Detalle de Origen (para notas)
-        # SEC-005: el detalle de origen solo aplica a notas, debe ser de la empresa
-        # activa y pertenecer al documento de origen de la nota.
+        # SEC-005: búsqueda siempre acotada a la empresa activa.
         detalle_origen = None
         det_origen_val = linea_data.get('detalle_origen') or linea_data.get('detalle_origen_id')
         if det_origen_val and not tipo_comprobante.es_nota:
@@ -431,13 +507,13 @@ def crear_documento(
             except (DocumentoDetalle.DoesNotExist, ValueError, TypeError):
                 raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen no existe o no pertenece a la empresa activa."})
 
-        if detalle_origen and not documento_origen:
-            raise ValidationError({'detalles': f"Línea {linea_num}: El detalle de origen requiere un documento de origen."})
-
-        if detalle_origen and documento_origen and detalle_origen.documento_id != documento_origen.id:
-            raise ValidationError(
-                {'detalles': f"Línea {linea_num}: La línea de origen #{detalle_origen.linea} no pertenece al documento de origen #{documento_origen.id}."}
-            )
+        # CON-007: vínculo línea ↔ línea de origen (pertenencia, producto, obligatoriedad).
+        validar_linea_nota(
+            tipo_comprobante=tipo_comprobante, tipo_operacion=tipo_op,
+            producto_id=producto.id if producto else None, detalle_origen=detalle_origen,
+            origen=documento_origen, linea_num=linea_num,
+        )
+        lineas_devolucion.append((linea_num, detalle_origen, tipo_op, cantidad_base))
 
         # Equivalencia
         equivalencia = None
@@ -476,6 +552,10 @@ def crear_documento(
 
         subtotal_acum += (precio_unitario * cantidad_original)
         igv_acum += igv_linea
+
+    # CON-007: no devolver más de lo disponible en cada línea de origen.
+    if tipo_comprobante.es_nota:
+        validar_cantidades_devolucion(lineas_devolucion, excluir_documento_id=documento.id)
 
     # Actualizar totales en la cabecera
     total_acum = subtotal_acum + igv_acum

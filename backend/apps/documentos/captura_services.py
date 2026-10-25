@@ -6,13 +6,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import Moneda, TipoComprobante, TipoOperacion
 from apps.documentos.models import Documento, DocumentoCaptura, DocumentoDetalle, CapturaCampo
-from apps.empresas.models import Periodo
+from apps.empresas.periodos import parsear_fecha_calendario, periodo_abierto_para_fecha
 from apps.inventario.models import Almacen, ProductoEquivalencia, Tercero
 from apps.kardex.models import Incidencia
 
@@ -88,16 +87,13 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
         or ''
     )
 
-    # 3. Fecha de emisión
-    fecha_str = _find_text(root, 'IssueDate')
-    fecha_emision = None
-    if fecha_str:
-        try:
-            fecha_emision = datetime.strptime(fecha_str, '%Y-%m-%d').date()
-        except ValueError:
-            fecha_emision = timezone.now().date()
-    else:
-        fecha_emision = timezone.now().date()
+    # 3. Fecha de emisión (CON-001): se conserva literal. Si falta o es inválida queda
+    #    tal cual para que el borrador la rechace; nunca se reemplaza por "hoy".
+    fecha_str = (_find_text(root, 'IssueDate') or '').strip()
+    try:
+        fecha_emision_txt = datetime.strptime(fecha_str, '%Y-%m-%d').date().strftime('%Y-%m-%d')
+    except ValueError:
+        fecha_emision_txt = fecha_str
 
     # 4. Moneda
     moneda_str = _find_text(root, 'DocumentCurrencyCode') or 'PEN'
@@ -215,7 +211,7 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
             'serie': serie,
             'numero': numero,
             'serie_numero': id_doc or f"{serie}-{numero}",
-            'fecha_emision': fecha_emision.strftime('%Y-%m-%d'),
+            'fecha_emision': fecha_emision_txt,
             'moneda': moneda_str,
             'ruc_emisor': ruc_emisor,
             'razon_social_emisor': razon_social_emisor,
@@ -280,8 +276,9 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
             fecha_emision = f"{fecha_alt.group(3)}-{fecha_alt.group(2)}-{fecha_alt.group(1)}"
             conf_fecha = Decimal('88.0000')
         else:
-            fecha_emision = timezone.now().date().strftime('%Y-%m-%d')
-            conf_fecha = Decimal('70.0000')
+            # CON-001: sin fecha detectada no se inventa "hoy"; requiere corrección humana.
+            fecha_emision = ''
+            conf_fecha = Decimal('0.0000')
 
     # Moneda
     if re.search(r'\b(USD|D[OÓ]LARES?|\$)\b', texto, re.IGNORECASE):
@@ -590,54 +587,36 @@ def generar_borrador_desde_captura(
                 numero_normalizado=ref_num,
             ).first()
 
-    # 4. Fecha de emisión
-    fecha_str = cabecera.get('fecha_emision')
-    fecha_emision = None
-    if fecha_str:
-        try:
-            fecha_emision = datetime.strptime(fecha_str, '%Y-%m-%d').date()
-        except ValueError:
-            fecha_emision = timezone.now().date()
-    else:
-        fecha_emision = timezone.now().date()
+    # 4. Fecha de emisión (CON-001): debe ser válida; nunca se reemplaza por "hoy".
+    fecha_emision = parsear_fecha_calendario(cabecera.get('fecha_emision'), campo='fecha_emision')
 
-    # 5. Período
-    periodo = Periodo.objects.filter(
-        empresa_id=empresa_id,
-        estado='ABIERTO',
-        fecha_inicio__lte=fecha_emision,
-        fecha_fin__gte=fecha_emision,
-    ).first()
+    # 5. Período (CON-001): solo el período ABIERTO que contiene exactamente la fecha.
+    #    Sin fallback al "último período abierto".
+    periodo = periodo_abierto_para_fecha(empresa_id=empresa_id, fecha=fecha_emision, campo='fecha_emision')
 
-    if not periodo:
-        periodo = Periodo.objects.filter(empresa_id=empresa_id, estado='ABIERTO').order_by('-fecha_inicio').first()
-
-    if not periodo:
-        raise ValidationError({'periodo': 'No existe un período contable ABIERTO para registrar el comprobante.'})
-
-    # 6. Moneda y Tipo de Cambio
-    moneda_cod = cabecera.get('moneda', 'PEN').strip().upper()
+    # 6. Moneda y Tipo de Cambio (CON-006): no se asume PEN ni se inventa un TC.
+    from apps.documentos.services import MONEDAS_SOPORTADAS, resolver_tipo_cambio_usd
+    moneda_cod = (cabecera.get('moneda') or '').strip().upper() or 'PEN'
+    if moneda_cod not in MONEDAS_SOPORTADAS:
+        raise ValidationError({
+            'moneda': f"La moneda '{moneda_cod}' del comprobante no está soportada para valorizar (solo PEN o USD)."
+        })
     moneda = Moneda.objects.filter(codigo=moneda_cod).first()
     if not moneda:
-        moneda = Moneda.objects.get(codigo='PEN')
+        raise ValidationError({'moneda': f"La moneda '{moneda_cod}' no está registrada en el sistema."})
 
     tipo_cambio = None
     fecha_tc = None
     monto_tc = None
     fuente_tc = None
     if moneda.codigo == 'USD':
-        try:
-            from apps.documentos.services import resolver_tipo_cambio_usd
-            tc = resolver_tipo_cambio_usd(fecha_emision)
-            tipo_cambio = tc
-            fecha_tc = tc.fecha_publicacion
-            monto_tc = tc.venta
-            fuente_tc = tc.fuente
-        except Exception:
-            tipo_cambio = None
-            fecha_tc = None
-            monto_tc = None
-            fuente_tc = None
+        # Si no hay TC aplicable se rechaza el borrador completo (rollback de esta
+        # transacción); la captura y sus campos se conservan para reintentar luego.
+        tc = resolver_tipo_cambio_usd(fecha_emision)
+        tipo_cambio = tc
+        fecha_tc = tc.fecha_publicacion
+        monto_tc = tc.venta
+        fuente_tc = tc.fuente
 
     # 7. Totales
     def parse_dec(val: str, default: Decimal = DECIMAL_CERO) -> Decimal:
@@ -779,7 +758,7 @@ def generar_borrador_desde_captura(
         igv_no_recuperable = igv_linea * porcentaje_no_recup
         costo_linea_doc = valor_linea_calc + igv_no_recuperable
 
-        if moneda.codigo == 'USD' and monto_tc:
+        if moneda.codigo == 'USD':
             costo_linea_pen = costo_linea_doc * monto_tc
         else:
             costo_linea_pen = costo_linea_doc

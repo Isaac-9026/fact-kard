@@ -689,7 +689,9 @@ class DocumentosApiTest(TestCase):
             fuente_tc='SBS',
             subtotal=Decimal('500.00000000'),
             igv=Decimal('90.00000000'),
-            total=Decimal('590.00000000')
+            total=Decimal('590.00000000'),
+            # CON-007: una nota solo se admite sobre un documento de origen CONFIRMADO.
+            estado='CONFIRMADO',
         )
         det_factura = DocumentoDetalle.objects.create(
             documento=factura,
@@ -706,6 +708,12 @@ class DocumentosApiTest(TestCase):
         )
 
         # 2. Nota de Crédito emitida el 20 de enero (cuando el TC SBS del día es 3.82)
+        # CON-007: la NC de compra devuelve al proveedor (SALIDA); antes este test usaba
+        # una operación ENTRADA, que sumaba stock en vez de devolverlo.
+        tipo_op_devolucion = TipoOperacion.objects.create(
+            codigo_interno='DEVOLUCION_COMPRA', codigo_sunat='06', descripcion='DEVOLUCION A PROVEEDOR',
+            naturaleza='SALIDA', es_interna=False, afecta_kardex=True, origen_requerido='MOV_ORIGEN',
+        )
         url = reverse('documento-list-create')
         data_nc = {
             'clase': 'COMPRA',
@@ -722,7 +730,7 @@ class DocumentosApiTest(TestCase):
                     'producto': self.producto.id,
                     'producto_unidad': self.pu_und.id,
                     'almacen': self.almacen.id,
-                    'tipo_operacion': self.tipo_op_compra.id,
+                    'tipo_operacion': tipo_op_devolucion.id,
                     'cantidad_original': '10.00000000',
                     'precio_unitario': '10.00000000',
                     'igv': '18.00000000',

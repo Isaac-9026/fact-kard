@@ -5,7 +5,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.empresas.models import CierrePeriodo, ConfigEmpresa, Empresa, Establecimiento, Periodo
 from apps.inventario.models import Producto
-from apps.kardex.models import Movimiento
+from apps.kardex.models import Movimiento, ValorizacionMovimiento
 
 
 OCHO_DECIMALES = Decimal('0.00000001')
@@ -76,6 +76,32 @@ def _cantidad_anterior(*, empresa_id, producto_id, establecimiento_id, fecha_ini
     return q8(saldo)
 
 
+def _cpp_historico(*, empresa_id, producto_id, fecha_inicio=None, fecha_fin=None):
+    """
+    CON-010: CPP global (empresa + producto) de la última valorización en el orden
+    oficial anterior a fecha_inicio, o hasta fecha_fin inclusive. Nunca usa
+    SaldoCppActual, que refleja operaciones posteriores al período.
+    """
+    qs = ValorizacionMovimiento.objects.filter(
+        movimiento__empresa_id=empresa_id, movimiento__producto_id=producto_id,
+    )
+    if fecha_inicio is not None:
+        qs = qs.filter(movimiento__fecha_movimiento__lt=fecha_inicio)
+    if fecha_fin is not None:
+        qs = qs.filter(movimiento__fecha_movimiento__lte=fecha_fin)
+    ultima = qs.order_by(
+        '-movimiento__fecha_movimiento', '-movimiento__prioridad_dia',
+        '-movimiento__secuencia', '-movimiento__id',
+    ).first()
+    return q8(ultima.cpp_empresa if ultima else ZERO)
+
+
+def _periodo_anterior(periodo):
+    return Periodo.objects.filter(
+        empresa_id=periodo.empresa_id, orden__lt=periodo.orden,
+    ).order_by('-orden').first()
+
+
 def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, producto_id=None):
     periodo, establecimiento, producto = validar_filtros_formato(
         empresa_id=empresa_id,
@@ -140,8 +166,17 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         for detalle in cierre.detalles.all()
     } if cierre else {}
 
+    # CON-010: el saldo inicial valorizado coincide con el cierre vigente del período anterior si existe.
+    anterior = _periodo_anterior(periodo)
+    cierre_anterior = CierrePeriodo.objects.filter(
+        periodo_id=anterior.id, vigente=True,
+    ).prefetch_related('detalles').first() if anterior else None
+    detalles_cierre_anterior = {
+        (detalle.establecimiento_id, detalle.producto_id): detalle
+        for detalle in cierre_anterior.detalles.all()
+    } if cierre_anterior else {}
+
     reportes = []
-    from apps.kardex.models import SaldoCppActual
     for (estab_id, prod_id), movimientos_grupo in sorted(
         agrupados.items(), key=lambda item: (
             item[1][0].almacen.establecimiento.codigo_sunat if item[1] else Establecimiento.objects.get(pk=item[0][0]).codigo_sunat,
@@ -165,8 +200,19 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
             fecha_inicio=periodo.fecha_inicio,
         )
         saldo_fisico = saldo_inicial_cantidad
-        saldo_cpp_obj = SaldoCppActual.objects.filter(empresa_id=empresa_id, producto_id=prod_id).first()
-        cpp_global = q8(saldo_cpp_obj.cpp_pen if saldo_cpp_obj else ZERO)
+        # CON-010: CPP histórico al inicio del período (no SaldoCppActual).
+        cpp_inicial = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_inicio=periodo.fecha_inicio)
+        detalle_inicial = detalles_cierre_anterior.get((estab_id, prod_id))
+        if detalle_inicial is not None and q8(detalle_inicial.saldo_cantidad) == saldo_inicial_cantidad:
+            costo_total_inicial = q8(detalle_inicial.saldo_valor_pen)
+        else:
+            costo_total_inicial = q8(saldo_inicial_cantidad * cpp_inicial)
+        saldo_inicial_valorizado = {
+            'cantidad': texto_decimal(saldo_inicial_cantidad),
+            'costo_unitario': texto_decimal(cpp_inicial),
+            'costo_total': texto_decimal(costo_total_inicial),
+        }
+        cpp_global = cpp_inicial
         filas = []
         for movimiento in movimientos_grupo:
             valorizacion = getattr(movimiento, 'valorizacion', None)
@@ -217,23 +263,24 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 },
             })
 
-        microdiferencia = ZERO
-        detalle_cierre = cierre_detalles.get((estab_id, prod_id))
-        if detalle_cierre:
-            oficial = q8(detalle_cierre.saldo_valor_pen)
-            if filas:
-                calculado = q8(Decimal(filas[-1]['saldo_final']['costo_total']))
-                microdiferencia = q8(oficial - calculado)
-                filas[-1]['saldo_final']['costo_total'] = texto_decimal(oficial)
-            else:
-                calculado = q8(saldo_fisico * cpp_global)
-                microdiferencia = q8(oficial - calculado)
-
+        if not filas:
+            # CON-010: sin movimientos propios, el CPP al cierre del período sigue siendo
+            # histórico (otros establecimientos pueden haberlo movido dentro del período).
+            cpp_global = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_fin=periodo.fecha_fin)
         saldo_final_resumen = {
             'cantidad': texto_decimal(saldo_fisico),
             'costo_unitario': texto_decimal(cpp_global),
             'costo_total': texto_decimal(saldo_fisico * cpp_global),
         } if not filas else filas[-1]['saldo_final']
+
+        microdiferencia = ZERO
+        detalle_cierre = cierre_detalles.get((estab_id, prod_id))
+        if detalle_cierre:
+            oficial = q8(detalle_cierre.saldo_valor_pen)
+            calculado = q8(Decimal(saldo_final_resumen['costo_total']))
+            microdiferencia = q8(oficial - calculado)
+            # El saldo final informado coincide con el snapshot oficial del cierre.
+            saldo_final_resumen['costo_total'] = texto_decimal(oficial)
 
         reportes.append({
             'cabecera': {
@@ -252,6 +299,7 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 'metodo_valuacion': metodo,
             },
             'saldo_inicial': texto_decimal(saldo_inicial_cantidad),
+            'saldo_inicial_valorizado': saldo_inicial_valorizado,
             'saldo_final': saldo_final_resumen,
             'movimientos': filas,
             'microdiferencia_cierre': texto_decimal(microdiferencia),
