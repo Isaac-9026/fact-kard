@@ -8,6 +8,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 
 from rest_framework.permissions import IsAuthenticated
+from config.api import fecha_param
 from apps.usuarios.permissions import EsAdminOEsAdminGlobal
 from apps.auditoria.services import registrar_auditoria
 from apps.empresas.models import Empresa
@@ -71,7 +72,7 @@ class TipoCambioListCreateView(generics.ListCreateAPIView):
         moneda = self.request.query_params.get('moneda')
         if moneda:
             qs = qs.filter(moneda_codigo=moneda.upper())
-        fecha = self.request.query_params.get('fecha')
+        fecha = fecha_param(self.request.query_params, 'fecha')  # Bloque 6: 400 si no es fecha
         if fecha:
             qs = qs.filter(fecha_publicacion=fecha)
         return qs

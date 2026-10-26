@@ -63,7 +63,12 @@ class DocumentoListSerializer(serializers.ModelSerializer):
     tercero_razon_social = serializers.ReadOnlyField(source='tercero.razon_social')
     periodo_orden = serializers.ReadOnlyField(source='periodo.orden')
     revisado_por_username = serializers.ReadOnlyField(source='revisado_por.username')
-    detalles_count = serializers.IntegerField(source='detalles.count', read_only=True)
+    detalles_count = serializers.SerializerMethodField()
+
+    def get_detalles_count(self, obj):
+        # Bloque 6: usa la anotación del listado (sin N+1); fallback para otros usos.
+        anotado = getattr(obj, 'num_detalles', None)
+        return anotado if anotado is not None else obj.detalles.count()
 
     class Meta:
         model = Documento
@@ -341,7 +346,13 @@ class DocumentoCapturaDetailSerializer(serializers.ModelSerializer):
 class DocumentoCapturaSubirSerializer(serializers.Serializer):
     archivo = serializers.FileField(required=True)
     tipo = serializers.ChoiceField(choices=['XML', 'PDF', 'IMAGEN', 'ESCANER'], required=True)
-    texto_ocr = serializers.CharField(required=False, allow_blank=True, default='')
+    texto_ocr = serializers.CharField(required=False, allow_blank=True, default='', max_length=200_000)
+
+    def validate(self, attrs):
+        # Bloque 6: tamaño, extensión/MIME, firma del contenido y nombre seguro.
+        from apps.documentos.uploads import validar_archivo_captura
+        attrs['nombre_seguro'] = validar_archivo_captura(attrs['archivo'], attrs['tipo'])
+        return attrs
 
 
 class CapturaCampoCorregirSerializer(serializers.Serializer):

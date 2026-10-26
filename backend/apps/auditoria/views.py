@@ -1,9 +1,10 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from apps.auditoria.models import Auditoria
+from config.api import PaginacionOpcional
 from apps.auditoria.serializers import AuditoriaSerializer
 from apps.usuarios.authentication import UsuarioTokenAuthentication
 from apps.usuarios.permissions import TieneEmpresaActiva, EsAdminEmpresa
@@ -44,5 +45,10 @@ class AuditoriaListView(APIView):
         if accion:
             qs = qs.filter(accion__iexact=accion.strip())
 
+        # Bloque 6: paginación opcional (?page=&page_size=).
+        paginador = PaginacionOpcional()
+        pagina = paginador.paginate_queryset(qs, request, self)
+        if pagina is not None:
+            return paginador.get_paginated_response(AuditoriaSerializer(pagina, many=True).data)
         serializer = AuditoriaSerializer(qs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

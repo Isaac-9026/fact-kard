@@ -77,11 +77,15 @@ def establecimiento_principal_id(empresa_id):
     ).first()
 
 
-def valores_por_establecimiento(empresa_id, estado_producto):
+_SIN_DATO = object()
+
+
+def valores_por_establecimiento(empresa_id, estado_producto, principal=_SIN_DATO):
     """Valor por establecimiento con la misma regla que el cierre (diferencia al principal)."""
+    if principal is _SIN_DATO:
+        principal = establecimiento_principal_id(empresa_id)
     partes = sorted((e, c) for e, c in estado_producto['establecimientos'].items() if c != ZERO)
-    return repartir_valor(estado_producto['valor'], partes, estado_producto['cpp'],
-                          preferida=establecimiento_principal_id(empresa_id))
+    return repartir_valor(estado_producto['valor'], partes, estado_producto['cpp'], preferida=principal)
 
 
 def resumen_saldos_al_corte(*, empresa_id, periodo=None, fecha_hasta=None, producto_id=None, almacen_id=None):
@@ -141,7 +145,7 @@ def resumen_saldos_al_corte(*, empresa_id, periodo=None, fecha_hasta=None, produ
     return {'corte': corte, 'fuente': fuente, 'filas': filas}
 
 
-def valores_establecimiento_por_movimiento(empresa_id, producto_id, hasta):
+def valores_establecimiento_por_movimiento(empresa_id, producto_id, hasta, principal=_SIN_DATO):
     """
     Bloque 5: tras cada movimiento (orden oficial, fecha <= hasta), parte del saldo real
     de la empresa que corresponde a cada establecimiento: {movimiento_id: {estab_id: valor}}.
@@ -149,7 +153,8 @@ def valores_establecimiento_por_movimiento(empresa_id, producto_id, hasta):
     de cantidades por establecimiento no coincide con la de la empresa (p. ej. entre la
     entrada y la salida de una transferencia del mismo día) no se reparte ese instante.
     """
-    principal = establecimiento_principal_id(empresa_id)
+    if principal is _SIN_DATO:
+        principal = establecimiento_principal_id(empresa_id)
     cantidades = defaultdict(lambda: ZERO)
     resultado = {}
     movimientos = Movimiento.objects.filter(

@@ -65,3 +65,15 @@ export const asignarUsuarioApi = async (payload: AsignarUsuarioPayload): Promise
   const response = await apiClient.post<UsuarioEmpresaItem>('/usuarios/asignaciones/', payload);
   return response.data;
 };
+
+/**
+ * Bloque 6: revoca el token en el servidor (logout efectivo). Es "best effort": si falla
+ * (sin red o token ya inválido) la sesión local se limpia igual.
+ */
+export const logoutApi = async (token: string): Promise<void> => {
+  try {
+    await apiClient.post('/usuarios/logout/', {}, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    // sin acción: el token igual se elimina del navegador
+  }
+};

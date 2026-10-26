@@ -3,6 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers
 from rest_framework.response import Response
 
+from config.api import PaginacionOpcional, entero_param
 from apps.inventario.models import Producto
 from apps.kardex.models import Incidencia, Movimiento, Recalculo, SaldoCppActual, StockAlmacen
 from apps.kardex.services import ejecutar_recalculo_producto
@@ -64,10 +65,12 @@ class BaseMixin:
 
 class MovimientoListView(BaseMixin, generics.ListAPIView):
     serializer_class = MovimientoSerializer
+    pagination_class = PaginacionOpcional
     def get_queryset(self):
         qs = Movimiento.objects.filter(empresa_id=self.request.empresa_id).select_related('valorizacion')
         for parametro, campo in (('producto', 'producto_id'), ('almacen', 'almacen_id'), ('periodo', 'periodo_id')):
-            if self.request.query_params.get(parametro): qs = qs.filter(**{campo: self.request.query_params[parametro]})
+            valor = entero_param(self.request.query_params, parametro)  # Bloque 6: 400 si no es un id
+            if valor is not None: qs = qs.filter(**{campo: valor})
         return qs.order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
 
 
@@ -80,8 +83,9 @@ class SaldosActualesView(BaseMixin, generics.GenericAPIView):
 
 class IncidenciaListView(BaseMixin, generics.ListAPIView):
     serializer_class = IncidenciaSerializer
+    pagination_class = PaginacionOpcional
     def get_queryset(self):
-        return Incidencia.objects.filter(empresa_id=self.request.empresa_id).order_by('-detectado_en')
+        return Incidencia.objects.filter(empresa_id=self.request.empresa_id).order_by('-detectado_en', '-id')
 
 
 class IncidenciaUpdateView(BaseMixin, generics.UpdateAPIView):
@@ -94,6 +98,7 @@ class IncidenciaUpdateView(BaseMixin, generics.UpdateAPIView):
 
 class RecalculoListCreateView(BaseMixin, generics.ListCreateAPIView):
     serializer_class = RecalculoSerializer
+    pagination_class = PaginacionOpcional
     def get_queryset(self):
         return Recalculo.objects.filter(empresa_id=self.request.empresa_id).prefetch_related('detalles').order_by('-ejecutado_en')
     def create(self, request, *args, **kwargs):

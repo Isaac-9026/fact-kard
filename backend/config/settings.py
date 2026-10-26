@@ -133,6 +133,12 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Django REST Framework
+# Bloque 6: duración del token (segundos) y límite de intentos de login por IP.
+TOKEN_MAX_AGE_SECONDS = config('TOKEN_MAX_AGE_SECONDS', default=60 * 60 * 24 * 7, cast=int)
+LOGIN_THROTTLE_RATE = config('LOGIN_THROTTLE_RATE', default='10/min')
+# Bloque 6: tamaño máximo de un archivo de captura (bytes).
+CAPTURA_MAX_BYTES = config('CAPTURA_MAX_BYTES', default=10 * 1024 * 1024, cast=int)
+
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { getMeApi } from '../api/auth';
+import { getMeApi, logoutApi } from '../api/auth';
 import { registrarManejadorSesionInvalida, reiniciarControlSesion } from '../api/http';
 import type { Usuario, EmpresaAsociada, EmpresaActiva, AuthContextType } from '../types/auth';
 import { reconciliarEstadoEmpresas } from './authState';
@@ -133,6 +133,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = useCallback(() => {
+    const tokenActual = localStorage.getItem('token');
+    if (tokenActual) void logoutApi(tokenActual);
     setVerificandoSesion(false);
     setToken(null);
     setUsuario(null);

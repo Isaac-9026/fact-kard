@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
+from apps.documentos.uploads import nombre_seguro
 from apps.documentos.afectacion_igv import (
     TOLERANCIA_IGV, igv_esperado, resolver_afectacion, tasa_igv, validar_igv_linea,
 )
@@ -436,6 +437,7 @@ def procesar_subida_captura(
     archivo,
     tipo: str,
     texto_ocr: Optional[str] = None,
+    nombre_archivo: Optional[str] = None,
 ) -> Tuple[DocumentoCaptura, bool]:
     """
     Procesa un archivo XML o PDF/Imagen/Escáner:
@@ -459,7 +461,8 @@ def procesar_subida_captura(
     captura = DocumentoCaptura.objects.create(
         empresa_id=empresa_id,
         tipo=tipo.upper(),
-        ruta_archivo=f"uploads/{tipo.lower()}/{archivo.name}",
+        # Bloque 6: nombre saneado (sin rutas); el archivo aún no se almacena en disco.
+        ruta_archivo=f"uploads/{tipo.lower()}/{nombre_archivo or nombre_seguro(archivo.name)}",
         hash_sha256=hash_sha256,
         estado_proceso='PROCESADO',
         subido_por=usuario,

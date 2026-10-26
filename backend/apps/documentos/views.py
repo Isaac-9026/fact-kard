@@ -1,12 +1,13 @@
-from django.db.models import Q
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from django.db.models import Q, Count
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import generics, status
-from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.documentos.models import Documento, DocumentoCaptura, CapturaCampo
+from config.api import PaginacionOpcional, entero_param
+from apps.documentos.models import Documento, DocumentoCaptura
 from apps.documentos.serializers import (
     DocumentoListSerializer,
     DocumentoDetailSerializer,
@@ -39,6 +40,7 @@ class DocumentoListCreateView(generics.ListCreateAPIView):
     Aislamiento estricto por empresa_id (X-Empresa-Id).
     """
     permission_classes = [TieneEmpresaActiva]
+    pagination_class = PaginacionOpcional
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -50,15 +52,16 @@ class DocumentoListCreateView(generics.ListCreateAPIView):
         if not empresa_id:
             return Documento.objects.none()
 
+        # Bloque 6: el número de líneas se anota en SQL (antes un COUNT por documento).
         qs = Documento.objects.filter(empresa_id=empresa_id).select_related(
             'periodo', 'tercero', 'tipo_comprobante', 'moneda_codigo', 'revisado_por'
-        )
+        ).annotate(num_detalles=Count('detalles'))
 
         clase = self.request.query_params.get('clase')
         if clase:
             qs = qs.filter(clase=clase.upper())
 
-        periodo_id = self.request.query_params.get('periodo')
+        periodo_id = entero_param(self.request.query_params, 'periodo')  # Bloque 6: 400 si no es id
         if periodo_id:
             qs = qs.filter(periodo_id=periodo_id)
 
@@ -232,6 +235,7 @@ class DocumentoCapturaSubirView(APIView):
             archivo=archivo,
             tipo=tipo,
             texto_ocr=texto_ocr,
+            nombre_archivo=serializer.validated_data['nombre_seguro'],
         )
 
         data = DocumentoCapturaDetailSerializer(captura).data
@@ -250,6 +254,7 @@ class DocumentoCapturaListView(generics.ListAPIView):
     """Lista las capturas realizadas por la empresa activa."""
     permission_classes = [TieneEmpresaActiva]
     serializer_class = DocumentoCapturaListSerializer
+    pagination_class = PaginacionOpcional
 
     def get_queryset(self):
         empresa_id = getattr(self.request, 'empresa_id', None)

@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Max, Q, Sum
 from rest_framework.exceptions import ValidationError
 
 from apps.auditoria.services import registrar_auditoria
@@ -267,7 +267,15 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
         'movimiento_origen__valorizacion', 'movimiento_extornado__valorizacion',
     ).order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
 
-    movimientos_anteriores = list(movimientos_base.filter(fecha_movimiento__lt=fecha_desde))
+    # Bloque 6: la historia anterior a fecha_desde no se carga en memoria. Solo hace
+    # falta su punto de partida: stock por almacén (agregado en SQL) y el saldo de la
+    # última valorización. El tramo recalculado y el orden oficial no cambian.
+    anteriores = Movimiento.objects.filter(
+        empresa_id=empresa_id, producto_id=producto_id, fecha_movimiento__lt=fecha_desde,
+    )
+    ultimo_anterior = anteriores.select_related('valorizacion').order_by(
+        '-fecha_movimiento', '-prioridad_dia', '-secuencia', '-id',
+    ).first()
     movimientos_afectados = list(movimientos_base.filter(fecha_movimiento__gte=fecha_desde))
 
     # C-03: Prohibir recálculo que altere movimientos o comience en períodos cerrados
@@ -299,18 +307,15 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
 
     # Los movimientos anteriores solo reconstruyen el punto de partida. Su
     # valorización es historia consolidada y no debe versionarse nuevamente.
-    for movimiento in movimientos_anteriores:
-        if movimiento.naturaleza == 'ENTRADA':
-            stocks[movimiento.almacen_id] = q8(
-                stocks.get(movimiento.almacen_id, ZERO) + movimiento.cantidad_base,
-            )
-        elif movimiento.naturaleza == 'SALIDA':
-            stocks[movimiento.almacen_id] = q8(
-                stocks.get(movimiento.almacen_id, ZERO) - movimiento.cantidad_base,
-            )
+    por_almacen = anteriores.values('almacen_id').annotate(
+        entradas=Sum('cantidad_base', filter=Q(naturaleza='ENTRADA')),
+        salidas=Sum('cantidad_base', filter=Q(naturaleza='SALIDA')),
+    )
+    for fila in por_almacen:
+        stocks[fila['almacen_id']] = q8((fila['entradas'] or ZERO) - (fila['salidas'] or ZERO))
 
-    if movimientos_anteriores:
-        valorizacion_previa = getattr(movimientos_anteriores[-1], 'valorizacion', None)
+    if ultimo_anterior is not None:
+        valorizacion_previa = getattr(ultimo_anterior, 'valorizacion', None)
         if valorizacion_previa is None:
             raise ValidationError({
                 'recalculo': 'El último movimiento anterior a fecha_desde no tiene valorización.',
@@ -555,9 +560,7 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
     saldo = SaldoCppActual.objects.select_for_update().get(empresa_id=empresa_id, producto_id=producto_id)
     saldo.cantidad_total=cantidad; saldo.valor_total_pen=valor; saldo.cpp_pen=cpp(valor, cantidad)
     ultimo_movimiento = (
-        movimientos_afectados[-1] if movimientos_afectados
-        else movimientos_anteriores[-1] if movimientos_anteriores
-        else None
+        movimientos_afectados[-1] if movimientos_afectados else ultimo_anterior
     )
     saldo.ultimo_movimiento=ultimo_movimiento; saldo.save()
     for almacen_id, cantidad_stock in stocks.items():

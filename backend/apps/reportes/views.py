@@ -12,6 +12,23 @@ from apps.reportes.formato131_excel import generar_excel_formato_131
 from apps.reportes.formato131_service import generar_formato_131
 from apps.reportes.piloto_service import comparar_piloto, obtener_valores_factkard
 from apps.reportes.serializers import PilotoComparacionSerializer
+from config.api import entero_param, fecha_param, paginar_lista
+
+
+def filtros_kardex(params):
+    """Bloque 6: filtros del Kardex validados (400 ante ids o fechas inválidos)."""
+    desde, hasta = fecha_param(params, 'fecha_desde'), fecha_param(params, 'fecha_hasta')
+    if desde and hasta and desde > hasta:
+        from rest_framework.exceptions import ValidationError
+        raise ValidationError({'fecha_desde': 'La fecha desde no puede ser posterior a la fecha hasta.'})
+    return {
+        'producto_id': entero_param(params, 'producto_id', 'producto'),
+        'periodo_id': entero_param(params, 'periodo_id', 'periodo'),
+        'almacen_id': entero_param(params, 'almacen_id', 'almacen'),
+        'tipo_operacion_id': entero_param(params, 'tipo_operacion_id', 'tipo_operacion'),
+        'fecha_desde': desde.isoformat() if desde else None,
+        'fecha_hasta': hasta.isoformat() if hasta else None,
+    }
 
 
 class KardexReportView(APIView):
@@ -27,25 +44,20 @@ class KardexReportView(APIView):
     def get(self, request, *args, **kwargs):
         empresa_id = request.empresa_id
 
-        producto_id = request.query_params.get('producto_id') or request.query_params.get('producto')
-        periodo_id = request.query_params.get('periodo_id') or request.query_params.get('periodo')
-        almacen_id = request.query_params.get('almacen_id') or request.query_params.get('almacen')
-        tipo_operacion_id = request.query_params.get('tipo_operacion_id') or request.query_params.get('tipo_operacion')
-        fecha_desde = request.query_params.get('fecha_desde')
-        fecha_hasta = request.query_params.get('fecha_hasta')
+        filtros = filtros_kardex(request.query_params)
 
         resultado = consultar_kardex_valorizado(
             empresa_id=empresa_id,
-            producto_id=int(producto_id) if producto_id else None,
-            periodo_id=int(periodo_id) if periodo_id else None,
-            almacen_id=int(almacen_id) if almacen_id else None,
-            tipo_operacion_id=int(tipo_operacion_id) if tipo_operacion_id else None,
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta,
+            **filtros,
         )
 
-        serializer = KardexReporteResponseSerializer(resultado)
-        return Response(serializer.data)
+        # Bloque 6: paginación opcional de las filas; el resumen y el saldo inicial se
+        # calculan siempre sobre el rango completo.
+        resultado['movimientos'], paginacion = paginar_lista(request, resultado['movimientos'], self)
+        data = KardexReporteResponseSerializer(resultado).data
+        if paginacion is not None:
+            data['paginacion'] = paginacion
+        return Response(data)
 
 
 class KardexExcelExportView(APIView):
@@ -63,21 +75,11 @@ class KardexExcelExportView(APIView):
     def get(self, request, *args, **kwargs):
         empresa_id = request.empresa_id
 
-        producto_id = request.query_params.get('producto_id') or request.query_params.get('producto')
-        periodo_id = request.query_params.get('periodo_id') or request.query_params.get('periodo')
-        almacen_id = request.query_params.get('almacen_id') or request.query_params.get('almacen')
-        tipo_operacion_id = request.query_params.get('tipo_operacion_id') or request.query_params.get('tipo_operacion')
-        fecha_desde = request.query_params.get('fecha_desde')
-        fecha_hasta = request.query_params.get('fecha_hasta')
+        filtros = filtros_kardex(request.query_params)
 
         buffer = generar_bytes_excel_kardex(
             empresa_id=empresa_id,
-            producto_id=int(producto_id) if producto_id else None,
-            periodo_id=int(periodo_id) if periodo_id else None,
-            almacen_id=int(almacen_id) if almacen_id else None,
-            tipo_operacion_id=int(tipo_operacion_id) if tipo_operacion_id else None,
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta,
+            **filtros,
         )
 
         nombre_archivo = f"kardex_empresa_{empresa_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -94,11 +96,12 @@ class Formato131View(APIView):
     permission_classes = (TieneEmpresaActiva,)
 
     def get(self, request):
+        params = request.query_params
         resultado = generar_formato_131(
             empresa_id=request.empresa_id,
-            periodo_id=request.query_params.get('periodo_id'),
-            establecimiento_id=request.query_params.get('establecimiento_id'),
-            producto_id=request.query_params.get('producto_id'),
+            periodo_id=entero_param(params, 'periodo_id', requerido=True),
+            establecimiento_id=entero_param(params, 'establecimiento_id'),
+            producto_id=entero_param(params, 'producto_id'),
         )
         return Response(resultado)
 
@@ -108,12 +111,13 @@ class Formato131ExcelView(APIView):
     permission_classes = (TieneEmpresaActiva,)
 
     def get(self, request):
-        periodo_id = request.query_params.get('periodo_id')
+        params = request.query_params
+        periodo_id = entero_param(params, 'periodo_id', requerido=True)
         buffer = generar_excel_formato_131(
             empresa_id=request.empresa_id,
             periodo_id=periodo_id,
-            establecimiento_id=request.query_params.get('establecimiento_id'),
-            producto_id=request.query_params.get('producto_id'),
+            establecimiento_id=entero_param(params, 'establecimiento_id'),
+            producto_id=entero_param(params, 'producto_id'),
         )
         response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="formato_13_1_periodo_{periodo_id}.xlsx"'
@@ -125,12 +129,8 @@ class PilotoComparadorView(APIView):
     permission_classes = (TieneEmpresaActiva,)
 
     def get(self, request):
-        periodo_id = request.query_params.get('periodo_id')
-        producto_id = request.query_params.get('producto_id')
-        if not periodo_id:
-            return Response({'periodo_id': 'Este parámetro es obligatorio.'}, status=400)
-        if not producto_id:
-            return Response({'producto_id': 'Este parámetro es obligatorio.'}, status=400)
+        periodo_id = entero_param(request.query_params, 'periodo_id', requerido=True)
+        producto_id = entero_param(request.query_params, 'producto_id', requerido=True)
         return Response(obtener_valores_factkard(
             empresa_id=request.empresa_id,
             periodo_id=periodo_id,

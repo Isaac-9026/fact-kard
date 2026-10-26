@@ -1,12 +1,18 @@
+from datetime import timedelta
+
+from django.contrib.auth.hashers import make_password
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from apps.usuarios.models import Usuario, UsuarioEmpresa
-from apps.usuarios.authentication import UsuarioTokenAuthentication, generar_token
+from apps.usuarios.models import TokenRevocado, Usuario, UsuarioEmpresa
+from apps.usuarios.authentication import (
+    LoginRateThrottle, UsuarioTokenAuthentication, duracion_token, generar_token, leer_token,
+)
 from apps.usuarios.permissions import TieneEmpresaActiva, EsAdminEmpresa
 from apps.usuarios.serializers import (
     LoginRequestSerializer,
@@ -66,6 +72,7 @@ def obtener_empresas_usuario(usuario: Usuario):
 class LoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [LoginRateThrottle]
 
     @extend_schema(
         summary="Autenticación de usuario",
@@ -84,24 +91,20 @@ class LoginView(APIView):
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
 
-        try:
-            usuario = Usuario.objects.get(username=username)
-        except Usuario.DoesNotExist:
-            return Response(
-                {'detail': 'Credenciales de acceso inválidas.'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
+        # Bloque 6: mismo mensaje y mismo trabajo de hash exista o no el usuario.
+        usuario = Usuario.objects.filter(username=username).first()
+        if usuario is None:
+            make_password(password)  # equipara el tiempo de respuesta
+            return Response({'detail': 'Credenciales de acceso inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
 
+        if not usuario.check_password(password):
+            return Response({'detail': 'Credenciales de acceso inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Solo con la contraseña correcta se informa que la cuenta está inactiva.
         if not usuario.activo:
             return Response(
                 {'detail': 'El usuario se encuentra inactivo. Contacte al administrador.'},
                 status=status.HTTP_403_FORBIDDEN
-            )
-
-        if not usuario.check_password(password):
-            return Response(
-                {'detail': 'Credenciales de acceso inválidas.'},
-                status=status.HTTP_401_UNAUTHORIZED
             )
 
         token = generar_token(usuario)
@@ -112,6 +115,20 @@ class LoginView(APIView):
             'usuario': UsuarioResponseSerializer(usuario).data,
             'empresas': empresas_data,
         }, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    """Bloque 6: revoca el token usado en la petición (logout efectivo en el servidor)."""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [UsuarioTokenAuthentication]
+
+    def post(self, request):
+        payload = leer_token(request.auth)
+        expira = timezone.now() + timedelta(seconds=duracion_token())
+        TokenRevocado.objects.get_or_create(jti=payload['jti'], defaults={'usuario': request.user, 'expira_en': expira})
+        # Limpieza oportunista de revocaciones ya expiradas.
+        TokenRevocado.objects.filter(expira_en__lt=timezone.now()).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MeView(APIView):

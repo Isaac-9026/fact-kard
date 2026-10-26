@@ -66,3 +66,19 @@ class UsuarioEmpresa(models.Model):
 
     def __str__(self):
         return f"{self.usuario.username} - {self.empresa.razon_social} ({self.rol})"
+
+
+class TokenRevocado(models.Model):
+    """
+    Bloque 6: tokens invalidados por logout (lista de revocación por `jti`). Basta con
+    conservarlos hasta su expiración; luego el token ya no es válido por sí mismo.
+    """
+    jti = models.CharField(max_length=64, unique=True)
+    usuario = models.ForeignKey(
+        'usuarios.Usuario', on_delete=models.CASCADE, db_column='usuario_id', related_name='tokens_revocados',
+    )
+    revocado_en = models.DateTimeField(auto_now_add=True)
+    expira_en = models.DateTimeField()
+
+    class Meta:
+        db_table = 'token_revocado'

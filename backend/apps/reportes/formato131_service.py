@@ -8,7 +8,8 @@ from apps.empresas.models import CierrePeriodo, ConfigEmpresa, Empresa, Establec
 from apps.inventario.models import Producto
 from apps.kardex.models import Movimiento, ValorizacionMovimiento
 from apps.reportes.saldos_corte import (
-    q8, saldos_al_corte, valores_establecimiento_por_movimiento, valores_por_establecimiento,
+    establecimiento_principal_id, q8, saldos_al_corte, valores_establecimiento_por_movimiento,
+    valores_por_establecimiento,
 )
 
 
@@ -62,22 +63,6 @@ def _documento_sunat(movimiento):
     return {'tipo_documento': '00', 'serie': 'MOV', 'numero': str(movimiento.id)}
 
 
-def _cantidad_anterior(*, empresa_id, producto_id, establecimiento_id, fecha_inicio):
-    movimientos = Movimiento.objects.filter(
-        empresa_id=empresa_id,
-        producto_id=producto_id,
-        almacen__establecimiento_id=establecimiento_id,
-        fecha_movimiento__lt=fecha_inicio,
-    ).values_list('naturaleza', 'cantidad_base')
-    saldo = ZERO
-    for naturaleza, cantidad in movimientos:
-        if naturaleza == 'ENTRADA':
-            saldo += cantidad
-        elif naturaleza == 'SALIDA':
-            saldo -= cantidad
-    return q8(saldo)
-
-
 def _cpp_historico(*, empresa_id, producto_id, fecha_inicio=None, fecha_fin=None):
     """
     CON-010: CPP global (empresa + producto) de la última valorización en el orden
@@ -98,12 +83,54 @@ def _cpp_historico(*, empresa_id, producto_id, fecha_inicio=None, fecha_fin=None
     return q8(ultima.cpp_empresa if ultima else ZERO)
 
 
-def _valor_establecimiento(empresa_id, producto_id, establecimiento_id, corte, *, defecto):
-    """Parte del saldo real de la empresa que corresponde al establecimiento al corte."""
-    estado = saldos_al_corte(empresa_id, corte, producto_id).get(producto_id)
-    if estado is None:
-        return defecto
-    return valores_por_establecimiento(empresa_id, estado).get(establecimiento_id, defecto)
+class _CacheProducto:
+    """
+    Bloque 6: los datos que dependen solo del producto (no del establecimiento) se
+    calculan una vez por generación del 13.1. Antes se repetían por cada par
+    (establecimiento, producto) con varias consultas cada vez. Mismos resultados.
+    """
+
+    def __init__(self, empresa_id):
+        self.empresa_id = empresa_id
+        self.principal = establecimiento_principal_id(empresa_id)
+        self._memo = {}
+
+    def _de(self, clave, calcular):
+        if clave not in self._memo:
+            self._memo[clave] = calcular()
+        return self._memo[clave]
+
+    def estado(self, producto_id, corte):
+        return self._de(('estado', producto_id, corte),
+                        lambda: saldos_al_corte(self.empresa_id, corte, producto_id).get(producto_id))
+
+    def cantidad_anterior(self, producto_id, establecimiento_id, fecha_inicio):
+        """Equivale a _cantidad_anterior (movimientos con fecha < fecha_inicio)."""
+        estado = self.estado(producto_id, fecha_inicio - timedelta(days=1))
+        return q8(estado['establecimientos'].get(establecimiento_id, ZERO)) if estado else ZERO
+
+    def valor_establecimiento(self, producto_id, establecimiento_id, corte, *, defecto):
+        estado = self.estado(producto_id, corte)
+        if estado is None:
+            return defecto
+        valores = self._de(('valores', producto_id, corte),
+                           lambda: valores_por_establecimiento(self.empresa_id, estado, self.principal))
+        return valores.get(establecimiento_id, defecto)
+
+    def cpp(self, producto_id, *, fecha_inicio=None, fecha_fin=None):
+        return self._de(('cpp', producto_id, fecha_inicio, fecha_fin), lambda: _cpp_historico(
+            empresa_id=self.empresa_id, producto_id=producto_id, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin,
+        ))
+
+    def reparto(self, producto_id, hasta):
+        return self._de(('reparto', producto_id, hasta), lambda: valores_establecimiento_por_movimiento(
+            self.empresa_id, producto_id, hasta, principal=self.principal,
+        ))
+
+    def unidad_base(self, producto):
+        return self._de(('unidad', producto.id), lambda: producto.unidades.select_related('unidad_codigo').filter(
+            es_base=True,
+        ).first())
 
 
 def _periodo_anterior(periodo):
@@ -158,16 +185,12 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
     if producto:
         stocks_qs = stocks_qs.filter(producto_id=producto.id)
 
+    cache = _CacheProducto(empresa_id)
     pares_conocidos = set(agrupados.keys())
     for st in stocks_qs:
         par = (st.almacen.establecimiento_id, st.producto_id)
         if par not in pares_conocidos:
-            cant_ant = _cantidad_anterior(
-                empresa_id=empresa_id,
-                producto_id=st.producto_id,
-                establecimiento_id=st.almacen.establecimiento_id,
-                fecha_inicio=periodo.fecha_inicio,
-            )
+            cant_ant = cache.cantidad_anterior(st.producto_id, st.almacen.establecimiento_id, periodo.fecha_inicio)
             if cant_ant != ZERO:
                 agrupados[par] = []
                 pares_conocidos.add(par)
@@ -202,26 +225,21 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
             prod = Producto.objects.select_related('tipo_existencia_codigo').get(pk=prod_id)
             estab = Establecimiento.objects.get(pk=estab_id)
 
-        unidad_base = prod.unidades.select_related('unidad_codigo').filter(es_base=True).first()
+        unidad_base = cache.unidad_base(prod)
         if not unidad_base:
             raise ValidationError({'producto_id': f'El producto {prod.codigo_interno} no tiene unidad base.'})
-        saldo_inicial_cantidad = _cantidad_anterior(
-            empresa_id=empresa_id,
-            producto_id=prod_id,
-            establecimiento_id=estab_id,
-            fecha_inicio=periodo.fecha_inicio,
-        )
+        saldo_inicial_cantidad = cache.cantidad_anterior(prod_id, estab_id, periodo.fecha_inicio)
         saldo_fisico = saldo_inicial_cantidad
         # CON-010: CPP histórico al inicio del período (no SaldoCppActual).
-        cpp_inicial = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_inicio=periodo.fecha_inicio)
+        cpp_inicial = cache.cpp(prod_id, fecha_inicio=periodo.fecha_inicio)
         detalle_inicial = detalles_cierre_anterior.get((estab_id, prod_id))
         if detalle_inicial is not None and q8(detalle_inicial.saldo_cantidad) == saldo_inicial_cantidad:
             costo_total_inicial = q8(detalle_inicial.saldo_valor_pen)
         else:
             # Bloque 4: sin cierre previo, el valor del establecimiento es su parte del saldo
             # real de la empresa (cantidad × CPP con el redondeo asignado como en el cierre).
-            costo_total_inicial = _valor_establecimiento(
-                empresa_id, prod_id, estab_id, periodo.fecha_inicio - timedelta(days=1),
+            costo_total_inicial = cache.valor_establecimiento(
+                prod_id, estab_id, periodo.fecha_inicio - timedelta(days=1),
                 defecto=q8(saldo_inicial_cantidad * cpp_inicial),
             )
         saldo_inicial_valorizado = {
@@ -231,7 +249,7 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         }
         cpp_global = cpp_inicial
         # Bloque 5: valor del establecimiento tras cada movimiento = su parte del saldo real.
-        reparto = valores_establecimiento_por_movimiento(empresa_id, prod_id, periodo.fecha_fin) if movimientos_grupo else {}
+        reparto = cache.reparto(prod_id, periodo.fecha_fin) if movimientos_grupo else {}
         filas = []
         for movimiento in movimientos_grupo:
             valorizacion = getattr(movimiento, 'valorizacion', None)
@@ -295,7 +313,7 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         # CON-010 / Bloque 4: el CPP al cierre del período es el histórico global a la fecha
         # fin; otros establecimientos pueden haberlo movido después del último movimiento
         # propio, así que no se toma el de la última fila.
-        cpp_fin = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_fin=periodo.fecha_fin)
+        cpp_fin = cache.cpp(prod_id, fecha_fin=periodo.fecha_fin)
         if not filas and cpp_fin == cpp_inicial:
             # Bloque 3: sin movimientos y sin cambio de CPP el saldo final es exactamente el
             # inicial valorizado (no se reconstruye como cantidad × CPP).
@@ -316,7 +334,7 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         else:
             # Bloque 4: período sin cierre → misma regla que el cierre: la suma de los
             # establecimientos es exactamente el saldo real de la empresa.
-            oficial = _valor_establecimiento(empresa_id, prod_id, estab_id, periodo.fecha_fin, defecto=calculado)
+            oficial = cache.valor_establecimiento(prod_id, estab_id, periodo.fecha_fin, defecto=calculado)
             fuente_saldo_final = 'CALCULADO'
         microdiferencia = q8(oficial - calculado)
         # El saldo final informado coincide con el saldo oficial (cierre o empresa).
