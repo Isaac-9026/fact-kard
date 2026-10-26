@@ -7,7 +7,9 @@ from rest_framework.exceptions import ValidationError
 from apps.empresas.models import CierrePeriodo, ConfigEmpresa, Empresa, Establecimiento, Periodo
 from apps.inventario.models import Producto
 from apps.kardex.models import Movimiento, ValorizacionMovimiento
-from apps.reportes.saldos_corte import q8, saldos_al_corte, valores_por_establecimiento
+from apps.reportes.saldos_corte import (
+    q8, saldos_al_corte, valores_establecimiento_por_movimiento, valores_por_establecimiento,
+)
 
 
 ZERO = Decimal('0.00000000')
@@ -228,6 +230,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
             'costo_total': texto_decimal(costo_total_inicial),
         }
         cpp_global = cpp_inicial
+        # Bloque 5: valor del establecimiento tras cada movimiento = su parte del saldo real.
+        reparto = valores_establecimiento_por_movimiento(empresa_id, prod_id, periodo.fecha_fin) if movimientos_grupo else {}
         filas = []
         for movimiento in movimientos_grupo:
             valorizacion = getattr(movimiento, 'valorizacion', None)
@@ -277,7 +281,10 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 'saldo_final': {
                     'cantidad': texto_decimal(saldo_fisico),
                     'costo_unitario': texto_decimal(cpp_global),
-                    'costo_total': texto_decimal(saldo_fisico * cpp_global),
+                    'costo_total': texto_decimal(
+                        reparto[movimiento.id].get(estab_id, ZERO) if movimiento.id in reparto
+                        else saldo_fisico * cpp_global
+                    ),
                 },
                 'orden': {
                     'prioridad_dia': movimiento.prioridad_dia,

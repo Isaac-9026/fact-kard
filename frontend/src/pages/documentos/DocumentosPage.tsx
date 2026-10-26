@@ -57,7 +57,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table'
 import { Badge } from '../../components/ui/badge'
-import { AFECTACIONES_IGV, TASA_IGV_POR_DEFECTO_PCT, igvEditable, igvSugerido, type AfectacionIgv } from '../../utils/afectacionIgv'
+import { AFECTACIONES_IGV, TASA_IGV_POR_DEFECTO_PCT, igvEditable, igvSugerido, tasaVigente, type AfectacionIgv, type TasaIgvVigencia } from '../../utils/afectacionIgv'
 import { obtenerConfigEmpresa } from '../../api/empresas'
 import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
@@ -93,7 +93,8 @@ export const DocumentosPage: React.FC = () => {
   const [almacenes, setAlmacenes] = useState<Almacen[]>([])
   const [terceros, setTerceros] = useState<Tercero[]>([])
   // Bloque 4: tasa del IGV configurada para la empresa (solo para sugerir; valida el backend)
-  const [tasaIgvPct, setTasaIgvPct] = useState<string>(TASA_IGV_POR_DEFECTO_PCT)
+  const [tasaIgvActual, setTasaIgvActual] = useState<string>(TASA_IGV_POR_DEFECTO_PCT)
+  const [tasasIgv, setTasasIgv] = useState<TasaIgvVigencia[]>([])
 
   // Filters
   const [filtroClase, setFiltroClase] = useState<ClaseDocumento | ''>('')
@@ -175,8 +176,11 @@ export const DocumentosPage: React.FC = () => {
 
   useEffect(() => {
     obtenerConfigEmpresa()
-      .then((config) => setTasaIgvPct(config.tasa_igv_pct || TASA_IGV_POR_DEFECTO_PCT))
-      .catch(() => setTasaIgvPct(TASA_IGV_POR_DEFECTO_PCT))
+      .then((config) => {
+        setTasaIgvActual(config.tasa_igv_pct || TASA_IGV_POR_DEFECTO_PCT)
+        setTasasIgv(config.tasas_igv ?? [])
+      })
+      .catch(() => setTasaIgvActual(TASA_IGV_POR_DEFECTO_PCT))
   }, [empresaActiva?.id])
 
   // Resolver Tipo de Cambio automáticamente cuando la moneda sea USD y cambie la fecha
@@ -248,7 +252,7 @@ export const DocumentosPage: React.FC = () => {
 
         if (campo === 'precioUnitario' || campo === 'cantidadOriginal' || campo === 'afectacionIgv') {
           if (!actualizada.esBonificacion) {
-            const sugerido = igvSugerido(actualizada.afectacionIgv, actualizada.cantidadOriginal, actualizada.precioUnitario, tasaIgvPct)
+            const sugerido = igvSugerido(actualizada.afectacionIgv, actualizada.cantidadOriginal, actualizada.precioUnitario, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
             if (sugerido !== null) actualizada.igv = sugerido
           }
         }

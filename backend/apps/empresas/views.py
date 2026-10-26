@@ -110,17 +110,11 @@ class ConfigEmpresaView(APIView):
             config,
             data=request.data,
             partial=True,
-            context={'empresa_id': config.empresa_id},
+            # Bloque 5: el cambio de tasa (con su vigencia) lo audita registrar_tasa_igv.
+            context={'empresa_id': config.empresa_id, 'usuario_id': request.user.id},
         )
         serializer.is_valid(raise_exception=True)
-        tasa_anterior = config.tasa_igv_pct
         serializer.save()
-        if config.tasa_igv_pct != tasa_anterior:
-            # Bloque 4: el cambio de la tasa del IGV queda auditado.
-            registrar_auditoria(
-                config.empresa_id, request.user.id, 'CAMBIAR_TASA_IGV', 'CONFIG_EMPRESA', config.id,
-                {'tasa_igv_pct': str(tasa_anterior)}, {'tasa_igv_pct': str(config.tasa_igv_pct)},
-            )
         return Response(serializer.data)
 
 

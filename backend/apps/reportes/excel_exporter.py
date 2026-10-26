@@ -1,4 +1,5 @@
 import io
+from decimal import ROUND_HALF_UP, Decimal
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -52,6 +53,26 @@ FMT_COST = "#,##0.000000"
 FMT_MONEY = "#,##0.00"
 FMT_DATE = "YYYY-MM-DD"
 
+
+
+# Bloque 5: los importes van a Excel como Decimal, sin aritmética float. Excel guarda 15
+# dígitos significativos (openpyxl los escribe con %.16g): se redondea de forma
+# determinista (ROUND_HALF_UP) a ese límite en lugar de dejarlo a la representación binaria.
+DIGITOS_EXCEL = 15
+
+
+def _num(valor, cero=False):
+    if valor is None:
+        return Decimal('0') if cero else None
+    numero = valor if isinstance(valor, Decimal) else Decimal(str(valor))
+    if not numero.is_finite():
+        return None
+    if numero.is_zero():
+        return Decimal('0')
+    exceso = len(numero.as_tuple().digits) - DIGITOS_EXCEL
+    if exceso > 0:
+        numero = numero.quantize(Decimal(1).scaleb(numero.as_tuple().exponent + exceso), rounding=ROUND_HALF_UP)
+    return numero.normalize()
 
 def ajustar_ancho_columnas(ws, min_width=12):
     """Ajusta automáticamente el ancho de las columnas para legibilidad óptima."""
@@ -230,7 +251,7 @@ def generar_libro_excel_kardex(
             (13, cpp_ini, FMT_COST),
             (14, resumen['saldo_inicial_valor'], FMT_MONEY),
         ):
-            celda = ws1.cell(row=current_row, column=col, value=float(valor) if valor is not None else None)
+            celda = ws1.cell(row=current_row, column=col, value=_num(valor))
             celda.number_format = fmt
             celda.alignment = ALIGN_RIGHT
         for col_idx in range(1, 15):
@@ -250,41 +271,41 @@ def generar_libro_excel_kardex(
         ws1.cell(row=current_row, column=5, value=f"{row_data['almacen_codigo']} - {row_data['almacen_nombre']}").alignment = ALIGN_LEFT
 
         # Bloque Entradas
-        c_ec = ws1.cell(row=current_row, column=6, value=float(row_data['entrada_cantidad']) if row_data['entrada_cantidad'] is not None else None)
+        c_ec = ws1.cell(row=current_row, column=6, value=_num(row_data['entrada_cantidad']))
         c_ec.number_format = FMT_QTY
         c_ec.alignment = ALIGN_RIGHT
 
-        c_ecu = ws1.cell(row=current_row, column=7, value=float(row_data['entrada_costo_unitario']) if row_data['entrada_costo_unitario'] is not None else None)
+        c_ecu = ws1.cell(row=current_row, column=7, value=_num(row_data['entrada_costo_unitario']))
         c_ecu.number_format = FMT_COST
         c_ecu.alignment = ALIGN_RIGHT
 
-        c_ev = ws1.cell(row=current_row, column=8, value=float(row_data['entrada_valor']) if row_data['entrada_valor'] is not None else None)
+        c_ev = ws1.cell(row=current_row, column=8, value=_num(row_data['entrada_valor']))
         c_ev.number_format = FMT_MONEY
         c_ev.alignment = ALIGN_RIGHT
 
         # Bloque Salidas
-        c_sc = ws1.cell(row=current_row, column=9, value=float(row_data['salida_cantidad']) if row_data['salida_cantidad'] is not None else None)
+        c_sc = ws1.cell(row=current_row, column=9, value=_num(row_data['salida_cantidad']))
         c_sc.number_format = FMT_QTY
         c_sc.alignment = ALIGN_RIGHT
 
-        c_scu = ws1.cell(row=current_row, column=10, value=float(row_data['salida_costo_unitario']) if row_data['salida_costo_unitario'] is not None else None)
+        c_scu = ws1.cell(row=current_row, column=10, value=_num(row_data['salida_costo_unitario']))
         c_scu.number_format = FMT_COST
         c_scu.alignment = ALIGN_RIGHT
 
-        c_sv = ws1.cell(row=current_row, column=11, value=float(row_data['salida_valor']) if row_data['salida_valor'] is not None else None)
+        c_sv = ws1.cell(row=current_row, column=11, value=_num(row_data['salida_valor']))
         c_sv.number_format = FMT_MONEY
         c_sv.alignment = ALIGN_RIGHT
 
         # Bloque Saldo Final
-        c_sdc = ws1.cell(row=current_row, column=12, value=float(row_data['saldo_cantidad']) if row_data['saldo_cantidad'] is not None else None)
+        c_sdc = ws1.cell(row=current_row, column=12, value=_num(row_data['saldo_cantidad']))
         c_sdc.number_format = FMT_QTY
         c_sdc.alignment = ALIGN_RIGHT
 
-        c_cpp = ws1.cell(row=current_row, column=13, value=float(row_data['cpp']) if row_data['cpp'] is not None else None)
+        c_cpp = ws1.cell(row=current_row, column=13, value=_num(row_data['cpp']))
         c_cpp.number_format = FMT_COST
         c_cpp.alignment = ALIGN_RIGHT
 
-        c_sdv = ws1.cell(row=current_row, column=14, value=float(row_data['saldo_valor']) if row_data['saldo_valor'] is not None else None)
+        c_sdv = ws1.cell(row=current_row, column=14, value=_num(row_data['saldo_valor']))
         c_sdv.number_format = FMT_MONEY
         c_sdv.alignment = ALIGN_RIGHT
 
@@ -303,41 +324,41 @@ def generar_libro_excel_kardex(
     total_lbl.font = TOTALS_FONT
     total_lbl.alignment = Alignment(horizontal="right", vertical="center")
 
-    tot_ec = ws1.cell(row=current_row, column=6, value=float(resumen['total_entradas_cantidad']))
+    tot_ec = ws1.cell(row=current_row, column=6, value=_num(resumen['total_entradas_cantidad']))
     tot_ec.number_format = FMT_QTY
     tot_ec.alignment = ALIGN_RIGHT
     tot_ec.font = TOTALS_FONT
 
     ws1.cell(row=current_row, column=7, value="—").alignment = ALIGN_CENTER
 
-    tot_ev = ws1.cell(row=current_row, column=8, value=float(resumen['total_entradas_valor']))
+    tot_ev = ws1.cell(row=current_row, column=8, value=_num(resumen['total_entradas_valor']))
     tot_ev.number_format = FMT_MONEY
     tot_ev.alignment = ALIGN_RIGHT
     tot_ev.font = TOTALS_FONT
 
-    tot_sc = ws1.cell(row=current_row, column=9, value=float(resumen['total_salidas_cantidad']))
+    tot_sc = ws1.cell(row=current_row, column=9, value=_num(resumen['total_salidas_cantidad']))
     tot_sc.number_format = FMT_QTY
     tot_sc.alignment = ALIGN_RIGHT
     tot_sc.font = TOTALS_FONT
 
     ws1.cell(row=current_row, column=10, value="—").alignment = ALIGN_CENTER
 
-    tot_sv = ws1.cell(row=current_row, column=11, value=float(resumen['total_salidas_valor']))
+    tot_sv = ws1.cell(row=current_row, column=11, value=_num(resumen['total_salidas_valor']))
     tot_sv.number_format = FMT_MONEY
     tot_sv.alignment = ALIGN_RIGHT
     tot_sv.font = TOTALS_FONT
 
-    tot_sdc = ws1.cell(row=current_row, column=12, value=float(resumen['saldo_final_cantidad']))
+    tot_sdc = ws1.cell(row=current_row, column=12, value=_num(resumen['saldo_final_cantidad']))
     tot_sdc.number_format = FMT_QTY
     tot_sdc.alignment = ALIGN_RIGHT
     tot_sdc.font = TOTALS_FONT
 
-    tot_cpp = ws1.cell(row=current_row, column=13, value=float(resumen['cpp_final']) if resumen['cpp_final'] is not None else None)
+    tot_cpp = ws1.cell(row=current_row, column=13, value=_num(resumen['cpp_final']))
     tot_cpp.number_format = FMT_COST
     tot_cpp.alignment = ALIGN_RIGHT
     tot_cpp.font = TOTALS_FONT
 
-    tot_sdv = ws1.cell(row=current_row, column=14, value=float(resumen['saldo_final_valor']))
+    tot_sdv = ws1.cell(row=current_row, column=14, value=_num(resumen['saldo_final_valor']))
     tot_sdv.number_format = FMT_MONEY
     tot_sdv.alignment = ALIGN_RIGHT
     tot_sdv.font = TOTALS_FONT
@@ -388,29 +409,29 @@ def generar_libro_excel_kardex(
 
         # Bloque de valores
         cant_val = m['entrada_cantidad'] if m['entrada_cantidad'] is not None else m['salida_cantidad']
-        c_cb = ws2.cell(row=row_idx, column=13, value=float(cant_val) if cant_val is not None else 0.0)
+        c_cb = ws2.cell(row=row_idx, column=13, value=_num(cant_val, cero=True))
         c_cb.number_format = FMT_QTY
         c_cb.alignment = ALIGN_RIGHT
 
         costo_val = m['entrada_costo_unitario'] if m['entrada_costo_unitario'] is not None else m['salida_costo_unitario']
-        c_cu = ws2.cell(row=row_idx, column=14, value=float(costo_val) if costo_val is not None else None)
+        c_cu = ws2.cell(row=row_idx, column=14, value=_num(costo_val))
         c_cu.number_format = FMT_COST
         c_cu.alignment = ALIGN_RIGHT
 
         val_total = m['entrada_valor'] if m['entrada_valor'] is not None else m['salida_valor']
-        c_vm = ws2.cell(row=row_idx, column=15, value=float(val_total) if val_total is not None else None)
+        c_vm = ws2.cell(row=row_idx, column=15, value=_num(val_total))
         c_vm.number_format = FMT_MONEY
         c_vm.alignment = ALIGN_RIGHT
 
-        c_sc = ws2.cell(row=row_idx, column=16, value=float(m['saldo_cantidad']) if m['saldo_cantidad'] is not None else None)
+        c_sc = ws2.cell(row=row_idx, column=16, value=_num(m['saldo_cantidad']))
         c_sc.number_format = FMT_QTY
         c_sc.alignment = ALIGN_RIGHT
 
-        c_cpp = ws2.cell(row=row_idx, column=17, value=float(m['cpp']) if m['cpp'] is not None else None)
+        c_cpp = ws2.cell(row=row_idx, column=17, value=_num(m['cpp']))
         c_cpp.number_format = FMT_COST
         c_cpp.alignment = ALIGN_RIGHT
 
-        c_sv = ws2.cell(row=row_idx, column=18, value=float(m['saldo_valor']) if m['saldo_valor'] is not None else None)
+        c_sv = ws2.cell(row=row_idx, column=18, value=_num(m['saldo_valor']))
         c_sv.number_format = FMT_MONEY
         c_sv.alignment = ALIGN_RIGHT
 
@@ -550,7 +571,7 @@ def generar_libro_excel_kardex(
             (8, fila_rs['cantidad_empresa'], FMT_QTY),
             (9, fila_rs['valor_empresa'], FMT_MONEY),
         ):
-            celda = ws4.cell(row=row_saldo, column=col, value=float(valor))
+            celda = ws4.cell(row=row_saldo, column=col, value=_num(valor))
             celda.number_format = fmt
             celda.alignment = ALIGN_RIGHT
 

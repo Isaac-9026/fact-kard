@@ -27,6 +27,15 @@ export function igvSugerido(
   return (cant * pu * tasa).toFixed(8);
 }
 
+export interface TasaIgvVigencia { vigente_desde: string; tasa_pct: string }
+
+/** Bloque 5: tasa vigente en la fecha del comprobante (ISO yyyy-mm-dd); si no hay historial, la actual. */
+export function tasaVigente(tasas: TasaIgvVigencia[] | undefined, fecha: string, actual: string): string {
+  const aplicables = (tasas ?? []).filter((t) => t.vigente_desde <= fecha);
+  if (aplicables.length === 0) return actual;
+  return aplicables.reduce((a, b) => (b.vigente_desde > a.vigente_desde ? b : a)).tasa_pct;
+}
+
 /** El IGV solo es editable en líneas gravadas o gratuitas; en las demás es 0. */
 export function igvEditable(afectacion: AfectacionIgv): boolean {
   return afectacion === 'GRAVADO' || afectacion === 'GRATUITO';

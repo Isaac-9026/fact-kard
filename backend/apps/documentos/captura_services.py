@@ -273,26 +273,27 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
     ruc_cliente = rucs[1] if len(rucs) > 1 else ''
     conf_ruc_cliente = Decimal('80.0000') if ruc_cliente else Decimal('0.0000')
 
-    # Tipo Comprobante
-    tipo_comp = '01'
-    conf_tipo = Decimal('90.0000')
+    # Tipo Comprobante (Bloque 5: sin palabra clave no se supone factura)
+    tipo_comp, conf_tipo = '', Decimal('0.0000')
     if re.search(r'\bNOTA\s+DE\s+CR[EÉ]DITO\b', texto, re.IGNORECASE):
-        tipo_comp = '07'
+        tipo_comp, conf_tipo = '07', Decimal('90.0000')
+    elif re.search(r'\bNOTA\s+DE\s+D[EÉ]BITO\b', texto, re.IGNORECASE):
+        tipo_comp, conf_tipo = '08', Decimal('90.0000')
     elif re.search(r'\bBOLETA\b', texto, re.IGNORECASE):
-        tipo_comp = '03'
+        tipo_comp, conf_tipo = '03', Decimal('90.0000')
     elif re.search(r'\bFACTURA\b', texto, re.IGNORECASE):
-        tipo_comp = '01'
+        tipo_comp, conf_tipo = '01', Decimal('90.0000')
 
     # Serie y Número (ej. F001-1234 o E001-5678)
-    serie_match = re.search(r'\b([FE][0-9A-Z]{3})[- ]?([0-9]{1,8})\b', texto)
+    serie_match = re.search(r'\b([FEB][0-9A-Z]{3})[- ]?([0-9]{1,8})\b', texto)
     if serie_match:
         serie = serie_match.group(1).upper()
         numero = serie_match.group(2)
         conf_serie_num = Decimal('92.0000')
     else:
-        serie = 'F001'
-        numero = '00000001'
-        conf_serie_num = Decimal('65.0000')
+        # Bloque 5: antes se inventaba F001-00000001; ahora queda para corrección humana.
+        serie, numero = '', ''
+        conf_serie_num = Decimal('0.0000')
 
     # Fecha (YYYY-MM-DD o DD/MM/YYYY)
     fecha_match = re.search(r'\b(\d{4}[-/]\d{2}[-/]\d{2})\b', texto)
@@ -313,9 +314,12 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
     if re.search(r'\b(USD|D[OÓ]LARES?|\$)\b', texto, re.IGNORECASE):
         moneda = 'USD'
         conf_moneda = Decimal('94.0000')
-    else:
+    elif re.search(r'S/|\bSOLES\b|\bPEN\b', texto, re.IGNORECASE):
         moneda = 'PEN'
         conf_moneda = Decimal('92.0000')
+    else:
+        moneda = ''  # Bloque 5: sin evidencia no se supone PEN
+        conf_moneda = Decimal('0.0000')
 
     # Totales e IGV (Bloque 4): solo lo que el texto evidencia. Antes se asumía
     # subtotal = total / 1.18 (gravado 18 %) y, sin total, se inventaba 118.00.
@@ -354,25 +358,54 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
 
     # Razón Social Emisor
     rz_match = re.search(r'\b(?:SE[NÑ]OR(?:ES)?|EMISOR|PROVEEDOR|RAZ[OÓ]N\s+SOCIAL)[:\s]+([^\n\r]+)', texto, re.IGNORECASE)
-    razon_social = rz_match.group(1).strip() if rz_match else 'PROVEEDOR OCR EXTRAIDO S.A.C.'
-    conf_rz = Decimal('85.0000') if rz_match else Decimal('60.0000')
+    razon_social = rz_match.group(1).strip() if rz_match else ''
+    conf_rz = Decimal('85.0000') if rz_match else Decimal('0.0000')
 
-    # Líneas extraídas
-    detalles = [
-        {
-            'numero_linea': 1,
-            'codigo_externo': 'ITEM-OCR-01',
-            'descripcion': 'MERCADERIA O SERVICIO OCR EXTRAIDO',
-            'unidad_medida': 'NIU',
+    # Líneas (Bloque 5): "cantidad [código] descripción precio_unitario importe", aceptada
+    # solo si cantidad × precio = importe (± 0.01). Si las líneas no suman el subtotal
+    # leído, no se usan. Sin líneas válidas queda una línea vacía para revisión manual.
+    detalles = []
+    patron_linea = re.compile(
+        r'^\s*(?P<cant>\d+(?:\.\d+)?)\s+(?:(?P<cod>(?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{1,19})\s+)?'
+        r'(?P<desc>[^\d\s].*?)\s+(?P<pu>\d[\d,]*\.\d{2,8})\s+(?P<imp>\d[\d,]*\.\d{2})\s*$',
+        re.MULTILINE,
+    )
+    for m in patron_linea.finditer(texto):
+        cant = Decimal(m.group('cant'))
+        pu = Decimal(m.group('pu').replace(',', ''))
+        imp = Decimal(m.group('imp').replace(',', ''))
+        if cant <= DECIMAL_CERO or abs(cant * pu - imp) > Decimal('0.01'):
+            continue
+        detalles.append({'codigo_externo': m.group('cod') or '', 'descripcion': m.group('desc').strip(),
+                         'cantidad': cant.quantize(Q8), 'precio_unitario': pu.quantize(Q8),
+                         'valor_total': imp.quantize(Q8)})
+    if detalles:
+        suma = sum((d['valor_total'] for d in detalles), DECIMAL_CERO)
+        if subtotal_dec is not None and abs(suma - subtotal_dec) > Decimal('0.01'):
+            detalles = []  # no cuadran con el subtotal: ambiguo
+        elif subtotal_dec is None:
+            subtotal_dec = suma
+    if detalles:
+        for d in detalles:
+            d.update({
+                'unidad_medida': 'NIU', 'confianza': Decimal('80.0000'),
+                # IGV por línea solo cuando hay una única línea y el IGV es explícito.
+                'igv': _texto(igv_dec) if len(detalles) == 1 or afectacion_ocr in ('EXONERADO', 'INAFECTO') else '',
+                'afectacion_igv': afectacion_ocr,
+                'confianzas': {'igv': conf_afectacion, 'afectacion_igv': conf_afectacion},
+            })
+    else:
+        detalles = [{
+            'codigo_externo': '', 'descripcion': '', 'unidad_medida': 'NIU',
             'cantidad': Decimal('1.00000000'),
             'precio_unitario': subtotal_dec if subtotal_dec is not None else DECIMAL_CERO,
             'valor_total': subtotal_dec if subtotal_dec is not None else DECIMAL_CERO,
-            'igv': _texto(igv_dec),
-            'afectacion_igv': afectacion_ocr,
-            'confianza': Decimal('82.5000') if subtotal_dec is not None else Decimal('0.0000'),
+            'igv': _texto(igv_dec), 'afectacion_igv': afectacion_ocr,
+            'confianza': Decimal('0.0000'),
             'confianzas': {'igv': conf_afectacion, 'afectacion_igv': conf_afectacion},
-        }
-    ]
+        }]
+    for numero_linea, d in enumerate(detalles, start=1):
+        d['numero_linea'] = numero_linea
 
     return {
         'tipo': 'OCR',
@@ -622,8 +655,11 @@ def generar_borrador_desde_captura(
 
     # 3. Serie y Número normalizados con función centralizada de documentos (A-06)
     from apps.documentos.services import normalizar_numero, normalizar_serie, validar_duplicado_documento
-    serie_raw = cabecera.get('serie', 'F001').strip()
-    num_raw = cabecera.get('numero', '1').strip()
+    serie_raw = cabecera.get('serie', '').strip()
+    num_raw = cabecera.get('numero', '').strip()
+    if not serie_raw or not num_raw:
+        # Bloque 5: sin serie/número no se inventan (antes F001-1); revisión manual.
+        raise ValidationError({'serie': 'El comprobante no indica serie y número. Corríjalos antes de generar el borrador.'})
     serie_norm = normalizar_serie(serie_raw)
     num_norm = normalizar_numero(num_raw)
 
@@ -667,7 +703,9 @@ def generar_borrador_desde_captura(
 
     # 6. Moneda y Tipo de Cambio (CON-006): no se asume PEN ni se inventa un TC.
     from apps.documentos.services import MONEDAS_SOPORTADAS, resolver_tipo_cambio_usd
-    moneda_cod = (cabecera.get('moneda') or '').strip().upper() or 'PEN'
+    moneda_cod = (cabecera.get('moneda') or '').strip().upper()
+    if not moneda_cod:
+        raise ValidationError({'moneda': 'El comprobante no indica la moneda. Corríjala antes de generar el borrador.'})
     if moneda_cod not in MONEDAS_SOPORTADAS:
         raise ValidationError({
             'moneda': f"La moneda '{moneda_cod}' del comprobante no está soportada para valorizar (solo PEN o USD)."
@@ -768,7 +806,7 @@ def generar_borrador_desde_captura(
 
     from apps.documentos.services import obtener_porcentaje_credito_fiscal
     porcentaje_cf = obtener_porcentaje_credito_fiscal(empresa_id, periodo)
-    tasa = tasa_igv(empresa_id)  # Bloque 4: tasa configurada de la empresa
+    tasa = tasa_igv(empresa_id, fecha_emision)  # Bloque 5: tasa vigente en la fecha del comprobante
     # Bloque 4: evidencia a nivel de documento. Si el IGV total del comprobante es la tasa
     # aplicada a TODO el subtotal, todas sus líneas son gravadas.
     documento_gravado = (
@@ -780,6 +818,11 @@ def generar_borrador_desde_captura(
     for index, (linea_num, line_fields) in enumerate(sorted(detalles.items()), start=1):
         cod_ext = (line_fields.get('codigo_externo') or '').strip()
         desc_ext = (line_fields.get('descripcion') or '').strip()
+        if not cod_ext and not desc_ext:
+            raise ValidationError({'descripcion': (
+                f'Línea {index}: sin código ni descripción del bien (no se inventa un ítem). '
+                'Corrija los campos de la línea antes de generar el borrador.'
+            )})
         und_ext = (line_fields.get('unidad_medida') or 'NIU').strip()
 
         cant = parse_dec(line_fields.get('cantidad', '1.0'), default=DECIMAL_UNO)
@@ -853,6 +896,13 @@ def generar_borrador_desde_captura(
         afectacion_igv, codigo_afectacion = resolver_afectacion(
             afectacion=afectacion_indicada, codigo=codigo_afectacion, es_bonificacion=False, linea_num=index,
         )
+        if igv_linea is None and afectacion_igv == 'GRAVADO' and not documento_gravado:
+            # Bloque 5: el IGV de la línea solo se calcula si el IGV del documento es la tasa
+            # sobre todo el subtotal; si no (líneas mixtas o IGV no leído), revisión manual.
+            raise ValidationError({'igv': (
+                f"Línea {index}: gravada sin IGV de línea y el IGV del comprobante no corresponde a todo el "
+                "subtotal. Indique el campo 'igv' de la línea y vuelva a generar el borrador."
+            )})
         if igv_linea is None:
             igv_linea = (val_linea * tasa).quantize(Q8, rounding=ROUND_HALF_UP) if afectacion_igv == 'GRAVADO' else DECIMAL_CERO
         validar_igv_linea(igv=igv_linea, base=val_linea, afectacion=afectacion_igv, linea_num=index, tasa=tasa)

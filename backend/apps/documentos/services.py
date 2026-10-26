@@ -342,7 +342,7 @@ def crear_documento(
         raise ValidationError({'detalles': 'El comprobante debe contener al menos una línea de detalle.'})
 
     porcentaje_cf = obtener_porcentaje_credito_fiscal(empresa_id, periodo)
-    tasa = tasa_igv(empresa_id)  # Bloque 4: tasa configurada de la empresa
+    tasa = tasa_igv(empresa_id, fecha_emision)  # Bloque 5: tasa vigente en la fecha del comprobante
 
     subtotal_acum = Decimal('0.00000000')
     igv_acum = Decimal('0.00000000')

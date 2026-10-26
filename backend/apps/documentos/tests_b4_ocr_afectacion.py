@@ -20,7 +20,7 @@ D = Decimal
 class OcrAfectacionTests(Bloque2Fixture, TestCase):
     def setUp(self):
         self.crear_base()
-        self.cabecera = f'FACTURA F001-{{n}} RUC {self.RUC_PROVEEDOR} CLIENTE RUC {self.empresa.ruc} FECHA 2026-01-10 '
+        self.cabecera = f'FACTURA F001-{{n}} RUC {self.RUC_PROVEEDOR} CLIENTE RUC {self.empresa.ruc} FECHA 2026-01-10 MONEDA S/\n'
 
     def subir_ocr(self, texto, n):
         archivo = SimpleUploadedFile(f'ocr_{n}.pdf', b'%PDF-1.4 qa', content_type='application/pdf')
@@ -35,7 +35,7 @@ class OcrAfectacionTests(Bloque2Fixture, TestCase):
 
     # 1
     def test_ocr_con_igv_explicito_es_gravado(self):
-        captura = self.subir_ocr('OP. GRAVADA: 100.00 IGV 18%: 18.00 TOTAL: 118.00', 501)
+        captura = self.subir_ocr('1 SKU-OCR-1 TALADRO 100.00 100.00\nOP. GRAVADA: 100.00 IGV 18%: 18.00 TOTAL: 118.00', 501)
         self.assertEqual(self.campo(captura, 'afectacion_igv').valor_extraido, 'GRAVADO')
         resp = self.generar_borrador(captura)
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -44,7 +44,7 @@ class OcrAfectacionTests(Bloque2Fixture, TestCase):
 
     # 2
     def test_ocr_exonerado_con_evidencia(self):
-        captura = self.subir_ocr('OP. EXONERADA: 100.00 TOTAL: 100.00', 502)
+        captura = self.subir_ocr('1 SKU-OCR-1 TALADRO 100.00 100.00\nOP. EXONERADA: 100.00 TOTAL: 100.00', 502)
         self.assertEqual(self.campo(captura, 'afectacion_igv').valor_extraido, 'EXONERADO')
         resp = self.generar_borrador(captura)
         self.assertEqual(resp.status_code, 201, resp.data)
@@ -53,7 +53,7 @@ class OcrAfectacionTests(Bloque2Fixture, TestCase):
 
     # 3 y 5
     def test_ocr_ambiguo_queda_pendiente_y_no_genera_documento(self):
-        captura = self.subir_ocr('TOTAL: 118.00', 503)
+        captura = self.subir_ocr('1 SKU-OCR-1 TALADRO 118.00 118.00\nTOTAL: 118.00', 503)
         afectacion = self.campo(captura, 'afectacion_igv')
         self.assertEqual((afectacion.valor_extraido, afectacion.confianza), ('', D('0')))
         resp = self.generar_borrador(captura)

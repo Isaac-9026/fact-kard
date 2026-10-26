@@ -72,14 +72,24 @@ def resolver_afectacion(*, afectacion, codigo, es_bonificacion, linea_num):
     return afectacion, codigo
 
 
-def tasa_igv(empresa_id):
+def tasa_igv(empresa_id, fecha=None):
     """
-    Bloque 4: tasa del IGV aplicable (fracción, p. ej. 0.18) desde una única fuente:
-    ConfigEmpresa.tasa_igv_pct; sin configuración, TASA_IGV_POR_DEFECTO_PCT.
+    Tasa del IGV (fracción, p. ej. 0.18) aplicable a una operación de `fecha` (hoy si se
+    omite), desde una única fuente:
+    1) Bloque 5: TasaIgvVigencia con mayor vigente_desde <= fecha;
+    2) ConfigEmpresa.tasa_igv_pct (Bloque 4);
+    3) TASA_IGV_POR_DEFECTO_PCT.
     """
-    from apps.empresas.models import TASA_IGV_POR_DEFECTO_PCT, ConfigEmpresa
+    from django.utils import timezone
 
-    pct = ConfigEmpresa.objects.filter(empresa_id=empresa_id).values_list('tasa_igv_pct', flat=True).first()
+    from apps.empresas.models import TASA_IGV_POR_DEFECTO_PCT, ConfigEmpresa, TasaIgvVigencia
+
+    fecha = fecha or timezone.localdate()
+    pct = TasaIgvVigencia.objects.filter(empresa_id=empresa_id, vigente_desde__lte=fecha).order_by(
+        '-vigente_desde',
+    ).values_list('tasa_pct', flat=True).first()
+    if pct is None:
+        pct = ConfigEmpresa.objects.filter(empresa_id=empresa_id).values_list('tasa_igv_pct', flat=True).first()
     return (pct if pct is not None else TASA_IGV_POR_DEFECTO_PCT) / CIEN
 
 

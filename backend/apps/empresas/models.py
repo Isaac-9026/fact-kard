@@ -112,6 +112,33 @@ class ConfigEmpresa(models.Model):
         return f"Configuración de {self.empresa.razon_social}"
 
 
+class TasaIgvVigencia(models.Model):
+    """
+    Bloque 5: tasa del IGV vigente desde una fecha. La tasa de una operación es la del
+    registro con mayor `vigente_desde` <= su fecha (ver documentos.afectacion_igv.tasa_igv).
+    """
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.CASCADE,
+        db_column='empresa_id',
+        related_name='tasas_igv'
+    )
+    vigente_desde = models.DateField()
+    tasa_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tasa_igv_vigencia'
+        ordering = ('vigente_desde',)
+        constraints = [
+            models.UniqueConstraint(fields=('empresa', 'vigente_desde'), name='uq_tasa_igv_empresa_desde'),
+            models.CheckConstraint(
+                condition=models.Q(tasa_pct__gt=0, tasa_pct__lte=100),
+                name='chk_tasa_igv_vigencia_rango'
+            ),
+        ]
+
+
 class Periodo(models.Model):
     empresa = models.ForeignKey(
         'empresas.Empresa',

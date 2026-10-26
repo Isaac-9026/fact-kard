@@ -214,7 +214,7 @@ class AuditoriaSeguridadKardexTest(TestCase):
         )
 
         # Equivalencia con factor de caja = 12 unidades
-        equiv = ProductoEquivalencia.objects.create(
+        ProductoEquivalencia.objects.create(
             empresa=self.empresa,
             tercero=self.tercero,
             codigo_externo='SKU-USD-BOX',
@@ -347,7 +347,7 @@ class AuditoriaSeguridadKardexTest(TestCase):
             estado_revision='REVISADO',
             creado_por=self.usuario_admin,
         )
-        det_nc = DocumentoDetalle.objects.create(
+        DocumentoDetalle.objects.create(
             documento=doc_nc,
             linea=1,
             producto=self.producto,
@@ -412,7 +412,6 @@ class AuditoriaSeguridadKardexTest(TestCase):
         self.assertEqual(resp_per.status_code, 403)
 
         # 4. Confirmar documento -> 403
-        tipo_op = TipoOperacion.objects.get(codigo_interno='COMPRA')
         doc = Documento.objects.create(
             empresa=self.empresa,
             clase='COMPRA',

@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.catalogos.models import Moneda
-from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo, TasaIgvVigencia
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
@@ -42,6 +42,9 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         max_digits=5, decimal_places=2, required=False, coerce_to_string=True,
         min_value=Decimal('0.01'), max_value=Decimal('100'),
     )
+    # Bloque 5: fecha desde la que rige la nueva tasa (hoy si se omite) y su historial.
+    tasa_igv_vigente_desde = serializers.DateField(required=False, write_only=True)
+    tasas_igv = serializers.SerializerMethodField()
     establecimiento_principal = serializers.PrimaryKeyRelatedField(
         queryset=Establecimiento.objects.none(),
         allow_null=True,
@@ -53,6 +56,7 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'empresa', 'tolerancia_residuo_pen', 'decimales_calculo',
             'regla_redondeo', 'metodo_valuacion', 'establecimiento_principal', 'tasa_igv_pct',
+            'tasa_igv_vigente_desde', 'tasas_igv',
         )
         read_only_fields = ('id', 'empresa', 'regla_redondeo', 'metodo_valuacion')
 
@@ -76,7 +80,22 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Debe estar entre 2 y 8.')
         return value
 
+    def get_tasas_igv(self, obj):
+        return [
+            {'vigente_desde': v.vigente_desde.isoformat(), 'tasa_pct': str(v.tasa_pct)}
+            for v in TasaIgvVigencia.objects.filter(empresa_id=obj.empresa_id)
+        ]
+
     def update(self, instance, validated_data):
+        if 'tasa_igv_pct' in validated_data or 'tasa_igv_vigente_desde' in validated_data:
+            from django.utils import timezone
+
+            from apps.empresas.services import registrar_tasa_igv
+            nueva = validated_data.get('tasa_igv_pct', instance.tasa_igv_pct)
+            desde = validated_data.get('tasa_igv_vigente_desde') or timezone.localdate()
+            if nueva != instance.tasa_igv_pct or 'tasa_igv_vigente_desde' in validated_data:
+                registrar_tasa_igv(config=instance, tasa_pct=nueva, vigente_desde=desde,
+                                   usuario_id=self.context.get('usuario_id'))
         instance.tolerancia_residuo_pen = validated_data.get(
             'tolerancia_residuo_pen', instance.tolerancia_residuo_pen
         )
@@ -85,7 +104,6 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         )
         if 'establecimiento_principal' in validated_data:
             instance.establecimiento_principal = validated_data['establecimiento_principal']
-        instance.tasa_igv_pct = validated_data.get('tasa_igv_pct', instance.tasa_igv_pct)
         instance.regla_redondeo = 'ROUND_HALF_UP'
         instance.metodo_valuacion = 'CPP'
         instance.save(update_fields=(

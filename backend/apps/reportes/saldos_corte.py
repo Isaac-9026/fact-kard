@@ -139,3 +139,32 @@ def resumen_saldos_al_corte(*, empresa_id, periodo=None, fecha_hasta=None, produ
                     'cantidad_empresa': cantidad_empresa, 'valor_empresa': valor_empresa,
                 })
     return {'corte': corte, 'fuente': fuente, 'filas': filas}
+
+
+def valores_establecimiento_por_movimiento(empresa_id, producto_id, hasta):
+    """
+    Bloque 5: tras cada movimiento (orden oficial, fecha <= hasta), parte del saldo real
+    de la empresa que corresponde a cada establecimiento: {movimiento_id: {estab_id: valor}}.
+    Mismo reparto que el cierre (cantidad × CPP global, redondeo al principal). Si la suma
+    de cantidades por establecimiento no coincide con la de la empresa (p. ej. entre la
+    entrada y la salida de una transferencia del mismo día) no se reparte ese instante.
+    """
+    principal = establecimiento_principal_id(empresa_id)
+    cantidades = defaultdict(lambda: ZERO)
+    resultado = {}
+    movimientos = Movimiento.objects.filter(
+        empresa_id=empresa_id, producto_id=producto_id, fecha_movimiento__lte=hasta,
+    ).select_related('valorizacion', 'almacen').order_by('fecha_movimiento', 'prioridad_dia', 'secuencia', 'id')
+    for mov in movimientos:
+        signo = 1 if mov.naturaleza == 'ENTRADA' else -1 if mov.naturaleza == 'SALIDA' else 0
+        if signo:
+            estab = mov.almacen.establecimiento_id
+            cantidades[estab] = q8(cantidades[estab] + signo * mov.cantidad_base)
+        val = getattr(mov, 'valorizacion', None)
+        if val is None:
+            continue
+        partes = sorted((e, c) for e, c in cantidades.items() if c != ZERO)
+        if q8(sum((c for _, c in partes), ZERO)) != q8(val.saldo_cantidad_empresa):
+            continue
+        resultado[mov.id] = repartir_valor(val.saldo_valor_empresa, partes, val.cpp_empresa, preferida=principal)
+    return resultado

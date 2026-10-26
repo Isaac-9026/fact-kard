@@ -1,4 +1,5 @@
 import hashlib
+from datetime import date
 import json
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
@@ -10,7 +11,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.auditoria.services import registrar_auditoria
 from apps.documentos.models import Documento
-from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle, ConfigEmpresa, Periodo
+from apps.empresas.models import CierrePeriodo, CierrePeriodoDetalle, ConfigEmpresa, Periodo, TasaIgvVigencia
 from apps.kardex.models import Incidencia, Movimiento, SaldoCppActual
 
 
@@ -194,3 +195,43 @@ def reabrir_periodo(*, empresa_id, periodo_id, usuario, motivo):
     if posteriores:
         CierrePeriodo.objects.filter(periodo_id__in=[p.id for p in posteriores], vigente=True).update(vigente=False)
     return periodo, len(posteriores)
+
+
+# Bloque 5: la tasa del IGV tiene vigencia por fecha. Antes del primer cambio se registra la
+# tasa anterior desde FECHA_BASE_TASA_IGV, para que las operaciones históricas la conserven.
+FECHA_BASE_TASA_IGV = date(1900, 1, 1)
+
+
+@transaction.atomic
+def registrar_tasa_igv(*, config, tasa_pct, vigente_desde, usuario_id):
+    tasa_pct = Decimal(tasa_pct).quantize(Decimal('0.01'))
+    cerrado = Periodo.objects.filter(
+        empresa_id=config.empresa_id, estado='CERRADO',
+        fecha_inicio__lte=vigente_desde, fecha_fin__gte=vigente_desde,
+    ).first()
+    if cerrado is not None:
+        raise ValidationError({'tasa_igv_vigente_desde': (
+            f'La fecha {vigente_desde.isoformat()} pertenece al período cerrado '
+            f'{cerrado.anio}-{cerrado.mes:02d}; no se puede cambiar la tasa de un período cerrado.'
+        )})
+    tasa_anterior = config.tasa_igv_pct
+    vigencias = TasaIgvVigencia.objects.select_for_update().filter(empresa_id=config.empresa_id)
+    if not vigencias.exists():
+        TasaIgvVigencia.objects.create(
+            empresa_id=config.empresa_id, vigente_desde=FECHA_BASE_TASA_IGV, tasa_pct=tasa_anterior,
+        )
+    TasaIgvVigencia.objects.update_or_create(
+        empresa_id=config.empresa_id, vigente_desde=vigente_desde, defaults={'tasa_pct': tasa_pct},
+    )
+    # ConfigEmpresa.tasa_igv_pct refleja la tasa vigente hoy.
+    hoy = timezone.localdate()
+    actual = TasaIgvVigencia.objects.filter(empresa_id=config.empresa_id, vigente_desde__lte=hoy).order_by(
+        '-vigente_desde',
+    ).values_list('tasa_pct', flat=True).first()
+    config.tasa_igv_pct = actual if actual is not None else tasa_anterior
+    config.save(update_fields=['tasa_igv_pct'])
+    registrar_auditoria(
+        config.empresa_id, usuario_id, 'CAMBIAR_TASA_IGV', 'CONFIG_EMPRESA', config.id,
+        {'tasa_igv_pct': str(tasa_anterior)}, {'tasa_igv_pct': str(tasa_pct)},
+        motivo=f'Vigente desde {vigente_desde.isoformat()}',
+    )
