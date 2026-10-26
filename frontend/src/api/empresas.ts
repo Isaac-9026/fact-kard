@@ -6,8 +6,8 @@ export interface Empresa { id: number; ruc: string; razon_social: string; nombre
 export interface CrearEmpresaPayload { ruc: string; razon_social: string; nombre_comercial?: string; direccion?: string; moneda_base_codigo: string }
 export interface Establecimiento { id: number; codigo_sunat: string; nombre: string; activo: boolean }
 export type EstablecimientoPayload = Omit<Establecimiento, 'id'>;
-export interface ConfigEmpresa { id: number; empresa: number; tolerancia_residuo_pen: string; decimales_calculo: number; regla_redondeo: 'ROUND_HALF_UP'; metodo_valuacion: 'CPP'; establecimiento_principal: number | null }
-export interface ActualizarConfigPayload { tolerancia_residuo_pen?: string; decimales_calculo?: number; establecimiento_principal?: number | null }
+export interface ConfigEmpresa { id: number; empresa: number; tolerancia_residuo_pen: string; decimales_calculo: number; regla_redondeo: 'ROUND_HALF_UP'; metodo_valuacion: 'CPP'; establecimiento_principal: number | null; tasa_igv_pct?: string }
+export interface ActualizarConfigPayload { tolerancia_residuo_pen?: string; decimales_calculo?: number; establecimiento_principal?: number | null; tasa_igv_pct?: string }
 
 export const obtenerMonedas = async (): Promise<Moneda[]> => (await apiClient.get<Moneda[]>('/catalogos/monedas/')).data;
 export const obtenerEmpresas = async (): Promise<Empresa[]> => (await apiClient.get<Empresa[]>('/empresas/')).data;

@@ -22,7 +22,6 @@ from apps.empresas.services import cerrar_periodo, reabrir_periodo
 from apps.usuarios.models import UsuarioEmpresa
 from apps.usuarios.permissions import EsAdminEmpresa, TieneEmpresaActiva
 from apps.auditoria.services import registrar_auditoria
-from django.utils import timezone
 
 
 def _usuario_actual(request):
@@ -114,7 +113,14 @@ class ConfigEmpresaView(APIView):
             context={'empresa_id': config.empresa_id},
         )
         serializer.is_valid(raise_exception=True)
+        tasa_anterior = config.tasa_igv_pct
         serializer.save()
+        if config.tasa_igv_pct != tasa_anterior:
+            # Bloque 4: el cambio de la tasa del IGV queda auditado.
+            registrar_auditoria(
+                config.empresa_id, request.user.id, 'CAMBIAR_TASA_IGV', 'CONFIG_EMPRESA', config.id,
+                {'tasa_igv_pct': str(tasa_anterior)}, {'tasa_igv_pct': str(config.tasa_igv_pct)},
+            )
         return Response(serializer.data)
 
 

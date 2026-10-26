@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from apps.documentos.afectacion_igv import AFECTACIONES
 from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
-from apps.documentos.services import crear_documento, revisar_documento, anular_documento
+from apps.documentos.services import crear_documento
 
 
 class DocumentoDetalleSerializer(serializers.ModelSerializer):

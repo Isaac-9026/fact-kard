@@ -9,10 +9,9 @@ from apps.catalogos.models import Moneda, TipoCambio, TipoComprobante, TipoExist
 from apps.documentos.captura_services import generar_borrador_desde_captura
 from apps.documentos.models import CapturaCampo, Documento, DocumentoCaptura, DocumentoDetalle
 from apps.documentos.services import crear_documento
-from apps.empresas.models import CierrePeriodo, ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
+from apps.empresas.models import ConfigEmpresa, ConfigIgvPeriodo, Empresa, Establecimiento, Periodo
 from apps.empresas.services import cerrar_periodo, reabrir_periodo
-from apps.inventario.models import Almacen, Producto, ProductoEquivalencia, ProductoUnidad, SaldoInicial, Tercero
-from apps.inventario.services import confirmar_saldo_inicial
+from apps.inventario.models import Almacen, Producto, ProductoEquivalencia, ProductoUnidad, Tercero
 from apps.kardex.models import Movimiento, SaldoCppActual, StockAlmacen, ValorizacionMovimiento
 from apps.kardex.services import anular_documento_motor, confirmar_documento_motor, ejecutar_recalculo_producto
 from apps.reportes.formato131_service import generar_formato_131

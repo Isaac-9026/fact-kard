@@ -11,10 +11,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from rest_framework.exceptions import ValidationError
 
-# Tasa general del IGV en Perú (16 % IGV + 2 % IPM). No existe en el modelo una tasa
-# configurable por empresa/período; si se agrega, debe reemplazar esta constante.
-TASA_IGV = Decimal('0.18')
 TOLERANCIA_IGV = Decimal('0.01')
+CIEN = Decimal('100')
 
 GRAVADO, EXONERADO, INAFECTO, EXPORTACION, GRATUITO = (
     'GRAVADO', 'EXONERADO', 'INAFECTO', 'EXPORTACION', 'GRATUITO',
@@ -74,13 +72,24 @@ def resolver_afectacion(*, afectacion, codigo, es_bonificacion, linea_num):
     return afectacion, codigo
 
 
-def igv_esperado(base):
-    return (base * TASA_IGV).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-
-def validar_igv_linea(*, igv, base, afectacion, linea_num):
+def tasa_igv(empresa_id):
     """
-    GRAVADO: IGV = base × 18 % (± S/ 0.01); con base > 0 el IGV 0 se rechaza.
+    Bloque 4: tasa del IGV aplicable (fracción, p. ej. 0.18) desde una única fuente:
+    ConfigEmpresa.tasa_igv_pct; sin configuración, TASA_IGV_POR_DEFECTO_PCT.
+    """
+    from apps.empresas.models import TASA_IGV_POR_DEFECTO_PCT, ConfigEmpresa
+
+    pct = ConfigEmpresa.objects.filter(empresa_id=empresa_id).values_list('tasa_igv_pct', flat=True).first()
+    return (pct if pct is not None else TASA_IGV_POR_DEFECTO_PCT) / CIEN
+
+
+def igv_esperado(base, tasa):
+    return (base * tasa).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def validar_igv_linea(*, igv, base, afectacion, linea_num, tasa):
+    """
+    GRAVADO: IGV = base × tasa configurada (± S/ 0.01); con base > 0 el IGV 0 se rechaza.
     EXONERADO / INAFECTO / EXPORTACION: IGV 0.
     GRATUITO: se conserva la lógica previa (sin validación de tasa; el IGV de una
     transferencia gratuita es referencial o no existe).
@@ -93,10 +102,10 @@ def validar_igv_linea(*, igv, base, afectacion, linea_num):
                 f"Línea {linea_num}: una línea {afectacion.lower()} no lleva IGV (recibido {igv.normalize():f})."
             )})
         return
-    esperado = igv_esperado(base)
+    esperado = igv_esperado(base, tasa)
     if abs(igv - esperado) > TOLERANCIA_IGV:
         raise ValidationError({'detalles': (
             f"Línea {linea_num}: el IGV {igv.normalize():f} no corresponde a la base gravada "
-            f"{base.normalize():f} (18 % = {esperado:f}). Si la línea es exonerada, inafecta o de "
-            'exportación indique su afectación.'
+            f"{base.normalize():f} ({(tasa * CIEN).normalize():f} % = {esperado:f}). Si la línea es "
+            'exonerada, inafecta o de exportación indique su afectación.'
         )})

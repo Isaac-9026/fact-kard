@@ -2,16 +2,12 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Sum
 
-from apps.kardex.models import Movimiento, StockAlmacen
-from apps.empresas.models import Empresa, Periodo
-from apps.inventario.models import Producto, Almacen
-from apps.catalogos.models import TipoOperacion
+from apps.kardex.models import Movimiento
+from apps.empresas.models import Periodo
+from apps.inventario.models import Producto
+from apps.reportes.saldos_corte import q8
 
 DECIMAL_ZERO = Decimal('0.00000000')
-
-
-def q8(valor):
-    return Decimal(valor).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
 
 
 def _como_fecha(valor):

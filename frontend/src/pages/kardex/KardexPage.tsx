@@ -27,6 +27,10 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { PageHeader } from '../../components/ui/page-header';
+import {
+  SIN_DATO, filaSaldoInicialKardex, guardarPeriodo, leerPeriodoGuardado, periodoInicialKardex, textoCppFinal,
+  type SaldoInicialProducto,
+} from '../../utils/kardexVista';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, KpiCard } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -75,9 +79,12 @@ export const KardexPage: React.FC = () => {
   // Estado de resultados
   const [movimientos, setMovimientos] = useState<KardexFila[]>([]);
   const [resumen, setResumen] = useState<KardexResumen | null>(null);
+  const [saldosIniciales, setSaldosIniciales] = useState<SaldoInicialProducto[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [exporting, setExporting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const saldoInicial = filaSaldoInicialKardex(resumen, saldosIniciales);
 
   // Ejecución de la consulta contable con una instantánea estable de filtros.
   const cargarKardex = useCallback(async (filtros: KardexFiltros) => {
@@ -87,6 +94,7 @@ export const KardexPage: React.FC = () => {
       const res = await obtenerKardexValorizado(filtros);
       setMovimientos(res.movimientos);
       setResumen(res.resumen);
+      setSaldosIniciales(res.saldos_iniciales ?? []);
     } catch (err: any) {
       console.error('Error al consultar Kardex', err);
       setError(
@@ -116,12 +124,10 @@ export const KardexPage: React.FC = () => {
           setPeriodos(persData);
           setTiposOperacion(opsData);
 
-          // Si hay períodos, preseleccionar el último abierto
-          const abierto = persData.find((p) => p.estado === 'ABIERTO');
-          if (abierto) {
-            setPeriodoId(String(abierto.id));
-          }
-          void cargarKardex({ periodo_id: abierto?.id });
+          // Bloque 4: última selección válida de esta pestaña; si no, el último abierto.
+          const inicial = periodoInicialKardex(persData, leerPeriodoGuardado(empresaActiva?.id));
+          setPeriodoId(inicial);
+          void cargarKardex({ periodo_id: inicial ? Number(inicial) : undefined });
         }
       } catch (err) {
         console.error('Error al cargar catálogos de Kardex', err);
@@ -142,6 +148,7 @@ export const KardexPage: React.FC = () => {
     setTipoOperacionId(filtros.tipo_operacion_id ? String(filtros.tipo_operacion_id) : '');
     setFechaDesde(filtros.fecha_desde ?? '');
     setFechaHasta(filtros.fecha_hasta ?? '');
+    guardarPeriodo(empresaActiva?.id, filtros.periodo_id ? String(filtros.periodo_id) : '');
     void cargarKardex(filtros);
   };
 
@@ -229,7 +236,7 @@ export const KardexPage: React.FC = () => {
         />
         <KpiCard
           title="CPP Vigente (PEN)"
-          value={loading ? '...' : resumen?.cpp_final ? `S/ ${formatCost(resumen.cpp_final)}` : 'S/ 0.000000'}
+          value={loading ? '...' : resumen ? textoCppFinal(resumen.cpp_final, formatCost) : SIN_DATO}
           subtitle="Costo Promedio Ponderado Móvil (6 dec.)"
           icon={Scale}
         />
@@ -446,7 +453,7 @@ export const KardexPage: React.FC = () => {
             <Loader2 className="h-8 w-8 animate-spin text-slate-900 mb-3" />
             <p className="text-sm font-medium">Procesando y valorizando movimientos de Kardex...</p>
           </div>
-        ) : movimientos.length === 0 ? (
+        ) : movimientos.length === 0 && !saldoInicial.mostrar ? (
           <div className="py-16 text-center">
             <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
               <Inbox className="h-6 w-6" />
@@ -502,17 +509,24 @@ export const KardexPage: React.FC = () => {
               </thead>
 
               <tbody className="divide-y divide-slate-100">
-                {resumen && (Number(resumen.saldo_inicial_cantidad ?? 0) !== 0 || Number(resumen.saldo_inicial_valor ?? 0) !== 0) && (
+                {saldoInicial.mostrar && (
                   <tr className="bg-slate-50/70 font-semibold text-slate-700">
                     <td colSpan={11} className="py-2 px-3 text-right">
-                      Saldo inicial del filtro
-                      {resumen.ambito_saldo === 'ALMACEN' && (
+                      SALDO INICIAL
+                      {resumen?.ambito_saldo === 'ALMACEN' && (
                         <span className="ml-2 text-[10px] font-normal text-slate-500">(stock del almacén × CPP global)</span>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatQty(resumen.saldo_inicial_cantidad)}</td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">—</td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">S/ {formatMoney(resumen.saldo_inicial_valor)}</td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatQty(saldoInicial.cantidad)}</td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatCost(saldoInicial.cpp)}</td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">S/ {formatMoney(saldoInicial.valor)}</td>
+                  </tr>
+                )}
+                {saldoInicial.mostrar && movimientos.length === 0 && (
+                  <tr>
+                    <td colSpan={14} className="py-3 px-3 text-center text-slate-400">
+                      Sin movimientos en el rango; el saldo final es el saldo inicial.
+                    </td>
                   </tr>
                 )}
                 {movimientos.map((mov) => {

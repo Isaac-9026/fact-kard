@@ -65,6 +65,15 @@ class Command(BaseCommand):
             )
 
         # 5. TipoOperacion (Tabla 12 SUNAT + internas)
+        # Fuente: Tabla 12 "Tipo de operación", Anexo 3 de la R.S. 169-2015/SUNAT (PLE).
+        # Interpretación revisada en el Bloque 4 (ver catalogos/tests_b4_tabla12.py):
+        # - 05 DEVOLUCION RECIBIDA (entrada) → devolución del cliente; 06 DEVOLUCION
+        #   ENTREGADA (salida) → devolución al proveedor. No están invertidos. La tabla
+        #   también tiene 24/25 (entrada por devolución del cliente / salida por devolución
+        #   al proveedor), más específicos; no se cambian sin decisión contable.
+        # - 22/23 (entrada/salida por identificación errónea) corrigen un bien mal
+        #   identificado; no representan la anulación de un comprobante. Los extornos por
+        #   anulación usan 99 OTROS.
         tipos_operacion = [
             ('SALDO_INICIAL', '16', 'SALDO INICIAL', 'ENTRADA', False, True, 'SALDO_INICIAL'),
             ('COMPRA', '02', 'COMPRA NACIONAL', 'ENTRADA', False, True, 'DOCUMENTO'),

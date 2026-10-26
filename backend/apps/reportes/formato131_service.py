@@ -1,19 +1,16 @@
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import timedelta
+from decimal import Decimal
 
 from rest_framework.exceptions import ValidationError
 
 from apps.empresas.models import CierrePeriodo, ConfigEmpresa, Empresa, Establecimiento, Periodo
 from apps.inventario.models import Producto
 from apps.kardex.models import Movimiento, ValorizacionMovimiento
+from apps.reportes.saldos_corte import q8, saldos_al_corte, valores_por_establecimiento
 
 
-OCHO_DECIMALES = Decimal('0.00000001')
 ZERO = Decimal('0.00000000')
-
-
-def q8(valor):
-    return Decimal(valor or 0).quantize(OCHO_DECIMALES, rounding=ROUND_HALF_UP)
 
 
 def texto_decimal(valor):
@@ -97,6 +94,14 @@ def _cpp_historico(*, empresa_id, producto_id, fecha_inicio=None, fecha_fin=None
         '-movimiento__secuencia', '-movimiento__id',
     ).first()
     return q8(ultima.cpp_empresa if ultima else ZERO)
+
+
+def _valor_establecimiento(empresa_id, producto_id, establecimiento_id, corte, *, defecto):
+    """Parte del saldo real de la empresa que corresponde al establecimiento al corte."""
+    estado = saldos_al_corte(empresa_id, corte, producto_id).get(producto_id)
+    if estado is None:
+        return defecto
+    return valores_por_establecimiento(empresa_id, estado).get(establecimiento_id, defecto)
 
 
 def _periodo_anterior(periodo):
@@ -211,7 +216,12 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         if detalle_inicial is not None and q8(detalle_inicial.saldo_cantidad) == saldo_inicial_cantidad:
             costo_total_inicial = q8(detalle_inicial.saldo_valor_pen)
         else:
-            costo_total_inicial = q8(saldo_inicial_cantidad * cpp_inicial)
+            # Bloque 4: sin cierre previo, el valor del establecimiento es su parte del saldo
+            # real de la empresa (cantidad × CPP con el redondeo asignado como en el cierre).
+            costo_total_inicial = _valor_establecimiento(
+                empresa_id, prod_id, estab_id, periodo.fecha_inicio - timedelta(days=1),
+                defecto=q8(saldo_inicial_cantidad * cpp_inicial),
+            )
         saldo_inicial_valorizado = {
             'cantidad': texto_decimal(saldo_inicial_cantidad),
             'costo_unitario': texto_decimal(cpp_inicial),
@@ -275,31 +285,35 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 },
             })
 
-        if not filas:
-            # CON-010: sin movimientos propios, el CPP al cierre del período sigue siendo
-            # histórico (otros establecimientos pueden haberlo movido dentro del período).
-            cpp_global = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_fin=periodo.fecha_fin)
-        if filas:
-            saldo_final_resumen = filas[-1]['saldo_final']
-        elif cpp_global == cpp_inicial:
+        # CON-010 / Bloque 4: el CPP al cierre del período es el histórico global a la fecha
+        # fin; otros establecimientos pueden haberlo movido después del último movimiento
+        # propio, así que no se toma el de la última fila.
+        cpp_fin = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_fin=periodo.fecha_fin)
+        if not filas and cpp_fin == cpp_inicial:
             # Bloque 3: sin movimientos y sin cambio de CPP el saldo final es exactamente el
             # inicial valorizado (no se reconstruye como cantidad × CPP).
             saldo_final_resumen = dict(saldo_inicial_valorizado)
         else:
             saldo_final_resumen = {
                 'cantidad': texto_decimal(saldo_fisico),
-                'costo_unitario': texto_decimal(cpp_global),
-                'costo_total': texto_decimal(saldo_fisico * cpp_global),
+                'costo_unitario': texto_decimal(cpp_fin),
+                'costo_total': texto_decimal(saldo_fisico * cpp_fin),
             }
 
         microdiferencia = ZERO
+        calculado = q8(Decimal(saldo_final_resumen['costo_total']))
         detalle_cierre = cierre_detalles.get((estab_id, prod_id))
         if detalle_cierre:
             oficial = q8(detalle_cierre.saldo_valor_pen)
-            calculado = q8(Decimal(saldo_final_resumen['costo_total']))
-            microdiferencia = q8(oficial - calculado)
-            # El saldo final informado coincide con el snapshot oficial del cierre.
-            saldo_final_resumen['costo_total'] = texto_decimal(oficial)
+            fuente_saldo_final = 'CIERRE'
+        else:
+            # Bloque 4: período sin cierre → misma regla que el cierre: la suma de los
+            # establecimientos es exactamente el saldo real de la empresa.
+            oficial = _valor_establecimiento(empresa_id, prod_id, estab_id, periodo.fecha_fin, defecto=calculado)
+            fuente_saldo_final = 'CALCULADO'
+        microdiferencia = q8(oficial - calculado)
+        # El saldo final informado coincide con el saldo oficial (cierre o empresa).
+        saldo_final_resumen['costo_total'] = texto_decimal(oficial)
 
         reportes.append({
             'cabecera': {
@@ -322,6 +336,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
             'saldo_final': saldo_final_resumen,
             'movimientos': filas,
             'microdiferencia_cierre': texto_decimal(microdiferencia),
+            # CIERRE: snapshot oficial; CALCULADO: reparto del saldo real de la empresa.
+            'fuente_saldo_final': fuente_saldo_final,
         })
 
     return {

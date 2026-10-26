@@ -59,6 +59,11 @@ class Establecimiento(models.Model):
         return f"{self.codigo_sunat} - {self.nombre}"
 
 
+# Bloque 4: tasa del IGV (16 % IGV + 2 % IPM) por defecto. Única definición en el código;
+# la tasa aplicable se lee de ConfigEmpresa.tasa_igv_pct (ver documentos.afectacion_igv).
+TASA_IGV_POR_DEFECTO_PCT = Decimal('18.00')
+
+
 class ConfigEmpresa(models.Model):
     empresa = models.OneToOneField(
         'empresas.Empresa',
@@ -75,6 +80,10 @@ class ConfigEmpresa(models.Model):
     decimales_calculo = models.SmallIntegerField(default=6, db_default=6)
     regla_redondeo = models.CharField(max_length=30, default='ROUND_HALF_UP', db_default='ROUND_HALF_UP')
     metodo_valuacion = models.CharField(max_length=20, default='CPP', db_default='CPP')
+    tasa_igv_pct = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        default=TASA_IGV_POR_DEFECTO_PCT, db_default=TASA_IGV_POR_DEFECTO_PCT,
+    )
     establecimiento_principal = models.ForeignKey(
         'empresas.Establecimiento',
         on_delete=models.SET_NULL,
@@ -92,6 +101,10 @@ class ConfigEmpresa(models.Model):
             models.CheckConstraint(
                 condition=models.Q(decimales_calculo__range=(2, 8)),
                 name='chk_config_empresa_decimales'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tasa_igv_pct__gt=0, tasa_igv_pct__lte=100),
+                name='chk_config_empresa_tasa_igv'
             )
         ]
 

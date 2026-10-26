@@ -501,8 +501,15 @@ export const Formato131Page: React.FC = () => {
                 <div className="bg-amber-50/80 border-t border-amber-200 px-4 py-2 text-xs text-amber-800 flex items-center gap-2">
                   <Info className="h-4 w-4 text-amber-600 shrink-0" />
                   <span>
-                    <strong>Microdiferencia oficial asignada al establecimiento principal:</strong> S/{' '}
-                    <code className="font-mono">{r.microdiferencia_cierre}</code> (absorbida por redondeo contable).
+                    <strong>
+                      {r.fuente_saldo_final === 'CALCULADO'
+                        ? 'Ajuste de redondeo del reparto por establecimiento:'
+                        : 'Microdiferencia oficial asignada al establecimiento principal:'}
+                    </strong>{' '}
+                    S/ <code className="font-mono">{r.microdiferencia_cierre}</code>{' '}
+                    {r.fuente_saldo_final === 'CALCULADO'
+                      ? '(el total de la empresa es el saldo contable real; no es una diferencia contable).'
+                      : '(absorbida por redondeo contable).'}
                   </span>
                 </div>
               )}

@@ -1,14 +1,13 @@
 import io
-from decimal import Decimal
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from rest_framework.exceptions import ValidationError
 
-from apps.empresas.models import Empresa, Periodo
+from apps.empresas.models import Empresa, Establecimiento, Periodo
 from apps.inventario.models import Producto, Almacen
-from apps.catalogos.models import TipoOperacion
-from apps.kardex.models import Movimiento, Incidencia, SaldoCppActual, StockAlmacen
+from apps.kardex.models import Incidencia
+from apps.reportes.saldos_corte import resumen_saldos_al_corte
 from apps.reportes.services import consultar_kardex_valorizado
 
 FONT_NAME = "Segoe UI"
@@ -500,7 +499,7 @@ def generar_libro_excel_kardex(
 
     saldo_headers = [
         "Cód. Producto", "Descripción", "Establecimiento", "Almacén",
-        "Stock Almacén", "CPP Vigente (PEN)", "Valor Estimado Almacén (PEN)",
+        "Stock Almacén", "CPP al Corte (PEN)", "Valor Almacén (PEN)",
         "Stock Total Empresa", "Valor Total Empresa (PEN)"
     ]
     for idx, h in enumerate(saldo_headers, start=1):
@@ -510,54 +509,50 @@ def generar_libro_excel_kardex(
         cell.alignment = ALIGN_CENTER
         cell.border = DATA_BORDER
 
-    stocks_qs = StockAlmacen.objects.filter(empresa_id=empresa_id).select_related(
-        'producto', 'almacen', 'almacen__establecimiento'
+    # Bloque 4: saldos válidos a la fecha de corte del reporte (período o fecha_hasta),
+    # no el stock ni el CPP actuales; con período cerrado, el cierre vigente.
+    resumen_corte = resumen_saldos_al_corte(
+        empresa_id=empresa_id, periodo=periodo_filtro, fecha_hasta=fecha_hasta,
+        producto_id=producto_id, almacen_id=almacen_id,
     )
-    if producto_id:
-        stocks_qs = stocks_qs.filter(producto_id=producto_id)
-    if almacen_id:
-        stocks_qs = stocks_qs.filter(almacen_id=almacen_id)
-
-    stocks_qs = stocks_qs.order_by('producto__codigo_interno', 'almacen__codigo')
-
-    # Diccionario con saldos globales de la empresa
-    saldos_globales = {
-        s.producto_id: s for s in SaldoCppActual.objects.filter(empresa_id=empresa_id)
-    }
+    ws4["A2"] = (
+        f"Corte: {resumen_corte['corte'].isoformat() if resumen_corte['corte'] else 'estado actual'}"
+        f" | Fuente: {resumen_corte['fuente']}"
+        " | Valor por almacén = cantidad × CPP global (redondeo asignado de forma determinista)"
+    )
+    productos_rs = Producto.objects.in_bulk({f['producto_id'] for f in resumen_corte['filas']})
+    almacenes_rs = Almacen.objects.select_related('establecimiento').in_bulk(
+        {f['almacen_id'] for f in resumen_corte['filas'] if f['almacen_id']}
+    )
+    establecimientos_rs = Establecimiento.objects.in_bulk({f['establecimiento_id'] for f in resumen_corte['filas']})
+    filas_rs = sorted(resumen_corte['filas'], key=lambda f: (
+        productos_rs[f['producto_id']].codigo_interno,
+        almacenes_rs[f['almacen_id']].codigo if f['almacen_id'] else '~',
+    ))
 
     row_saldo = 4
-    for st in stocks_qs:
-        p = st.producto
-        alm = st.almacen
-        estab = alm.establecimiento if alm else None
-        sg = saldos_globales.get(st.producto_id)
-        cpp = sg.cpp_pen if sg else None
-        valor_est = (st.cantidad_actual * cpp) if (cpp is not None) else None
+    for fila_rs in filas_rs:
+        p = productos_rs[fila_rs['producto_id']]
+        alm = almacenes_rs.get(fila_rs['almacen_id'])
+        estab = establecimientos_rs.get(fila_rs['establecimiento_id'])
 
-        ws4.cell(row=row_saldo, column=1, value=p.codigo_interno if p else "").alignment = ALIGN_LEFT
-        ws4.cell(row=row_saldo, column=2, value=p.descripcion if p else "").alignment = ALIGN_LEFT
+        ws4.cell(row=row_saldo, column=1, value=p.codigo_interno).alignment = ALIGN_LEFT
+        ws4.cell(row=row_saldo, column=2, value=p.descripcion).alignment = ALIGN_LEFT
         ws4.cell(row=row_saldo, column=3, value=f"{estab.codigo_sunat} - {estab.nombre}" if estab else "").alignment = ALIGN_LEFT
-        ws4.cell(row=row_saldo, column=4, value=f"{alm.codigo} - {alm.nombre}" if alm else "").alignment = ALIGN_LEFT
+        ws4.cell(row=row_saldo, column=4, value=(
+            f"{alm.codigo} - {alm.nombre}" if alm else "(ajuste de redondeo, sin almacén)"
+        )).alignment = ALIGN_LEFT
 
-        c_sa = ws4.cell(row=row_saldo, column=5, value=float(st.cantidad_actual))
-        c_sa.number_format = FMT_QTY
-        c_sa.alignment = ALIGN_RIGHT
-
-        c_cpp = ws4.cell(row=row_saldo, column=6, value=float(cpp) if cpp is not None else None)
-        c_cpp.number_format = FMT_COST
-        c_cpp.alignment = ALIGN_RIGHT
-
-        c_ve = ws4.cell(row=row_saldo, column=7, value=float(valor_est) if valor_est is not None else None)
-        c_ve.number_format = FMT_MONEY
-        c_ve.alignment = ALIGN_RIGHT
-
-        c_ste = ws4.cell(row=row_saldo, column=8, value=float(sg.cantidad_total) if sg else 0.0)
-        c_ste.number_format = FMT_QTY
-        c_ste.alignment = ALIGN_RIGHT
-
-        c_vte = ws4.cell(row=row_saldo, column=9, value=float(sg.valor_total_pen) if sg else 0.0)
-        c_vte.number_format = FMT_MONEY
-        c_vte.alignment = ALIGN_RIGHT
+        for col, valor, fmt in (
+            (5, fila_rs['cantidad_almacen'], FMT_QTY),
+            (6, fila_rs['cpp'], FMT_COST),
+            (7, fila_rs['valor_almacen'], FMT_MONEY),
+            (8, fila_rs['cantidad_empresa'], FMT_QTY),
+            (9, fila_rs['valor_empresa'], FMT_MONEY),
+        ):
+            celda = ws4.cell(row=row_saldo, column=col, value=float(valor))
+            celda.number_format = fmt
+            celda.alignment = ALIGN_RIGHT
 
         for c_idx in range(1, 10):
             cell = ws4.cell(row=row_saldo, column=c_idx)

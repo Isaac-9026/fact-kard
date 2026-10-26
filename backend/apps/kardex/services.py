@@ -138,6 +138,12 @@ def _residuo(saldo, movimiento, periodo):
         empresa_id=saldo.empresa_id, producto_id=saldo.producto_id,
         almacen_id=movimiento.almacen_id, periodo=periodo, tipo_operacion=tipo,
         fecha_movimiento=movimiento.fecha_movimiento, prioridad_dia=3,
+        # Bloque 4: secuencia determinista tras los ajustes ya registrados ese día (antes
+        # quedaba en 0 y se adelantaba a ellos). Mismo criterio que _crear_residuo_en_recalculo.
+        secuencia=siguiente_secuencia_movimiento(
+            empresa_id=saldo.empresa_id, producto_id=saldo.producto_id,
+            fecha_movimiento=movimiento.fecha_movimiento, prioridad_dia=3,
+        ),
         naturaleza='AJUSTE_VALOR', cantidad_base=ZERO,
         valor_ajuste_pen=-saldo.valor_total_pen, generado_por_motor=True,
         creado_por_id=movimiento.creado_por_id,

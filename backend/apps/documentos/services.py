@@ -15,7 +15,7 @@ from apps.documentos.reglas import (
     validar_linea_nota,
     validar_naturaleza_linea,
 )
-from apps.documentos.afectacion_igv import resolver_afectacion, validar_igv_linea
+from apps.documentos.afectacion_igv import resolver_afectacion, tasa_igv, validar_igv_linea
 from apps.empresas.models import Empresa, Periodo, ConfigIgvPeriodo
 from apps.inventario.models import Almacen, Producto, ProductoUnidad, Tercero, ProductoEquivalencia
 
@@ -342,6 +342,7 @@ def crear_documento(
         raise ValidationError({'detalles': 'El comprobante debe contener al menos una línea de detalle.'})
 
     porcentaje_cf = obtener_porcentaje_credito_fiscal(empresa_id, periodo)
+    tasa = tasa_igv(empresa_id)  # Bloque 4: tasa configurada de la empresa
 
     subtotal_acum = Decimal('0.00000000')
     igv_acum = Decimal('0.00000000')
@@ -454,7 +455,7 @@ def crear_documento(
             es_bonificacion=es_bonificacion, linea_num=linea_num,
         )
         validar_igv_linea(
-            igv=igv_linea, afectacion=afectacion_igv, linea_num=linea_num,
+            igv=igv_linea, afectacion=afectacion_igv, linea_num=linea_num, tasa=tasa,
             base=base_imponible_linea(
                 precio_unitario=precio_unitario, cantidad_original=cantidad_original,
                 naturaleza=tipo_op.naturaleza,

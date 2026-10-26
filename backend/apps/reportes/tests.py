@@ -6,11 +6,11 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.catalogos.models import Moneda, TipoExistencia, UnidadMedida, TipoOperacion, TipoComprobante
+from apps.catalogos.models import Moneda, TipoExistencia, TipoOperacion, TipoComprobante
 from apps.empresas.models import Empresa, Establecimiento, Periodo
 from apps.inventario.models import Almacen, Producto
 from apps.documentos.models import Documento, DocumentoDetalle
-from apps.kardex.models import Movimiento, ValorizacionMovimiento, SaldoCppActual, Incidencia, StockAlmacen
+from apps.kardex.models import Movimiento, ValorizacionMovimiento, SaldoCppActual, StockAlmacen
 from apps.usuarios.models import Usuario, UsuarioEmpresa
 
 

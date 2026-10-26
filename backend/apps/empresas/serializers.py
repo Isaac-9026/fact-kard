@@ -37,6 +37,11 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         decimal_places=8,
         coerce_to_string=True,
     )
+    # Bloque 4: tasa del IGV en porcentaje (18.00 por defecto). Solo ADMIN puede cambiarla.
+    tasa_igv_pct = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False, coerce_to_string=True,
+        min_value=Decimal('0.01'), max_value=Decimal('100'),
+    )
     establecimiento_principal = serializers.PrimaryKeyRelatedField(
         queryset=Establecimiento.objects.none(),
         allow_null=True,
@@ -47,7 +52,7 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         model = ConfigEmpresa
         fields = (
             'id', 'empresa', 'tolerancia_residuo_pen', 'decimales_calculo',
-            'regla_redondeo', 'metodo_valuacion', 'establecimiento_principal',
+            'regla_redondeo', 'metodo_valuacion', 'establecimiento_principal', 'tasa_igv_pct',
         )
         read_only_fields = ('id', 'empresa', 'regla_redondeo', 'metodo_valuacion')
 
@@ -80,11 +85,12 @@ class ConfigEmpresaSerializer(serializers.ModelSerializer):
         )
         if 'establecimiento_principal' in validated_data:
             instance.establecimiento_principal = validated_data['establecimiento_principal']
+        instance.tasa_igv_pct = validated_data.get('tasa_igv_pct', instance.tasa_igv_pct)
         instance.regla_redondeo = 'ROUND_HALF_UP'
         instance.metodo_valuacion = 'CPP'
         instance.save(update_fields=(
             'tolerancia_residuo_pen', 'decimales_calculo',
-            'establecimiento_principal', 'regla_redondeo', 'metodo_valuacion',
+            'establecimiento_principal', 'regla_redondeo', 'metodo_valuacion', 'tasa_igv_pct',
         ))
         return instance
 

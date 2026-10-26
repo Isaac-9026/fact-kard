@@ -57,6 +57,7 @@ export interface KardexReporteResponse {
   empresa_id: number;
   filtros: KardexFiltros;
   resumen: KardexResumen;
+  saldos_iniciales?: { producto_id: number; producto_codigo: string; cantidad: string; cpp: string | null; valor: string }[];
   movimientos: KardexFila[];
 }
 

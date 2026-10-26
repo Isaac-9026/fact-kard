@@ -1,14 +1,16 @@
 import hashlib
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime, date
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from apps.documentos.afectacion_igv import TASA_IGV, resolver_afectacion, validar_igv_linea
+from apps.documentos.afectacion_igv import (
+    TOLERANCIA_IGV, igv_esperado, resolver_afectacion, tasa_igv, validar_igv_linea,
+)
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import Moneda, TipoComprobante, TipoOperacion
 from apps.documentos.clasificacion_captura import clasificar_comprobante
@@ -315,18 +317,40 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
         moneda = 'PEN'
         conf_moneda = Decimal('92.0000')
 
-    # Totales
-    total_match = re.search(r'\bTOTAL(?:\s+A\s+PAGAR)?[:\s]+(?:S/\.?|\$)?\s*([0-9,]+\.[0-9]{2})\b', texto, re.IGNORECASE)
-    if total_match:
-        total_str = total_match.group(1).replace(',', '')
-        total_dec = Decimal(total_str).quantize(Q8, rounding=ROUND_HALF_UP)
-        conf_total = Decimal('88.0000')
-    else:
-        total_dec = Decimal('118.00000000')
-        conf_total = Decimal('70.0000')
+    # Totales e IGV (Bloque 4): solo lo que el texto evidencia. Antes se asumía
+    # subtotal = total / 1.18 (gravado 18 %) y, sin total, se inventaba 118.00.
+    def _monto(patron):
+        m = re.search(patron + r'[:\s]*(?:S/\.?|\$)?\s*([0-9,]+\.[0-9]{2})\b', texto, re.IGNORECASE)
+        return Decimal(m.group(1).replace(',', '')).quantize(Q8, rounding=ROUND_HALF_UP) if m else None
 
-    subtotal_dec = (total_dec / Decimal('1.18')).quantize(Q8, rounding=ROUND_HALF_UP)
-    igv_dec = (total_dec - subtotal_dec).quantize(Q8, rounding=ROUND_HALF_UP)
+    total_dec = _monto(r'(?<!SUB\s)(?<!SUB-)(?<!SUB)\bTOTAL(?:\s+A\s+PAGAR)?')
+    conf_total = Decimal('88.0000') if total_dec is not None else Decimal('0.0000')
+    igv_explicito = _monto(r'\bI\.?G\.?V\.?(?:\s*\(?\s*\d{1,2}(?:\.\d+)?\s*%\s*\)?)?')
+    subtotal_explicito = _monto(r'\b(?:OP(?:ERACI[OÓ]N(?:ES)?)?\.?\s*GRAVADAS?|SUB\s*-?\s*TOTAL|VALOR\s+(?:DE\s+)?VENTA)')
+    hay_exonerada = bool(re.search(r'\bEXONERAD[OA]S?\b', texto, re.IGNORECASE))
+    hay_inafecta = bool(re.search(r'\bINAFECT[OA]S?\b', texto, re.IGNORECASE))
+
+    afectacion_ocr = ''  # sin evidencia: pendiente de clasificación (revisión manual)
+    if igv_explicito is not None and igv_explicito > DECIMAL_CERO:
+        afectacion_ocr = 'GRAVADO'
+        igv_dec = igv_explicito
+        if subtotal_explicito is not None:
+            subtotal_dec = subtotal_explicito
+        elif total_dec is not None:
+            subtotal_dec = (total_dec - igv_dec).quantize(Q8, rounding=ROUND_HALF_UP)
+        else:
+            subtotal_dec = None
+    elif not igv_explicito and hay_exonerada != hay_inafecta:
+        afectacion_ocr = 'EXONERADO' if hay_exonerada else 'INAFECTO'
+        igv_dec = DECIMAL_CERO
+        subtotal_dec = subtotal_explicito if subtotal_explicito is not None else total_dec
+    else:
+        igv_dec = None
+        subtotal_dec = subtotal_explicito if subtotal_explicito is not None else None
+    conf_afectacion = Decimal('85.0000') if afectacion_ocr else Decimal('0.0000')
+
+    def _texto(valor):
+        return str(valor) if valor is not None else ''
 
     # Razón Social Emisor
     rz_match = re.search(r'\b(?:SE[NÑ]OR(?:ES)?|EMISOR|PROVEEDOR|RAZ[OÓ]N\s+SOCIAL)[:\s]+([^\n\r]+)', texto, re.IGNORECASE)
@@ -341,9 +365,12 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
             'descripcion': 'MERCADERIA O SERVICIO OCR EXTRAIDO',
             'unidad_medida': 'NIU',
             'cantidad': Decimal('1.00000000'),
-            'precio_unitario': subtotal_dec,
-            'valor_total': subtotal_dec,
-            'confianza': Decimal('82.5000'),
+            'precio_unitario': subtotal_dec if subtotal_dec is not None else DECIMAL_CERO,
+            'valor_total': subtotal_dec if subtotal_dec is not None else DECIMAL_CERO,
+            'igv': _texto(igv_dec),
+            'afectacion_igv': afectacion_ocr,
+            'confianza': Decimal('82.5000') if subtotal_dec is not None else Decimal('0.0000'),
+            'confianzas': {'igv': conf_afectacion, 'afectacion_igv': conf_afectacion},
         }
     ]
 
@@ -359,9 +386,9 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
             'ruc_emisor': (ruc_emisor, conf_ruc),
             'ruc_cliente': (ruc_cliente, conf_ruc_cliente),
             'razon_social_emisor': (razon_social, conf_rz),
-            'subtotal': (str(subtotal_dec), Decimal('85.0000')),
-            'igv': (str(igv_dec), Decimal('85.0000')),
-            'total': (str(total_dec), conf_total),
+            'subtotal': (_texto(subtotal_dec), Decimal('85.0000') if subtotal_dec is not None else Decimal('0.0000')),
+            'igv': (_texto(igv_dec), conf_afectacion),
+            'total': (_texto(total_dec), conf_total),
         },
         'detalles': detalles,
         'confianza_global': Decimal('84.0000'),
@@ -451,7 +478,8 @@ def procesar_subida_captura(
         for item in datos['detalles']:
             num_linea = item['numero_linea']
             conf_det = item.get('confianza', Decimal('80.0000'))
-            for campo_nombre in ('codigo_externo', 'descripcion', 'unidad_medida', 'cantidad', 'precio_unitario', 'valor_total'):
+            for campo_nombre in ('codigo_externo', 'descripcion', 'unidad_medida', 'cantidad', 'precio_unitario',
+                                 'valor_total', 'igv', 'afectacion_igv'):
                 val = item.get(campo_nombre)
                 CapturaCampo.objects.create(
                     documento_captura=captura,
@@ -459,7 +487,7 @@ def procesar_subida_captura(
                     numero_linea=num_linea,
                     nombre_campo=campo_nombre,
                     valor_extraido=str(val) if val is not None else '',
-                    confianza=conf_det,
+                    confianza=item.get('confianzas', {}).get(campo_nombre, conf_det),
                 )
 
     registrar_auditoria(
@@ -740,6 +768,13 @@ def generar_borrador_desde_captura(
 
     from apps.documentos.services import obtener_porcentaje_credito_fiscal
     porcentaje_cf = obtener_porcentaje_credito_fiscal(empresa_id, periodo)
+    tasa = tasa_igv(empresa_id)  # Bloque 4: tasa configurada de la empresa
+    # Bloque 4: evidencia a nivel de documento. Si el IGV total del comprobante es la tasa
+    # aplicada a TODO el subtotal, todas sus líneas son gravadas.
+    documento_gravado = (
+        igv > DECIMAL_CERO and subtotal > DECIMAL_CERO
+        and abs(igv - igv_esperado(subtotal, tasa)) <= TOLERANCIA_IGV
+    )
 
     # 11. Crear Líneas de DocumentoDetalle
     for index, (linea_num, line_fields) in enumerate(sorted(detalles.items()), start=1):
@@ -799,16 +834,28 @@ def generar_borrador_desde_captura(
         # Bloque 3: afectación e IGV de la línea. XML: los del comprobante, validados igual
         # que en el registro manual. OCR (sin esos datos): gravado al 18 %, como antes.
         codigo_afectacion = (line_fields.get('codigo_afectacion_igv') or '').strip() or None
+        afectacion_indicada = (line_fields.get('afectacion_igv') or '').strip().upper() or None
         if 'igv' in line_fields and (line_fields.get('igv') or '').strip():
             igv_linea = parse_dec(line_fields['igv'])
         else:
             igv_linea = None
+        # Bloque 4: la afectación nunca se supone. Sin código/afectación indicados, solo un
+        # IGV > 0 en el comprobante evidencia una línea gravada; si no, revisión manual.
+        if afectacion_indicada is None and codigo_afectacion is None:
+            if (igv_linea is not None and igv_linea > DECIMAL_CERO) or (igv_linea is None and documento_gravado):
+                afectacion_indicada = 'GRAVADO'
+            else:
+                raise ValidationError({'afectacion_igv': (
+                    f"Línea {index}: el comprobante no permite determinar la afectación del IGV "
+                    '(gravado, exonerado, inafecto, exportación o gratuito). Corrija el campo '
+                    "'afectacion_igv' o 'codigo_afectacion_igv' de la línea y vuelva a generar el borrador."
+                )})
         afectacion_igv, codigo_afectacion = resolver_afectacion(
-            afectacion=None, codigo=codigo_afectacion, es_bonificacion=False, linea_num=index,
+            afectacion=afectacion_indicada, codigo=codigo_afectacion, es_bonificacion=False, linea_num=index,
         )
         if igv_linea is None:
-            igv_linea = (val_linea * TASA_IGV).quantize(Q8, rounding=ROUND_HALF_UP) if afectacion_igv == 'GRAVADO' else DECIMAL_CERO
-        validar_igv_linea(igv=igv_linea, base=val_linea, afectacion=afectacion_igv, linea_num=index)
+            igv_linea = (val_linea * tasa).quantize(Q8, rounding=ROUND_HALF_UP) if afectacion_igv == 'GRAVADO' else DECIMAL_CERO
+        validar_igv_linea(igv=igv_linea, base=val_linea, afectacion=afectacion_igv, linea_num=index, tasa=tasa)
 
         # Cálculo de Costo Unitario PEN (C-04: factor de empaque, moneda USD e IGV no recuperable)
         valor_linea_calc = cant * precio
