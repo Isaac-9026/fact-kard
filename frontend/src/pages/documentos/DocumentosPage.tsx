@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import {
+  CONFIG_VISTAS, claseInicialNuevo, filtrosApiDocumentos, tiposComprobanteDeVista, type VistaDocumentos,
+} from '../../utils/vistaDocumentos'
 import {
   FileSpreadsheet,
   Plus,
@@ -88,8 +92,18 @@ interface LineaFormulario {
   factorConversion: number
 }
 
-export const DocumentosPage: React.FC = () => {
+export interface DocumentosPageProps {
+  /**
+   * Navegación por flujo: Compras, Ventas y Notas reutilizan esta misma pantalla con
+   * filtros fijos (utils/vistaDocumentos.ts). 'TODOS' = Comprobantes, sin cambios.
+   */
+  vista?: VistaDocumentos
+}
+
+export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' }) => {
   const { empresaActiva } = useAuth()
+  const configVista = CONFIG_VISTAS[vista]
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Master Data
   const [documentos, setDocumentos] = useState<Documento[]>([])
@@ -116,13 +130,14 @@ export const DocumentosPage: React.FC = () => {
   const empresaId = empresaActiva?.id
   const [totalDocumentos, setTotalDocumentos] = useState(0)
   const [estadoPagina, setEstadoPagina] = useState<EstadoPagina>({ clave: '', page: 1 })
-  const claveFiltros = claveConsulta(empresaId, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda)
+  const claveFiltros = claveConsulta(empresaId, vista, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda)
   const page = paginaVigente(estadoPagina, claveFiltros)
   // Comprobantes que pueden ser origen de una nota (lista completa, solo al registrar una nota).
   const [documentosOrigen, setDocumentosOrigen] = useState<Documento[]>([])
 
   // UI States
   const [cargando, setCargando] = useState(false)
+  const [catalogosCargados, setCatalogosCargados] = useState(false)
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null)
   const [exitoGlobal, setExitoGlobal] = useState<string | null>(null)
 
@@ -160,13 +175,13 @@ export const DocumentosPage: React.FC = () => {
     setCargando(true)
     try {
       const data = await obtenerDocumentosPaginados(
-        {
+        filtrosApiDocumentos(vista, {
           clase: filtroClase || undefined,
           periodo: filtroPeriodo || undefined,
           estado: filtroEstado || undefined,
           estado_revision: filtroRevision || undefined,
           search: busqueda || undefined,
-        },
+        }),
         paramsPaginacion(page),
       )
       setDocumentos(data.results)
@@ -177,7 +192,7 @@ export const DocumentosPage: React.FC = () => {
     } finally {
       setCargando(false)
     }
-  }, [empresaId, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda, page])
+  }, [empresaId, vista, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda, page])
 
   useEffect(() => {
     diferirCarga(cargarDocumentos)
@@ -212,6 +227,7 @@ export const DocumentosPage: React.FC = () => {
       setErrorGlobal(axiosErr.response?.data?.detail || 'Error al cargar los datos del sistema.')
     } finally {
       setCargando(false)
+      setCatalogosCargados(true)
     }
   }, [])
 
@@ -263,28 +279,24 @@ export const DocumentosPage: React.FC = () => {
     return t ? t.numero_documento : 'Pendiente de selección'
   }, [formClase, formTercero, empresaActiva?.ruc, terceros])
 
-  const agregarLinea = () => {
-    const primerAlmacen = almacenes[0]?.id || ''
-    const primerTipoOp = tiposOperacion[0]?.id || ''
+  const lineaVacia = useCallback((): LineaFormulario => ({
+    tempId: Math.random().toString(36).substring(2, 9),
+    productoId: '',
+    productoUnidadId: '',
+    almacenId: almacenes[0]?.id || '',
+    tipoOperacionId: tiposOperacion[0]?.id || '',
+    cantidadOriginal: '1.00000000',
+    precioUnitario: '0.00000000',
+    igv: '0.00000000',
+    afectacionIgv: 'GRAVADO',
+    esBonificacion: false,
+    descripcionOriginal: '',
+    unidadesDisponibles: [],
+    factorConversion: 1,
+  }), [almacenes, tiposOperacion])
 
-    setLineas((prev) => [
-      ...prev,
-      {
-        tempId: Math.random().toString(36).substring(2, 9),
-        productoId: '',
-        productoUnidadId: '',
-        almacenId: primerAlmacen,
-        tipoOperacionId: primerTipoOp,
-        cantidadOriginal: '1.00000000',
-        precioUnitario: '0.00000000',
-        igv: '0.00000000',
-        afectacionIgv: 'GRAVADO',
-        esBonificacion: false,
-        descripcionOriginal: '',
-        unidadesDisponibles: [],
-        factorConversion: 1,
-      },
-    ])
+  const agregarLinea = () => {
+    setLineas((prev) => [...prev, lineaVacia()])
   }
 
   const eliminarLinea = (tempId: string) => {
@@ -549,21 +561,37 @@ export const DocumentosPage: React.FC = () => {
     }
   }, [necesitaOrigen, empresaId])
 
+  // Abre el formulario de nuevo comprobante con la clase de la vista (Compras/Ventas).
+  const abrirNuevo = () => {
+    setFormClase((actual) => claseInicialNuevo(vista, actual))
+    setModalNuevoAbierto(true)
+    if (lineas.length === 0) agregarLinea()
+  }
+
+  // Acceso rápido del Dashboard: /compras?nuevo=1 abre el formulario directamente.
+  // Espera a los catálogos para que la primera línea tenga almacén y tipo de operación.
+  const pedirNuevo = searchParams.get('nuevo') === '1'
+  useEffect(() => {
+    if (!pedirNuevo || !catalogosCargados) return
+    diferirCarga(() => {
+      setFormClase((actual) => claseInicialNuevo(vista, actual))
+      setModalNuevoAbierto(true)
+      setLineas((actuales) => (actuales.length === 0 ? [lineaVacia()] : actuales))
+      setSearchParams({}, { replace: true })
+    })
+  }, [pedirNuevo, catalogosCargados, vista, setSearchParams, lineaVacia])
+
+  const tiposComprobanteFormulario = tiposComprobanteDeVista(vista, tiposComprobante)
+
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Documentos Comerciales"
-        description="Mesa de control de comprobantes (Compras, Ventas, NC, ND), revisión contable y confirmación con impacto en Kardex."
+        title={configVista.titulo}
+        description={configVista.descripcion}
         icon={<FileSpreadsheet className="h-5 w-5" />}
         actions={
-          <Button
-            variant="primary"
-            onClick={() => {
-              setModalNuevoAbierto(true)
-              if (lineas.length === 0) agregarLinea()
-            }}
-          >
-            <Plus className="h-4 w-4 mr-1.5" /> Nuevo Comprobante
+          <Button variant="primary" onClick={abrirNuevo}>
+            <Plus className="h-4 w-4 mr-1.5" /> {configVista.botonNuevo}
           </Button>
         }
       />
@@ -592,17 +620,19 @@ export const DocumentosPage: React.FC = () => {
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="space-y-1">
-              <Label>Clase</Label>
-              <Select
-                value={filtroClase}
-                onChange={(e) => setFiltroClase(e.target.value as ClaseDocumento | '')}
-              >
-                <option value="">Todas las clases</option>
-                <option value="COMPRA">Compras</option>
-                <option value="VENTA">Ventas</option>
-              </Select>
-            </div>
+            {!configVista.claseFija && (
+              <div className="space-y-1">
+                <Label>Clase</Label>
+                <Select
+                  value={filtroClase}
+                  onChange={(e) => setFiltroClase(e.target.value as ClaseDocumento | '')}
+                >
+                  <option value="">Todas las clases</option>
+                  <option value="COMPRA">Compras</option>
+                  <option value="VENTA">Ventas</option>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label>Período</Label>
@@ -886,6 +916,7 @@ export const DocumentosPage: React.FC = () => {
                   <Select
                     value={formClase}
                     onChange={(e) => setFormClase(e.target.value as ClaseDocumento)}
+                    disabled={Boolean(configVista.claseFija)}
                   >
                     <option value="COMPRA">COMPRA (Entrada)</option>
                     <option value="VENTA">VENTA (Salida)</option>
@@ -916,7 +947,7 @@ export const DocumentosPage: React.FC = () => {
                     required
                   >
                     <option value="">Seleccione Tipo...</option>
-                    {tiposComprobante.map((c) => (
+                    {tiposComprobanteFormulario.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.codigo_sunat} - {c.descripcion} {c.es_nota ? '(Nota)' : ''}
                       </option>

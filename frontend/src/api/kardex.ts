@@ -15,3 +15,10 @@ export const obtenerIncidenciasPaginadas = async (paginacion: ParamsPaginacion):
 export const obtenerRecalculosPaginados = async (paginacion: ParamsPaginacion): Promise<Paginado<Recalculo>> =>
   leerPaginado((await apiClient.get<Paginado<Recalculo> | Recalculo[]>('/kardex/recalculos/', { params: paginacion })).data);
 export const ejecutarRecalculo = async (producto: number, fecha_desde: string): Promise<Recalculo> => (await apiClient.post('/kardex/recalculos/', { producto, fecha_desde })).data;
+
+// Navegación por flujo — vista "Inventario": saldos vigentes que mantiene el motor Kardex
+// (SaldoCppActual por producto y StockAlmacen por almacén). Solo lectura.
+export interface SaldoCppActualApi { producto_id: number; cantidad_total: number | string; valor_total_pen: number | string; cpp_pen: number | string | null; actualizado_en: string }
+export interface StockAlmacenApi { producto_id: number; almacen_id: number; cantidad_actual: number | string }
+export interface SaldosActualesResponse { saldos_cpp: SaldoCppActualApi[]; stocks_almacen: StockAlmacenApi[] }
+export const obtenerSaldosActuales = async (): Promise<SaldosActualesResponse> => (await apiClient.get('/kardex/saldos-actuales/')).data;

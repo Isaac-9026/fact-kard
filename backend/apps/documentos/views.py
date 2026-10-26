@@ -73,6 +73,14 @@ class DocumentoListCreateView(generics.ListCreateAPIView):
         if estado_revision:
             qs = qs.filter(estado_revision=estado_revision.upper())
 
+        # Navegación: vistas separadas de Compras/Ventas (sin notas) y de Notas de Crédito/Débito.
+        es_nota = self.request.query_params.get('es_nota')
+        if es_nota not in (None, ''):
+            valor = str(es_nota).strip().lower()
+            if valor not in ('true', 'false', '1', '0'):
+                raise ValidationError({'es_nota': "Valor no permitido. Use 'true' o 'false'."})
+            qs = qs.filter(tipo_comprobante__es_nota=valor in ('true', '1'))
+
         search = self.request.query_params.get('search')
         if search:
             search = search.strip()

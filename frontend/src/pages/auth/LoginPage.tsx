@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Boxes, User, Lock, AlertCircle, Loader2, ShieldCheck, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
+import { RUTA_INICIAL } from '../../navegacion'
 import { loginApi } from '../../api/auth'
 import type { AxiosError } from 'axios'
 import { Button } from '../../components/ui/button'
@@ -34,7 +35,7 @@ export const LoginPage: React.FC = () => {
       })
 
       login(data.token, data.usuario, data.empresas)
-      navigate('/empresas')
+      navigate(RUTA_INICIAL)
     } catch (err) {
       const axiosError = err as AxiosError<{ detail?: string }>
       if (axiosError.response?.data?.detail) {

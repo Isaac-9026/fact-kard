@@ -114,6 +114,8 @@ export interface DocumentoFiltros {
   estado?: EstadoDocumental;
   estado_revision?: EstadoRevision;
   search?: string;
+  /** true = solo notas de crédito/débito; false = sin notas. */
+  es_nota?: boolean;
 }
 
 export const obtenerDocumentos = async (filtros?: DocumentoFiltros): Promise<Documento[]> => {

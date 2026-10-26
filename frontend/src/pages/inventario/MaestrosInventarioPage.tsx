@@ -58,7 +58,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/ta
 import { Modal } from '../../components/ui/modal'
 import { diferirCarga } from '../../utils/efectos'
 
-type TabId = 'productos' | 'terceros' | 'almacenes'
+export type TabMaestros = 'productos' | 'terceros' | 'almacenes'
+type TabId = TabMaestros
+
+// Navegación por flujo: cada maestro tiene su opción de menú y reutiliza esta pantalla.
+const TITULOS_VISTA: Record<TabId, { titulo: string; descripcion: string }> = {
+  productos: { titulo: 'Productos y Unidades', descripcion: 'Catálogo de existencias y conversiones de unidades' },
+  almacenes: { titulo: 'Almacenes', descripcion: 'Almacenes por establecimiento' },
+  terceros: { titulo: 'Terceros', descripcion: 'Clientes y proveedores' },
+}
 
 const PRODUCTO_INICIAL = {
   codigo_interno: '',
@@ -108,10 +116,15 @@ const extraerError = (error: unknown) => {
     .join(' ')
 }
 
-export const MaestrosInventarioPage = () => {
+export interface MaestrosInventarioPageProps {
+  /** Maestro fijo (sin pestañas). Sin valor se muestran las tres pestañas como antes. */
+  vista?: TabId
+}
+
+export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = {}) => {
   const { empresaActiva } = useAuth()
   const esAdmin = empresaActiva?.rol === 'ADMIN'
-  const [tab, setTab] = useState<TabId>('productos')
+  const [tab, setTab] = useState<TabId>(vista ?? 'productos')
   const [productos, setProductos] = useState<Producto[]>([])
   const [terceros, setTerceros] = useState<Tercero[]>([])
   const [almacenes, setAlmacenes] = useState<Almacen[]>([])
@@ -492,8 +505,12 @@ export const MaestrosInventarioPage = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Maestros de Inventario"
-        description={`Gestión de catálogo de existencias, conversiones de unidades y terceros comerciales para ${empresaActiva.razon_social} (RUC: ${empresaActiva.ruc}).`}
+        title={vista ? TITULOS_VISTA[vista].titulo : 'Maestros de Inventario'}
+        description={
+          vista
+            ? `${TITULOS_VISTA[vista].descripcion} de ${empresaActiva.razon_social} (RUC: ${empresaActiva.ruc}).`
+            : `Gestión de catálogo de existencias, conversiones de unidades y terceros comerciales para ${empresaActiva.razon_social} (RUC: ${empresaActiva.ruc}).`
+        }
         icon={<Package className="h-5 w-5" />}
         badge={
           <Badge variant={esAdmin ? 'info' : 'neutral'}>
@@ -541,7 +558,7 @@ export const MaestrosInventarioPage = () => {
           limpiarMensajes()
         }}
       >
-        <TabsList>
+        <TabsList className={vista ? 'hidden' : undefined}>
           <TabsTrigger value="productos" icon={<Boxes className="h-3.5 w-3.5" />}>
             Productos y Conversiones ({productos.length})
           </TabsTrigger>

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   Boxes,
+  LayoutDashboard,
   FileSpreadsheet,
   ClipboardList,
   ArrowLeftRight,
@@ -11,10 +12,16 @@ import {
   FileCheck2,
   AlertTriangle,
   Package,
+  Warehouse,
+  Users,
+  Layers,
   CalendarRange,
   Globe,
   Building2,
   ShieldCheck,
+  ShoppingCart,
+  Receipt,
+  FileMinus,
   PanelLeftClose,
   PanelLeftOpen,
   Shield,
@@ -25,53 +32,31 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
 import { Badge } from '../components/ui/badge'
+import { NAV_SECCIONES, itemActivo, type IconoNav } from '../navegacion'
 
-interface NavItemConfig {
-  path: string
-  label: string
-  icon: LucideIcon
+// El orden y las rutas del menú viven en src/navegacion.ts (probado con node --test).
+const ICONOS: Record<IconoNav, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  empresas: Building2,
+  periodos: CalendarRange,
+  catalogos: Globe,
+  productos: Package,
+  almacenes: Warehouse,
+  terceros: Users,
+  saldoInicial: ClipboardList,
+  inventario: Layers,
+  compras: ShoppingCart,
+  ventas: Receipt,
+  comprobantes: FileSpreadsheet,
+  notas: FileMinus,
+  transferencias: ArrowLeftRight,
+  captura: ScanLine,
+  kardex: BookOpenCheck,
+  incidencias: AlertTriangle,
+  cierres: Lock,
+  formato131: FileCheck2,
+  auditoria: ShieldCheck,
 }
-
-interface NavSectionConfig {
-  title: string
-  items: NavItemConfig[]
-}
-
-const NAV_SECTIONS: NavSectionConfig[] = [
-  {
-    title: 'OPERACIONES',
-    items: [
-      { path: '/documentos', label: 'Comprobantes', icon: FileSpreadsheet },
-      { path: '/operaciones-internas', label: 'Notas y Saldo Inicial', icon: ClipboardList },
-      { path: '/transferencias', label: 'Transferencias', icon: ArrowLeftRight },
-      { path: '/captura-homologacion', label: 'Captura XML / OCR', icon: ScanLine },
-    ],
-  },
-  {
-    title: 'KARDEX Y CIERRE',
-    items: [
-      { path: '/kardex', label: 'Kardex Valorizado', icon: BookOpenCheck },
-      { path: '/cierres', label: 'Cierres y Snapshots', icon: Lock },
-      { path: '/formato-13-1', label: 'Formato 13.1 SUNAT', icon: FileCheck2 },
-      { path: '/incidencias', label: 'Incidencias y Recálculo', icon: AlertTriangle },
-    ],
-  },
-  {
-    title: 'MAESTROS Y FISCAL',
-    items: [
-      { path: '/inventario', label: 'Inventario y Terceros', icon: Package },
-      { path: '/periodos', label: 'Períodos e IGV', icon: CalendarRange },
-      { path: '/catalogos', label: 'Catálogos y TC SBS', icon: Globe },
-    ],
-  },
-  {
-    title: 'SEGURIDAD Y EMPRESA',
-    items: [
-      { path: '/empresas', label: 'Empresas y Anexos', icon: Building2 },
-      { path: '/auditoria', label: 'Auditoría Inmutable', icon: ShieldCheck },
-    ],
-  },
-]
 
 export const MainLayout: React.FC = () => {
   const { usuario, empresaActiva, empresasDisponibles, seleccionarEmpresa, logout } = useAuth()
@@ -84,16 +69,11 @@ export const MainLayout: React.FC = () => {
     navigate('/login')
   }
 
-  // Determine active section and item for topbar breadcrumb
+  // Sección y opción activas para el encabezado
   const getActiveInfo = () => {
-    for (const section of NAV_SECTIONS) {
-      for (const item of section.items) {
-        if (location.pathname.startsWith(item.path)) {
-          return { section: section.title, item: item.label, Icon: item.icon }
-        }
-      }
-    }
-    return { section: 'PANEL', item: 'Vista General', Icon: Boxes }
+    const activo = itemActivo(location.pathname)
+    if (activo) return { section: activo.seccion.title, item: activo.item.label, Icon: ICONOS[activo.item.icono] }
+    return { section: 'INICIO', item: 'Dashboard', Icon: LayoutDashboard }
   }
 
   const activeInfo = getActiveInfo()
@@ -123,8 +103,8 @@ export const MainLayout: React.FC = () => {
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-          {NAV_SECTIONS.map((section) => (
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
+          {NAV_SECCIONES.map((section) => (
             <div key={section.title} className="space-y-1">
               {!collapsed ? (
                 <div className="px-2 pb-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -134,14 +114,14 @@ export const MainLayout: React.FC = () => {
                 <div className="my-2 border-t border-slate-100" />
               )}
               {section.items.map((item) => {
-                const ItemIcon = item.icon
+                const ItemIcon = ICONOS[item.icono]
                 return (
                   <NavLink
                     key={item.path}
                     to={item.path}
                     title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors select-none ${
+                      `flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors select-none ${
                         isActive
                           ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-2xs border border-indigo-100/60'
                           : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
