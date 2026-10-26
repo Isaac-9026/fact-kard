@@ -38,7 +38,7 @@ export function Tabs({ value: controlledValue, defaultValue = '', onValueChange,
   )
 }
 
-export interface TabsListProps extends React.HTMLAttributes<HTMLDivElement> {}
+export type TabsListProps = React.HTMLAttributes<HTMLDivElement>
 
 export function TabsList({ className, ...props }: TabsListProps) {
   return (

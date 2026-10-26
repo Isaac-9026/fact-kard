@@ -1,0 +1,3 @@
+-r requirements.txt
+# Bloque 7: caché compartida (throttling de login) en producción. Opcional en local.
+redis==6.4.0

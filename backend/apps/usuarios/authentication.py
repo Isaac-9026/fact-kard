@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.core import signing
 from rest_framework import authentication, exceptions
+from rest_framework.authentication import CSRFCheck
 from rest_framework.throttling import SimpleRateThrottle
 
 from apps.usuarios.models import TokenRevocado, Usuario
@@ -73,7 +74,7 @@ class UsuarioTokenAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request):
         auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION')
         if not auth_header:
-            return None
+            return self.autenticar_por_cookie(request)
 
         parts = auth_header.split()
         if len(parts) != 2:
@@ -89,6 +90,55 @@ class UsuarioTokenAuthentication(authentication.BaseAuthentication):
 
     def authenticate_header(self, request):
         return self.keyword
+
+    def autenticar_por_cookie(self, request):
+        """
+        Bloque 7 (opcional, AUTH_COOKIE_ENABLED): el mismo token firmado viaja en una cookie
+        HttpOnly. Como el navegador la envía solo, las escrituras exigen el token CSRF
+        (encabezado X-CSRFToken), igual que la SessionAuthentication de DRF.
+        """
+        if not cookie_sesion_activa():
+            return None
+        token_str = request.COOKIES.get(settings.AUTH_COOKIE_NAME)
+        if not token_str:
+            return None
+        usuario = validar_token(token_str)
+        exigir_csrf(request)
+        return (usuario, token_str)
+
+
+def cookie_sesion_activa() -> bool:
+    return bool(getattr(settings, 'AUTH_COOKIE_ENABLED', False))
+
+
+def exigir_csrf(request):
+    check = CSRFCheck(lambda req: None)
+    check.process_request(request)
+    motivo = check.process_view(request, None, (), {})
+    if motivo:
+        raise exceptions.PermissionDenied(f'Verificación CSRF fallida: {motivo}')
+
+
+def establecer_cookie_sesion(response, token_str: str):
+    response.set_cookie(
+        settings.AUTH_COOKIE_NAME,
+        token_str,
+        max_age=duracion_token(),
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        domain=settings.AUTH_COOKIE_DOMAIN,
+        path=settings.AUTH_COOKIE_PATH,
+    )
+
+
+def borrar_cookie_sesion(response):
+    response.delete_cookie(
+        settings.AUTH_COOKIE_NAME,
+        domain=settings.AUTH_COOKIE_DOMAIN,
+        path=settings.AUTH_COOKIE_PATH,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+    )
 
 
 class LoginRateThrottle(SimpleRateThrottle):

@@ -45,7 +45,7 @@ import {
   obtenerEstablecimientos,
   type Establecimiento,
 } from '../../api/empresas'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card'
@@ -56,6 +56,7 @@ import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
+import { diferirCarga } from '../../utils/efectos'
 
 type TabId = 'productos' | 'terceros' | 'almacenes'
 
@@ -201,15 +202,18 @@ export const MaestrosInventarioPage = () => {
   }, [search, tipoTercero])
   const cargarAlmacenes = useCallback(async () => setAlmacenes(await getAlmacenes()), [])
 
+  // Al cambiar de empresa se vacían los datos de la anterior.
   useEffect(() => {
-    cerrarFormularios()
-    setProductos([])
-    setTerceros([])
-    setAlmacenes([])
-    setTiposExistencia([])
-    setUnidadesMedida([])
-    setEstablecimientos([])
-    limpiarMensajes()
+    diferirCarga(() => {
+      cerrarFormularios()
+      setProductos([])
+      setTerceros([])
+      setAlmacenes([])
+      setTiposExistencia([])
+      setUnidadesMedida([])
+      setEstablecimientos([])
+      limpiarMensajes()
+    })
   }, [cerrarFormularios, empresaActiva?.id])
 
   useEffect(() => {

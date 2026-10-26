@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
+from django.middleware.csrf import get_token, rotate_token
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
@@ -10,8 +11,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from apps.usuarios.models import TokenRevocado, Usuario, UsuarioEmpresa
+
 from apps.usuarios.authentication import (
-    LoginRateThrottle, UsuarioTokenAuthentication, duracion_token, generar_token, leer_token,
+    LoginRateThrottle, UsuarioTokenAuthentication, borrar_cookie_sesion, cookie_sesion_activa,
+    duracion_token, establecer_cookie_sesion, generar_token, leer_token,
 )
 from apps.usuarios.permissions import TieneEmpresaActiva, EsAdminEmpresa
 from apps.usuarios.serializers import (
@@ -110,11 +113,31 @@ class LoginView(APIView):
         token = generar_token(usuario)
         empresas_data = obtener_empresas_usuario(usuario)
 
-        return Response({
-            'token': token,
+        datos = {
             'usuario': UsuarioResponseSerializer(usuario).data,
             'empresas': empresas_data,
-        }, status=status.HTTP_200_OK)
+        }
+        if not cookie_sesion_activa():
+            return Response({'token': token, **datos}, status=status.HTTP_200_OK)
+        # Bloque 7 (opcional): el token va solo en la cookie HttpOnly, nunca en el cuerpo.
+        respuesta = Response(datos, status=status.HTTP_200_OK)
+        establecer_cookie_sesion(respuesta, token)
+        rotate_token(request)  # nuevo token CSRF tras iniciar sesión
+        return respuesta
+
+
+class CsrfView(APIView):
+    """Bloque 7: entrega la cookie/token CSRF que necesita el modo de sesión por cookie."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        summary="Token CSRF",
+        description="Entrega el token CSRF (y su cookie) para el modo de sesión por cookie HttpOnly.",
+        responses={200: OpenApiResponse(description="{'csrfToken': '...'}")},
+    )
+    def get(self, request):
+        return Response({'csrfToken': get_token(request)})
 
 
 class LogoutView(APIView):
@@ -128,7 +151,10 @@ class LogoutView(APIView):
         TokenRevocado.objects.get_or_create(jti=payload['jti'], defaults={'usuario': request.user, 'expira_en': expira})
         # Limpieza oportunista de revocaciones ya expiradas.
         TokenRevocado.objects.filter(expira_en__lt=timezone.now()).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        respuesta = Response(status=status.HTTP_204_NO_CONTENT)
+        if cookie_sesion_activa():
+            borrar_cookie_sesion(respuesta)
+        return respuesta
 
 
 class MeView(APIView):

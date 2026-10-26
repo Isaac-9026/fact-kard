@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import {
   obtenerDocumentos,
+  obtenerDocumentosPaginados,
   obtenerDocumento,
   crearDocumento,
   revisarDocumento,
@@ -50,7 +51,7 @@ import type {
   Almacen,
   Tercero,
 } from '../../api/inventario'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { fechaCalendarioLocal } from '../../utils/date'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
@@ -63,6 +64,12 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Modal } from '../../components/ui/modal'
+import { Paginacion } from '../../components/ui/paginacion'
+import { diferirCarga } from '../../utils/efectos'
+import { useValorDiferido } from '../../utils/useValorDiferido'
+import {
+  PAGE_SIZE_DEFECTO, claveConsulta, irAPagina, paginaVigente, paramsPaginacion, type EstadoPagina,
+} from '../../utils/paginacion'
 
 interface LineaFormulario {
   tempId: string
@@ -102,6 +109,17 @@ export const DocumentosPage: React.FC = () => {
   const [filtroEstado, setFiltroEstado] = useState<EstadoDocumental | ''>('')
   const [filtroRevision, setFiltroRevision] = useState<EstadoRevision | ''>('')
   const [filtroBusqueda, setFiltroBusqueda] = useState('')
+  const busqueda = useValorDiferido(filtroBusqueda.trim())
+
+  // Bloque 7: los filtros se aplican en el servidor y la lista llega por páginas.
+  // Cambiar de empresa o de filtro vuelve a la página 1.
+  const empresaId = empresaActiva?.id
+  const [totalDocumentos, setTotalDocumentos] = useState(0)
+  const [estadoPagina, setEstadoPagina] = useState<EstadoPagina>({ clave: '', page: 1 })
+  const claveFiltros = claveConsulta(empresaId, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda)
+  const page = paginaVigente(estadoPagina, claveFiltros)
+  // Comprobantes que pueden ser origen de una nota (lista completa, solo al registrar una nota).
+  const [documentosOrigen, setDocumentosOrigen] = useState<Documento[]>([])
 
   // UI States
   const [cargando, setCargando] = useState(false)
@@ -136,13 +154,41 @@ export const DocumentosPage: React.FC = () => {
   const [revMotivo, setRevMotivo] = useState('')
   const [anulacionMotivo, setAnulacionMotivo] = useState('')
 
-  // Cargar datos iniciales
+  // Página actual de documentos con los filtros vigentes.
+  const cargarDocumentos = useCallback(async () => {
+    if (!empresaId) return
+    setCargando(true)
+    try {
+      const data = await obtenerDocumentosPaginados(
+        {
+          clase: filtroClase || undefined,
+          periodo: filtroPeriodo || undefined,
+          estado: filtroEstado || undefined,
+          estado_revision: filtroRevision || undefined,
+          search: busqueda || undefined,
+        },
+        paramsPaginacion(page),
+      )
+      setDocumentos(data.results)
+      setTotalDocumentos(data.count)
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      setErrorGlobal(axiosErr.response?.data?.detail || 'Error al cargar los datos del sistema.')
+    } finally {
+      setCargando(false)
+    }
+  }, [empresaId, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, busqueda, page])
+
+  useEffect(() => {
+    diferirCarga(cargarDocumentos)
+  }, [cargarDocumentos])
+
+  // Cargar catálogos
   const cargarCatalogosYDocumentos = useCallback(async () => {
     setCargando(true)
     setErrorGlobal(null)
     try {
-      const [docs, pers, comps, ops, prods, alms, tercs] = await Promise.all([
-        obtenerDocumentos(),
+      const [pers, comps, ops, prods, alms, tercs] = await Promise.all([
         obtenerPeriodos(),
         obtenerTiposComprobante(),
         obtenerTiposOperacion(),
@@ -150,7 +196,6 @@ export const DocumentosPage: React.FC = () => {
         getAlmacenes(),
         getTerceros(),
       ])
-      setDocumentos(docs)
       setPeriodos(pers)
       setTiposComprobante(comps.filter((c) => c.activo))
       setTiposOperacion(ops.filter((o) => o.activo))
@@ -171,7 +216,7 @@ export const DocumentosPage: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    cargarCatalogosYDocumentos()
+    diferirCarga(cargarCatalogosYDocumentos)
   }, [cargarCatalogosYDocumentos, empresaActiva?.id])
 
   useEffect(() => {
@@ -185,21 +230,23 @@ export const DocumentosPage: React.FC = () => {
 
   // Resolver Tipo de Cambio automáticamente cuando la moneda sea USD y cambie la fecha
   useEffect(() => {
-    if (formMoneda === 'USD' && formFechaEmision) {
-      setCargandoTc(true)
-      resolverTipoCambio('USD', formFechaEmision)
-        .then((res) => {
-          setTcResuelto(res)
-        })
-        .catch(() => {
-          setTcResuelto(null)
-        })
-        .finally(() => {
-          setCargandoTc(false)
-        })
-    } else {
-      setTcResuelto(null)
-    }
+    diferirCarga(() => {
+      if (formMoneda === 'USD' && formFechaEmision) {
+        setCargandoTc(true)
+        resolverTipoCambio('USD', formFechaEmision)
+          .then((res) => {
+            setTcResuelto(res)
+          })
+          .catch(() => {
+            setTcResuelto(null)
+          })
+          .finally(() => {
+            setCargandoTc(false)
+          })
+      } else {
+        setTcResuelto(null)
+      }
+    })
   }, [formMoneda, formFechaEmision])
 
   const tipoCompSeleccionado = useMemo(() => {
@@ -412,8 +459,7 @@ export const DocumentosPage: React.FC = () => {
       setFormSerie('')
       setFormNumero('')
       setLineas([])
-      const docsActualizados = await obtenerDocumentos()
-      setDocumentos(docsActualizados)
+      await cargarDocumentos()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: Record<string, unknown> } }
       const msgs = axiosErr.response?.data
@@ -437,8 +483,7 @@ export const DocumentosPage: React.FC = () => {
       setExitoGlobal(`Estado de revisión actualizado a ${revEstadoSeleccionado}.`)
       setModalRevisionDoc(null)
       setRevMotivo('')
-      const docsActualizados = await obtenerDocumentos()
-      setDocumentos(docsActualizados)
+      await cargarDocumentos()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
       setErrorGlobal(axiosErr.response?.data?.detail || 'Error al cambiar estado de revisión.')
@@ -457,8 +502,7 @@ export const DocumentosPage: React.FC = () => {
     try {
       await confirmarDocumento(doc.id)
       setExitoGlobal(`Documento ${doc.serie_normalizada}-${doc.numero_normalizado} confirmado exitosamente en Kardex.`)
-      const docsActualizados = await obtenerDocumentos()
-      setDocumentos(docsActualizados)
+      await cargarDocumentos()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
       setErrorGlobal(axiosErr.response?.data?.detail || 'No se pudo confirmar el comprobante.')
@@ -476,36 +520,34 @@ export const DocumentosPage: React.FC = () => {
       setExitoGlobal(`Documento ${modalAnulacionDoc.serie_normalizada}-${modalAnulacionDoc.numero_normalizado} anulado con extorno.`)
       setModalAnulacionDoc(null)
       setAnulacionMotivo('')
-      const docsActualizados = await obtenerDocumentos()
-      setDocumentos(docsActualizados)
+      await cargarDocumentos()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
       setErrorGlobal(axiosErr.response?.data?.detail || 'Error al anular el documento.')
     }
   }
 
-  const documentosFiltrados = useMemo(() => {
-    return documentos.filter((d) => {
-      if (filtroClase && d.clase !== filtroClase) return false
-      if (filtroPeriodo && d.periodo !== filtroPeriodo) return false
-      if (filtroEstado && d.estado !== filtroEstado) return false
-      if (filtroRevision && d.estado_revision !== filtroRevision) return false
-      if (filtroBusqueda.trim()) {
-        const q = filtroBusqueda.toLowerCase()
-        const comp = `${d.serie_normalizada}-${d.numero_normalizado}`.toLowerCase()
-        const ruc = d.ruc_emisor.toLowerCase()
-        const terc = (d.tercero_razon_social || '').toLowerCase()
-        if (!comp.includes(q) && !ruc.includes(q) && !terc.includes(q)) {
-          return false
-        }
-      }
-      return true
-    })
-  }, [documentos, filtroClase, filtroPeriodo, filtroEstado, filtroRevision, filtroBusqueda])
 
   const documentosOrigenElegibles = useMemo(() => {
-    return documentos.filter((d) => !d.es_nota)
-  }, [documentos])
+    return documentosOrigen.filter((d) => !d.es_nota)
+  }, [documentosOrigen])
+
+  // La nota necesita elegir su comprobante de origen entre todos (no solo la página visible).
+  const necesitaOrigen = modalNuevoAbierto && esNota
+  useEffect(() => {
+    if (!necesitaOrigen) return
+    let ignorar = false
+    obtenerDocumentos()
+      .then((docs) => {
+        if (!ignorar) setDocumentosOrigen(docs)
+      })
+      .catch(() => {
+        if (!ignorar) setDocumentosOrigen([])
+      })
+    return () => {
+      ignorar = true
+    }
+  }, [necesitaOrigen, empresaId])
 
   return (
     <div className="space-y-6">
@@ -622,7 +664,7 @@ export const DocumentosPage: React.FC = () => {
         <CardContent className="p-0">
           <div className="flex items-center justify-between p-3 px-4 border-b border-slate-100 bg-slate-50/50">
             <span className="text-xs font-semibold text-slate-600">
-              Mostrando <strong className="font-mono text-slate-900">{documentosFiltrados.length}</strong> comprobantes
+              Total <strong className="font-mono text-slate-900">{totalDocumentos}</strong> comprobantes
             </span>
             {cargando && <span className="text-xs text-slate-400">Actualizando datos...</span>}
           </div>
@@ -644,14 +686,14 @@ export const DocumentosPage: React.FC = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {documentosFiltrados.length === 0 ? (
+              {documentos.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={11} className="text-center py-10 text-slate-400 text-xs">
                     No se encontraron comprobantes registrados para los filtros seleccionados.
                   </TableCell>
                 </TableRow>
               ) : (
-                documentosFiltrados.map((doc) => {
+                documentos.map((doc) => {
                   const esCompra = doc.clase === 'COMPRA'
                   const revVariant =
                     doc.estado_revision === 'REVISADO'
@@ -791,6 +833,17 @@ export const DocumentosPage: React.FC = () => {
               )}
             </TableBody>
           </Table>
+          {totalDocumentos > 0 && (
+            <Paginacion
+              page={page}
+              pageSize={PAGE_SIZE_DEFECTO}
+              count={totalDocumentos}
+              enPagina={documentos.length}
+              cargando={cargando}
+              etiqueta="comprobantes"
+              onCambiarPagina={(nueva) => setEstadoPagina(irAPagina(claveFiltros, nueva))}
+            />
+          )}
         </CardContent>
       </Card>
 

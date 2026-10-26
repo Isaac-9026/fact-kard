@@ -82,3 +82,6 @@ class TokenRevocado(models.Model):
 
     class Meta:
         db_table = 'token_revocado'
+        # Bloque 7: la limpieza de revocaciones expiradas (en cada logout) filtra por expira_en.
+        # La búsqueda por jti ya usa el índice único.
+        indexes = [models.Index(fields=['expira_en'], name='ix_token_revocado_expira')]

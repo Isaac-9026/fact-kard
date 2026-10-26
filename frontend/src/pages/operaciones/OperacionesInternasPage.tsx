@@ -39,7 +39,7 @@ import {
   type SaldoInicialFiltros,
 } from '../../api/operaciones'
 import { obtenerPeriodos, type Periodo } from '../../api/periodos'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { campoFechaNotaInterna, formularioNotaTrasRespuesta } from '../../utils/notaInternaForm'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
@@ -51,6 +51,7 @@ import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
+import { diferirCarga } from '../../utils/efectos'
 
 type TabId = 'saldos' | 'notas'
 
@@ -245,40 +246,45 @@ export const OperacionesInternasPage = () => {
     }
   }, [empresaActiva, filtrosNotaApi, filtrosSaldoApi, tab])
 
+  const empresaId = empresaActiva?.id
   useEffect(() => {
     requestRef.current += 1
-    cerrarFormularios()
-    setPeriodos([])
-    setAlmacenes([])
-    setProductos([])
-    setTiposOperacion([])
-    setSaldos([])
-    setNotas([])
-    limpiarMensajes()
-    if (!empresaActiva) return
     let ignorar = false
-    setCatalogosLoading(true)
-    Promise.all([obtenerPeriodos(), getAlmacenes(), getProductos(), obtenerTiposOperacion()])
-      .then(([nuevosPeriodos, nuevosAlmacenes, nuevosProductos, nuevosTipos]) => {
-        if (ignorar) return
-        setPeriodos(nuevosPeriodos)
-        setAlmacenes(nuevosAlmacenes)
-        setProductos(nuevosProductos)
-        setTiposOperacion(nuevosTipos)
-      })
-      .catch((err) => {
-        if (!ignorar) setError(extraerError(err))
-      })
-      .finally(() => {
-        if (!ignorar) setCatalogosLoading(false)
-      })
+    // Vaciar los datos de la empresa anterior y cargar los catálogos de la nueva.
+    diferirCarga(() => {
+      if (ignorar) return
+      cerrarFormularios()
+      setPeriodos([])
+      setAlmacenes([])
+      setProductos([])
+      setTiposOperacion([])
+      setSaldos([])
+      setNotas([])
+      limpiarMensajes()
+      if (!empresaId) return
+      setCatalogosLoading(true)
+      Promise.all([obtenerPeriodos(), getAlmacenes(), getProductos(), obtenerTiposOperacion()])
+        .then(([nuevosPeriodos, nuevosAlmacenes, nuevosProductos, nuevosTipos]) => {
+          if (ignorar) return
+          setPeriodos(nuevosPeriodos)
+          setAlmacenes(nuevosAlmacenes)
+          setProductos(nuevosProductos)
+          setTiposOperacion(nuevosTipos)
+        })
+        .catch((err) => {
+          if (!ignorar) setError(extraerError(err))
+        })
+        .finally(() => {
+          if (!ignorar) setCatalogosLoading(false)
+        })
+    })
     return () => {
       ignorar = true
     }
-  }, [cerrarFormularios, empresaActiva?.id])
+  }, [cerrarFormularios, empresaId])
 
   useEffect(() => {
-    void cargarLista()
+    diferirCarga(cargarLista)
   }, [cargarLista])
 
   const ejecutar = async (accion: () => Promise<void>, mensaje: string) => {

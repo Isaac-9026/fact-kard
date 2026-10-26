@@ -30,6 +30,10 @@ class Auditoria(models.Model):
 
     class Meta:
         db_table = 'auditoria'
+        # Bloque 7: listado paginado por empresa en orden -fecha, -id (la tabla solo crece).
+        indexes = [
+            models.Index(fields=['empresa', '-fecha', '-id'], name='ix_auditoria_empresa_fecha'),
+        ]
         verbose_name = 'Auditoría'
         verbose_name_plural = 'Auditorías'
 

@@ -1,4 +1,5 @@
 import { apiClient } from './http';
+import { leerPaginado, type Paginado, type ParamsPaginacion } from '../utils/paginacion';
 
 export interface AuditoriaItem {
   id: number;
@@ -24,7 +25,7 @@ export interface AuditoriaFiltros {
  * Consulta el registro de auditoría de la empresa activa (vía header X-Empresa-Id).
  * Permite filtrar por tipo de acción y nombre de entidad.
  */
-export const getAuditoriaApi = async (filtros?: AuditoriaFiltros): Promise<AuditoriaItem[]> => {
+const paramsAuditoria = (filtros?: AuditoriaFiltros): Record<string, string> => {
   const params: Record<string, string> = {};
   if (filtros?.entidad && filtros.entidad.trim() !== '') {
     params.entidad = filtros.entidad.trim();
@@ -33,6 +34,21 @@ export const getAuditoriaApi = async (filtros?: AuditoriaFiltros): Promise<Audit
     params.accion = filtros.accion.trim();
   }
 
-  const response = await apiClient.get<AuditoriaItem[]>('/auditoria/', { params });
+  return params;
+};
+
+export const getAuditoriaApi = async (filtros?: AuditoriaFiltros): Promise<AuditoriaItem[]> => {
+  const response = await apiClient.get<AuditoriaItem[]>('/auditoria/', { params: paramsAuditoria(filtros) });
   return response.data;
+};
+
+/** Bloque 7 — una página del registro de auditoría (`?page=&page_size=`). */
+export const getAuditoriaPaginadaApi = async (
+  filtros: AuditoriaFiltros | undefined,
+  paginacion: ParamsPaginacion,
+): Promise<Paginado<AuditoriaItem>> => {
+  const response = await apiClient.get<Paginado<AuditoriaItem> | AuditoriaItem[]>('/auditoria/', {
+    params: { ...paramsAuditoria(filtros), ...paginacion },
+  });
+  return leerPaginado(response.data);
 };

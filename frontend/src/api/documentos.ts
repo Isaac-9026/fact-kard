@@ -1,4 +1,5 @@
 import apiClient from './http';
+import { leerPaginado, type Paginado, type ParamsPaginacion } from '../utils/paginacion';
 
 export type ClaseDocumento = 'COMPRA' | 'VENTA';
 export type EstadoDocumental = 'BORRADOR' | 'CONFIRMADO' | 'ANULADO';
@@ -118,6 +119,19 @@ export interface DocumentoFiltros {
 export const obtenerDocumentos = async (filtros?: DocumentoFiltros): Promise<Documento[]> => {
   const { data } = await apiClient.get<Documento[]>('/documentos/', { params: filtros });
   return data;
+};
+
+/** Bloque 7 — una página de documentos con los filtros aplicados en el servidor. */
+export const obtenerDocumentosPaginados = async (
+  filtros: DocumentoFiltros,
+  paginacion: ParamsPaginacion,
+): Promise<Paginado<Documento>> => {
+  const params: Record<string, string | number> = { ...paginacion };
+  Object.entries(filtros).forEach(([clave, valor]) => {
+    if (valor !== undefined && valor !== null && String(valor).trim() !== '') params[clave] = typeof valor === 'string' ? valor.trim() : valor;
+  });
+  const { data } = await apiClient.get<Paginado<Documento> | Documento[]>('/documentos/', { params });
+  return leerPaginado(data);
 };
 
 export const obtenerDocumento = async (id: number): Promise<Documento> => {

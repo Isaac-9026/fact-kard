@@ -1,5 +1,6 @@
 import apiClient from './http';
 import { parametrosKardex } from '../utils/kardexFiltros';
+import type { MetaPaginacion, ParamsPaginacion } from '../utils/paginacion';
 
 export interface KardexFila {
   id: number;
@@ -59,15 +60,18 @@ export interface KardexReporteResponse {
   resumen: KardexResumen;
   saldos_iniciales?: { producto_id: number; producto_codigo: string; cantidad: string; cpp: string | null; valor: string }[];
   movimientos: KardexFila[];
+  /** Bloque 7: presente cuando se pide una página; `resumen` sigue siendo del rango completo. */
+  paginacion?: MetaPaginacion;
 }
 
 /**
  * Consulta oficial del Kardex Valorizado bajo el orden cronológico del motor.
  */
 export const obtenerKardexValorizado = async (
-  filtros?: KardexFiltros
+  filtros?: KardexFiltros,
+  paginacion?: ParamsPaginacion
 ): Promise<KardexReporteResponse> => {
-  const cleanParams = parametrosKardex(filtros);
+  const cleanParams = { ...parametrosKardex(filtros), ...(paginacion ?? {}) };
   const response = await apiClient.get<KardexReporteResponse>('/reportes/kardex/', {
     params: cleanParams,
   });

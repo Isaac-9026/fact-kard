@@ -9,8 +9,13 @@ import {
   User,
   Scale,
 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
-import { getAuditoriaApi, type AuditoriaItem } from '../../api/auditoria'
+import { useAuth } from '../../context/useAuth'
+import { getAuditoriaPaginadaApi, type AuditoriaItem } from '../../api/auditoria'
+import { diferirCarga } from '../../utils/efectos'
+import { Paginacion } from '../../components/ui/paginacion'
+import {
+  PAGE_SIZE_DEFECTO, claveConsulta, irAPagina, paginaVigente, paramsPaginacion, type EstadoPagina,
+} from '../../utils/paginacion'
 import type { AxiosError } from 'axios'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
@@ -33,6 +38,12 @@ export const AuditoriaPage: React.FC = () => {
   // Modal de Detalle JSON
   const [selectedLog, setSelectedLog] = useState<AuditoriaItem | null>(null)
 
+  // Bloque 7: paginación en el servidor. Cambiar de empresa o de filtro vuelve a la página 1.
+  const [total, setTotal] = useState(0)
+  const [estadoPagina, setEstadoPagina] = useState<EstadoPagina>({ clave: '', page: 1 })
+  const claveFiltros = claveConsulta(empresaActiva?.id, filtroEntidad.trim(), filtroAccion.trim())
+  const page = paginaVigente(estadoPagina, claveFiltros)
+
   const fetchAuditoria = useCallback(async () => {
     if (!empresaActiva) {
       setIsLoading(false)
@@ -42,11 +53,12 @@ export const AuditoriaPage: React.FC = () => {
     try {
       setIsLoading(true)
       setErrorMsg(null)
-      const data = await getAuditoriaApi({
-        entidad: filtroEntidad,
-        accion: filtroAccion,
-      })
-      setLogs(data)
+      const data = await getAuditoriaPaginadaApi(
+        { entidad: filtroEntidad, accion: filtroAccion },
+        paramsPaginacion(page),
+      )
+      setLogs(data.results)
+      setTotal(data.count)
     } catch (err) {
       const axiosErr = err as AxiosError<{ detail?: string }>
       if (axiosErr.response?.data?.detail) {
@@ -57,10 +69,10 @@ export const AuditoriaPage: React.FC = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [empresaActiva, filtroEntidad, filtroAccion])
+  }, [empresaActiva, filtroEntidad, filtroAccion, page])
 
   useEffect(() => {
-    fetchAuditoria()
+    diferirCarga(fetchAuditoria)
   }, [fetchAuditoria])
 
   const handleClearFilters = () => {
@@ -177,7 +189,7 @@ export const AuditoriaPage: React.FC = () => {
 
             <div className="flex items-center gap-2">
               <Badge variant="neutral" className="font-mono font-semibold">
-                {logs.length} {logs.length === 1 ? 'registro' : 'registros'}
+                {total} {total === 1 ? 'registro' : 'registros'}
               </Badge>
             </div>
           </div>
@@ -280,6 +292,16 @@ export const AuditoriaPage: React.FC = () => {
                 })}
               </TableBody>
             </Table>
+          )}
+          {total > 0 && (
+            <Paginacion
+              page={page}
+              pageSize={PAGE_SIZE_DEFECTO}
+              count={total}
+              enPagina={logs.length}
+              cargando={isLoading}
+              onCambiarPagina={(nueva) => setEstadoPagina(irAPagina(claveFiltros, nueva))}
+            />
           )}
         </CardContent>
       </Card>

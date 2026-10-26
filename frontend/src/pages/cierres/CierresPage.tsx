@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { diferirCarga } from '../../utils/efectos';
+import { useAuth } from '../../context/useAuth';
 import {
   compararCierres,
   ejecutarCierre,
@@ -59,8 +60,9 @@ export const CierresPage: React.FC = () => {
 
   const periodo = useMemo(() => periodos.find((p) => p.id === Number(periodoId)), [periodos, periodoId]);
 
-  const cargar = async () => {
-    if (!empresaActiva) return;
+  const empresaId = empresaActiva?.id;
+  const cargar = useCallback(async () => {
+    if (!empresaId) return;
     setOcupado(true);
     setError(null);
     try {
@@ -73,11 +75,11 @@ export const CierresPage: React.FC = () => {
     } finally {
       setOcupado(false);
     }
-  };
+  }, [empresaId]);
 
   useEffect(() => {
-    void cargar();
-  }, [empresaActiva?.id]);
+    diferirCarga(cargar);
+  }, [cargar]);
 
   const cerrar = async () => {
     if (!periodo || !confirm(`¿Cerrar oficialmente el período ${etiqueta(periodo)}? Esta acción calculará saldos inmutables con hash SHA-256.`)) return;

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useState, useMemo } from 'react'
+import { diferirCarga } from '../../utils/efectos'
 import {
   Globe,
   RotateCcw,
@@ -73,12 +74,7 @@ export const CatalogosPage: React.FC = () => {
   const [nuevoTc, setNuevoTc] = useState<NuevoTipoCambioForm>(() => nuevoTipoCambioInicial())
   const [guardandoTc, setGuardandoTc] = useState(false)
 
-  // Initial load
-  useEffect(() => {
-    cargarDatos()
-  }, [])
-
-  const cargarDatos = async () => {
+  const cargarDatos = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -102,7 +98,12 @@ export const CatalogosPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  // Carga inicial
+  useEffect(() => {
+    diferirCarga(cargarDatos)
+  }, [cargarDatos])
 
   const handleResolver = async (e: React.FormEvent) => {
     e.preventDefault()

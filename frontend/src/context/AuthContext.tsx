@@ -1,10 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getMeApi, logoutApi } from '../api/auth';
 import { registrarManejadorSesionInvalida, reiniciarControlSesion } from '../api/http';
-import type { Usuario, EmpresaAsociada, EmpresaActiva, AuthContextType } from '../types/auth';
+import type { Usuario, EmpresaAsociada, EmpresaActiva } from '../types/auth';
 import { reconciliarEstadoEmpresas } from './authState';
+import { AuthContext } from './useAuth';
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const refrescoEmpresasEnCurso = useRef<Promise<EmpresaAsociada[]> | null>(null);
@@ -90,10 +90,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [persistirEstadoEmpresas]);
 
   useEffect(() => {
-    if (!token) {
-      setVerificandoSesion(false);
-      return;
-    }
+    // Sin token no hay nada que verificar: el estado inicial ya es `false` y las rutas
+    // privadas redirigen al login aunque `verificandoSesion` siguiera en true.
+    if (!token) return;
     void refrescarEmpresasDisponibles()
       .catch(() => undefined)
       .finally(() => setVerificandoSesion(false));
@@ -203,13 +202,3 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     </AuthContext.Provider>
   );
 };
-
-export const useAuth = (): AuthContextType => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth debe ser utilizado dentro de un AuthProvider');
-  }
-  return context;
-};
-
-export default AuthContext;

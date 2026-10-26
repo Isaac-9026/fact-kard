@@ -139,6 +139,9 @@ class Documento(models.Model):
             models.Index(fields=['periodo'], name='idx_documento_periodo'),
             models.Index(fields=['tercero'], name='idx_documento_tercero'),
             models.Index(fields=['documento_origen'], name='idx_documento_origen'),
+            # Bloque 7: listado paginado filtrado por estado (BORRADOR/CONFIRMADO/ANULADO)
+            # con el mismo orden de la API (-fecha_emision, -id).
+            models.Index(fields=['empresa', 'estado', '-fecha_emision', '-id'], name='ix_documento_emp_estado_fecha'),
         ]
 
     def __str__(self):

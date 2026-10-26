@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../../context/useAuth';
 import {
   actualizarEquivalencia,
   corregirCampoCaptura,
@@ -14,7 +14,10 @@ import {
   type DocumentoCaptura,
   type GenerarBorradorResponse,
   type ProductoEquivalencia,
+  type SugerirEquivalenciaResponse,
 } from '../../api/captura';
+import { mensajeDeError } from '../../utils/errores';
+import { diferirCarga } from '../../utils/efectos';
 import {
   getAlmacenes,
   getProductos,
@@ -114,7 +117,7 @@ export const CapturaHomologacionPage: React.FC = () => {
   const [testTerceroId, setTestTerceroId] = useState<string>('');
   const [testCodigoExt, setTestCodigoExt] = useState<string>('');
   const [testDescExt, setTestDescExt] = useState<string>('');
-  const [sugerenciaResultado, setSugerenciaResultado] = useState<any>(null);
+  const [sugerenciaResultado, setSugerenciaResultado] = useState<SugerirEquivalenciaResponse | null>(null);
 
   // Carga inicial de datos auxiliares
   useEffect(() => {
@@ -142,52 +145,49 @@ export const CapturaHomologacionPage: React.FC = () => {
   }, [empresaActiva]);
 
   // Cargar lista de capturas
-  const cargarCapturas = async () => {
+  const cargarCapturas = useCallback(async () => {
     if (!empresaActiva) return;
     try {
       setLoading(true);
       const data = await obtenerCapturas();
       setCapturas(data);
-      if (data.length > 0 && selectedCapturaId === null) {
-        setSelectedCapturaId(data[0].id);
+      if (data.length > 0) {
+        // Solo se preselecciona la primera captura si aún no hay una elegida.
+        setSelectedCapturaId((actual) => (actual === null ? data[0].id : actual));
       }
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || 'Error al cargar capturas.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al cargar capturas.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [empresaActiva]);
 
   // Cargar lista de equivalencias
-  const cargarEquivalencias = async () => {
+  const cargarEquivalencias = useCallback(async () => {
     if (!empresaActiva) return;
     try {
       setLoading(true);
       const tercId = filtroTerceroId ? Number(filtroTerceroId) : undefined;
       const data = await obtenerEquivalencias(tercId);
       setEquivalencias(data);
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || 'Error al cargar equivalencias.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al cargar equivalencias.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [empresaActiva, filtroTerceroId]);
 
   useEffect(() => {
-    if (activeTab === 'capturas') {
-      cargarCapturas();
-    } else {
-      cargarEquivalencias();
-    }
-  }, [activeTab, empresaActiva, filtroTerceroId]);
+    diferirCarga(activeTab === 'capturas' ? cargarCapturas : cargarEquivalencias);
+  }, [activeTab, cargarCapturas, cargarEquivalencias]);
 
   // Cargar detalle de la captura seleccionada
   useEffect(() => {
-    if (!selectedCapturaId) {
-      setCapturaDetalle(null);
-      return;
-    }
     const cargarDetalle = async () => {
+      if (!selectedCapturaId) {
+        setCapturaDetalle(null);
+        return;
+      }
       try {
         setBorradorResultado(null);
         const data = await obtenerCapturaDetalle(selectedCapturaId);
@@ -196,7 +196,7 @@ export const CapturaHomologacionPage: React.FC = () => {
         console.error('Error al obtener detalle de captura:', err);
       }
     };
-    cargarDetalle();
+    diferirCarga(cargarDetalle);
   }, [selectedCapturaId]);
 
   // Manejo de cambio de archivo y detección de tipo
@@ -231,8 +231,8 @@ export const CapturaHomologacionPage: React.FC = () => {
       setTextoOcr('');
       await cargarCapturas();
       setSelectedCapturaId(res.id);
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.archivo || err?.response?.data?.detail || 'Error al subir y procesar captura.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['archivo', 'detail'], 'Error al subir y procesar captura.'));
     } finally {
       setLoading(false);
     }
@@ -251,8 +251,8 @@ export const CapturaHomologacionPage: React.FC = () => {
       }
       setEditingCampoId(null);
       setSuccessMsg(`Campo ${updated.nombre_campo} corregido con éxito.`);
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || 'Error al corregir campo.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al corregir campo.'));
     }
   };
 
@@ -270,8 +270,8 @@ export const CapturaHomologacionPage: React.FC = () => {
       await cargarCapturas();
       const detalleActualizado = await obtenerCapturaDetalle(selectedCapturaId);
       setCapturaDetalle(detalleActualizado);
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || err?.response?.data?.periodo || 'Error al generar borrador.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail', 'periodo'], 'Error al generar borrador.'));
     } finally {
       setLoading(false);
     }
@@ -279,12 +279,12 @@ export const CapturaHomologacionPage: React.FC = () => {
 
   // Cargar unidades del producto cuando se selecciona en el modal de equivalencia
   useEffect(() => {
-    if (!formProductoId) {
-      setProductoUnidades([]);
-      setFormProductoUnidadId('');
-      return;
-    }
     const cargarUnidades = async () => {
+      if (!formProductoId) {
+        setProductoUnidades([]);
+        setFormProductoUnidadId('');
+        return;
+      }
       try {
         const unds = await getProductoUnidades(Number(formProductoId));
         setProductoUnidades(unds);
@@ -296,7 +296,7 @@ export const CapturaHomologacionPage: React.FC = () => {
         console.error('Error al cargar unidades del producto:', err);
       }
     };
-    cargarUnidades();
+    diferirCarga(cargarUnidades);
   }, [formProductoId]);
 
   // Guardar nueva equivalencia
@@ -325,8 +325,8 @@ export const CapturaHomologacionPage: React.FC = () => {
       setFormDescExt('');
       setFormFactor('1.00000000');
       await cargarEquivalencias();
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || err?.response?.data?.factor_conversion || 'Error al registrar equivalencia.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail', 'factor_conversion'], 'Error al registrar equivalencia.'));
     } finally {
       setLoading(false);
     }
@@ -337,8 +337,8 @@ export const CapturaHomologacionPage: React.FC = () => {
     try {
       await actualizarEquivalencia(equiv.id, { activa: !equiv.activa });
       await cargarEquivalencias();
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || 'Error al actualizar equivalencia.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al actualizar equivalencia.'));
     }
   };
 
@@ -353,8 +353,8 @@ export const CapturaHomologacionPage: React.FC = () => {
       setLoading(true);
       const res = await sugerirEquivalencia(Number(testTerceroId), testCodigoExt.trim(), testDescExt.trim());
       setSugerenciaResultado(res);
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.detail || 'Error al probar sugerencia.');
+    } catch (err) {
+      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al probar sugerencia.'));
     } finally {
       setLoading(false);
     }
@@ -1318,10 +1318,10 @@ export const CapturaHomologacionPage: React.FC = () => {
                         <div className="mt-1 font-mono text-[11px]">
                           Producto Vinculado:{' '}
                           <strong>
-                            {sugerenciaResultado.sugerencia.producto_info?.producto_codigo} -{' '}
-                            {sugerenciaResultado.sugerencia.producto_info?.producto_descripcion}
+                            {sugerenciaResultado.sugerencia?.producto_info?.producto_codigo} -{' '}
+                            {sugerenciaResultado.sugerencia?.producto_info?.producto_descripcion}
                           </strong>{' '}
-                          (Factor: {sugerenciaResultado.sugerencia.factor_conversion})
+                          (Factor: {sugerenciaResultado.sugerencia?.factor_conversion})
                         </div>
                       </div>
                     ) : (

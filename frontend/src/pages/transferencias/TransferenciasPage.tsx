@@ -19,7 +19,7 @@ import {
   getTransferencias,
   type Transferencia,
 } from '../../api/transferencias'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { fechaCalendarioFormulario, fechaCalendarioLocal } from '../../utils/date'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
@@ -29,6 +29,7 @@ import { Badge } from '../../components/ui/badge'
 import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
+import { diferirCarga } from '../../utils/efectos'
 
 interface LineaTransferencia {
   producto: string
@@ -85,7 +86,7 @@ export const TransferenciasPage: React.FC = () => {
   }, [empresaActiva])
 
   useEffect(() => {
-    void cargar()
+    diferirCarga(cargar)
   }, [cargar])
 
   const guardar = async (event: FormEvent<HTMLFormElement>) => {

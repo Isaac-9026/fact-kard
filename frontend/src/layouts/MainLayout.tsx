@@ -23,7 +23,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { Badge } from '../components/ui/badge'
 
 interface NavItemConfig {

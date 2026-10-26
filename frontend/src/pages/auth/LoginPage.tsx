@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Boxes, User, Lock, AlertCircle, Loader2, ShieldCheck, CheckCircle2 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { loginApi } from '../../api/auth'
 import type { AxiosError } from 'axios'
 import { Button } from '../../components/ui/button'

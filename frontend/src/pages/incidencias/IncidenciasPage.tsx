@@ -13,15 +13,15 @@ import {
   X,
 } from 'lucide-react'
 import {
-  obtenerIncidencias,
-  obtenerRecalculos,
+  obtenerIncidenciasPaginadas,
+  obtenerRecalculosPaginados,
   resolverIncidencia,
   ejecutarRecalculo,
   type Incidencia,
   type Recalculo,
 } from '../../api/kardex'
 import { getProductos, type Producto } from '../../api/inventario'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card'
@@ -33,6 +33,11 @@ import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
 import { fechaCalendarioLocal } from '../../utils/date'
+import { diferirCarga } from '../../utils/efectos'
+import { Paginacion } from '../../components/ui/paginacion'
+import {
+  PAGE_SIZE_DEFECTO, claveConsulta, irAPagina, paginaVigente, paramsPaginacion, type EstadoPagina,
+} from '../../utils/paginacion'
 
 export const IncidenciasPage: React.FC = () => {
   const { empresaActiva, usuario } = useAuth()
@@ -40,6 +45,11 @@ export const IncidenciasPage: React.FC = () => {
   const [incidencias, setIncidencias] = useState<Incidencia[]>([])
   const [recalculos, setRecalculos] = useState<Recalculo[]>([])
   const [productos, setProductos] = useState<Producto[]>([])
+  // Bloque 7: paginación en el servidor; la página vuelve a 1 al cambiar de empresa.
+  const [totalIncidencias, setTotalIncidencias] = useState(0)
+  const [totalRecalculos, setTotalRecalculos] = useState(0)
+  const [pagIncidencias, setPagIncidencias] = useState<EstadoPagina>({ clave: '', page: 1 })
+  const [pagRecalculos, setPagRecalculos] = useState<EstadoPagina>({ clave: '', page: 1 })
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -54,28 +64,48 @@ export const IncidenciasPage: React.FC = () => {
 
   const esAdmin = Boolean(usuario?.es_admin_global || empresaActiva?.rol === 'ADMIN')
 
+  const claveEmpresa = claveConsulta(empresaActiva?.id)
+  const pageIncidencias = paginaVigente(pagIncidencias, claveEmpresa)
+  const pageRecalculos = paginaVigente(pagRecalculos, claveEmpresa)
+
   const cargar = useCallback(async () => {
     if (!empresaActiva) return
     setLoading(true)
     try {
-      const [listaIncidencias, listaRecalculos, listaProductos] = await Promise.all([
-        obtenerIncidencias(),
-        obtenerRecalculos(),
-        getProductos(),
+      const [listaIncidencias, listaRecalculos] = await Promise.all([
+        obtenerIncidenciasPaginadas(paramsPaginacion(pageIncidencias)),
+        obtenerRecalculosPaginados(paramsPaginacion(pageRecalculos)),
       ])
-      setIncidencias(listaIncidencias)
-      setRecalculos(listaRecalculos)
-      setProductos(listaProductos)
+      setIncidencias(listaIncidencias.results)
+      setTotalIncidencias(listaIncidencias.count)
+      setRecalculos(listaRecalculos.results)
+      setTotalRecalculos(listaRecalculos.count)
     } catch {
       setError('No se pudo cargar la información del motor Kardex.')
     } finally {
       setLoading(false)
     }
-  }, [empresaActiva])
+  }, [empresaActiva, pageIncidencias, pageRecalculos])
 
   useEffect(() => {
-    void cargar()
+    diferirCarga(cargar)
   }, [cargar])
+
+  // Catálogo de productos para el formulario de recálculo (no depende de la página).
+  useEffect(() => {
+    if (!empresaActiva) return
+    let ignorar = false
+    getProductos()
+      .then((lista) => {
+        if (!ignorar) setProductos(lista)
+      })
+      .catch(() => {
+        if (!ignorar) setError('No se pudo cargar la información del motor Kardex.')
+      })
+    return () => {
+      ignorar = true
+    }
+  }, [empresaActiva])
 
   const cambiarEstado = async (id: number, nuevoEstado: 'RESUELTA' | 'DESCARTADA') => {
     setError(null)
@@ -161,10 +191,10 @@ export const IncidenciasPage: React.FC = () => {
       <Tabs value={tab} onValueChange={(val) => setTab(val as 'incidencias' | 'recalculos')}>
         <TabsList>
           <TabsTrigger value="incidencias" icon={<AlertTriangle className="h-3.5 w-3.5" />}>
-            Incidencias Contables ({incidencias.length})
+            Incidencias Contables ({totalIncidencias})
           </TabsTrigger>
           <TabsTrigger value="recalculos" icon={<History className="h-3.5 w-3.5" />}>
-            Historial de Recálculos Cronológicos ({recalculos.length})
+            Historial de Recálculos Cronológicos ({totalRecalculos})
           </TabsTrigger>
         </TabsList>
 
@@ -286,6 +316,17 @@ export const IncidenciasPage: React.FC = () => {
                   </TableBody>
                 </Table>
               )}
+              {totalIncidencias > 0 && (
+                <Paginacion
+                  page={pageIncidencias}
+                  pageSize={PAGE_SIZE_DEFECTO}
+                  count={totalIncidencias}
+                  enPagina={incidencias.length}
+                  cargando={loading}
+                  etiqueta="incidencias"
+                  onCambiarPagina={(page) => setPagIncidencias(irAPagina(claveEmpresa, page))}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -341,7 +382,7 @@ export const IncidenciasPage: React.FC = () => {
           {/* Tabla de Historial de Recálculos */}
           <Card>
             <CardHeader>
-              <CardTitle>Historial de Recálculos Cronológicos ({recalculos.length})</CardTitle>
+              <CardTitle>Historial de Recálculos Cronológicos ({totalRecalculos})</CardTitle>
               <CardDescription>
                 Trazabilidad de recálculos de CPP activados de forma manual o automática por el motor M2.
               </CardDescription>
@@ -404,6 +445,15 @@ export const IncidenciasPage: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
+              <Paginacion
+                page={pageRecalculos}
+                pageSize={PAGE_SIZE_DEFECTO}
+                count={totalRecalculos}
+                enPagina={recalculos.length}
+                cargando={loading}
+                etiqueta="recálculos"
+                onCambiarPagina={(page) => setPagRecalculos(irAPagina(claveEmpresa, page))}
+              />
             </CardContent>
           </Card>
         </TabsContent>

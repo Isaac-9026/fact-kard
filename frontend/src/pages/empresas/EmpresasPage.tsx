@@ -23,7 +23,7 @@ import {
   type Establecimiento,
   type Moneda,
 } from '../../api/empresas'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card'
@@ -33,6 +33,7 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
+import { diferirCarga } from '../../utils/efectos'
 
 const mensajeError = (error: unknown) => {
   if (axios.isAxiosError(error)) {
@@ -113,12 +114,12 @@ export const EmpresasPage: React.FC = () => {
   }, [refrescarEmpresasDisponibles])
 
   useEffect(() => {
-    if (!empresaActiva) {
-      setEstablecimientos([])
-      setConfig(null)
-      return
-    }
     const cargar = async () => {
+      if (!empresaActiva) {
+        setEstablecimientos([])
+        setConfig(null)
+        return
+      }
       setError('')
       try {
         await cargarDatosEmpresa()
@@ -126,7 +127,7 @@ export const EmpresasPage: React.FC = () => {
         setError(mensajeError(err))
       }
     }
-    void cargar()
+    diferirCarga(cargar)
   }, [cargarDatosEmpresa, empresaActiva])
 
   const ejecutar = async (accion: () => Promise<void>, mensaje: string) => {

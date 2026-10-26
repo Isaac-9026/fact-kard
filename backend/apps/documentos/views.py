@@ -76,12 +76,23 @@ class DocumentoListCreateView(generics.ListCreateAPIView):
         search = self.request.query_params.get('search')
         if search:
             search = search.strip()
-            qs = qs.filter(
+            condicion = (
                 Q(serie_normalizada__icontains=search) |
                 Q(numero_normalizado__icontains=search) |
                 Q(ruc_emisor__icontains=search) |
                 Q(tercero__razon_social__icontains=search)
             )
+            # Bloque 7: el buscador del frontend admite "SERIE-NUMERO" (antes se filtraba
+            # en el navegador sobre "F001-123"); ahora la búsqueda se hace aquí.
+            if '-' in search:
+                serie, _, numero = search.partition('-')
+                if serie and numero:
+                    condicion |= Q(serie_normalizada__iendswith=serie, numero_normalizado__istartswith=numero)
+                elif serie:
+                    condicion |= Q(serie_normalizada__iendswith=serie)
+                elif numero:
+                    condicion |= Q(numero_normalizado__istartswith=numero)
+            qs = qs.filter(condicion)
 
         return qs.order_by('-fecha_emision', '-id')
 

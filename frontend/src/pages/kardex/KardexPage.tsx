@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, type FormEvent } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import {
   obtenerKardexValorizado,
   exportarKardexExcel,
@@ -11,6 +11,13 @@ import { getProductos, getAlmacenes, type Producto, type Almacen } from '../../a
 import { obtenerPeriodos, type Periodo } from '../../api/periodos';
 import { obtenerTiposOperacion, type TipoOperacion } from '../../api/catalogos';
 import { filtrosKardexDesdeFormulario } from '../../utils/kardexFiltros';
+import { mensajeDeError } from '../../utils/errores';
+import { paramsPaginacion } from '../../utils/paginacion';
+import { Paginacion } from '../../components/ui/paginacion';
+
+// Bloque 7: el Kardex se pide por páginas; el resumen y el saldo inicial siguen siendo del
+// rango completo (los calcula el backend). Excel y Formato 13.1 no se paginan.
+const KARDEX_PAGE_SIZE = 100;
 import {
   BookOpenCheck,
   FileDown,
@@ -83,24 +90,34 @@ export const KardexPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [exporting, setExporting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Última consulta aplicada (filtros + página) y total de movimientos del rango.
+  const [consulta, setConsulta] = useState<{ filtros: KardexFiltros; page: number }>({ filtros: {}, page: 1 });
+  const [totalMovimientos, setTotalMovimientos] = useState(0);
 
   const saldoInicial = filaSaldoInicialKardex(resumen, saldosIniciales);
+  // El saldo inicial va antes del primer movimiento: solo se muestra en la página 1.
+  const mostrarSaldoInicial = saldoInicial.mostrar && consulta.page === 1;
 
   // Ejecución de la consulta contable con una instantánea estable de filtros.
-  const cargarKardex = useCallback(async (filtros: KardexFiltros) => {
+  // Nuevos filtros o cambio de empresa: página 1. La navegación pasa la página pedida.
+  const cargarKardex = useCallback(async (filtros: KardexFiltros, page: number = 1) => {
     setLoading(true);
     setError(null);
+    setConsulta({ filtros, page });
     try {
-      const res = await obtenerKardexValorizado(filtros);
+      const res = await obtenerKardexValorizado(filtros, paramsPaginacion(page, KARDEX_PAGE_SIZE));
       setMovimientos(res.movimientos);
+      setTotalMovimientos(res.paginacion?.count ?? res.movimientos.length);
       setResumen(res.resumen);
       setSaldosIniciales(res.saldos_iniciales ?? []);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error al consultar Kardex', err);
       setError(
-        err?.response?.data?.detail ||
-          err?.response?.data?.message ||
+        mensajeDeError(
+          err,
+          ['detail', 'message'],
           'No se pudo cargar el Kardex Valorizado. Verifique los filtros y conexión.'
+        )
       );
     } finally {
       setLoading(false);
@@ -428,7 +445,7 @@ export const KardexPage: React.FC = () => {
               Movimientos Contables Registrados
             </CardTitle>
             <CardDescription className="text-xs">
-              <span className="font-mono font-semibold text-slate-900">{movimientos.length}</span>{' '}
+              <span className="font-mono font-semibold text-slate-900">{totalMovimientos}</span>{' '}
               movimiento(s) valorizados cronológicamente por el motor CPP
             </CardDescription>
           </div>
@@ -509,7 +526,7 @@ export const KardexPage: React.FC = () => {
               </thead>
 
               <tbody className="divide-y divide-slate-100">
-                {saldoInicial.mostrar && (
+                {mostrarSaldoInicial && (
                   <tr className="bg-slate-50/70 font-semibold text-slate-700">
                     <td colSpan={11} className="py-2 px-3 text-right">
                       SALDO INICIAL
@@ -522,7 +539,7 @@ export const KardexPage: React.FC = () => {
                     <td className="py-2 px-3 text-right font-mono tabular-nums">S/ {formatMoney(saldoInicial.valor)}</td>
                   </tr>
                 )}
-                {saldoInicial.mostrar && movimientos.length === 0 && (
+                {mostrarSaldoInicial && movimientos.length === 0 && (
                   <tr>
                     <td colSpan={14} className="py-3 px-3 text-center text-slate-400">
                       Sin movimientos en el rango; el saldo final es el saldo inicial.
@@ -662,6 +679,17 @@ export const KardexPage: React.FC = () => {
               )}
             </table>
           </div>
+        )}
+        {!loading && totalMovimientos > 0 && (
+          <Paginacion
+            page={consulta.page}
+            pageSize={KARDEX_PAGE_SIZE}
+            count={totalMovimientos}
+            enPagina={movimientos.length}
+            cargando={loading}
+            etiqueta="movimientos"
+            onCambiarPagina={(page) => void cargarKardex(consulta.filtros, page)}
+          />
         )}
       </Card>
     </div>

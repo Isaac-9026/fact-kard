@@ -153,6 +153,12 @@ class Movimiento(models.Model):
                 fields=['periodo'],
                 name='ix_movimiento_periodo'
             ),
+            # Bloque 7: orden cronológico de TODA la empresa (Kardex sin filtro de producto y
+            # /api/kardex/movimientos/ paginado). ix_movimiento_orden empieza por producto.
+            models.Index(
+                fields=['empresa', 'fecha_movimiento', 'prioridad_dia', 'secuencia', 'id'],
+                name='ix_movimiento_empresa_fecha'
+            ),
         ]
 
     def __str__(self):

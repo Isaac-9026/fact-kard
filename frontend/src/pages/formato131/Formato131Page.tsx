@@ -11,7 +11,7 @@ import {
   type PilotoReal,
   type PilotoResultado,
 } from '../../api/formato131';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import {
   FileCheck2,
   FileDown,

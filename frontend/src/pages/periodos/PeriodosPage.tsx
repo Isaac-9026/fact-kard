@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useState, useMemo } from 'react'
+import { diferirCarga } from '../../utils/efectos'
 import {
   CalendarRange,
   Plus,
@@ -12,7 +13,7 @@ import {
   Calendar,
   Layers,
 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../context/useAuth'
 import {
   obtenerPeriodos,
   crearPeriodo,
@@ -32,6 +33,14 @@ import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Modal } from '../../components/ui/modal'
 
+/** Primer y último día del mes (AAAA-MM-DD); null si año o mes no son válidos. */
+const rangoDelMes = (year: number, month: number) => {
+  if (!year || !month) return null
+  const mm = String(month).padStart(2, '0')
+  const lastDate = new Date(year, month, 0).getDate()
+  return { inicio: `${year}-${mm}-01`, fin: `${year}-${mm}-${String(lastDate).padStart(2, '0')}` }
+}
+
 export const PeriodosPage: React.FC = () => {
   const { empresaActiva, usuario } = useAuth()
   const esAdmin = Boolean(usuario?.es_admin_global || empresaActiva?.rol === 'ADMIN')
@@ -45,8 +54,8 @@ export const PeriodosPage: React.FC = () => {
   const [modalCrearOpen, setModalCrearOpen] = useState(false)
   const [anio, setAnio] = useState(() => new Date().getFullYear())
   const [mes, setMes] = useState(() => new Date().getMonth() + 1)
-  const [fechaInicio, setFechaInicio] = useState('')
-  const [fechaFin, setFechaFin] = useState('')
+  const [fechaInicio, setFechaInicio] = useState(() => rangoDelMes(anio, mes)?.inicio ?? '')
+  const [fechaFin, setFechaFin] = useState(() => rangoDelMes(anio, mes)?.fin ?? '')
   const [guardandoPeriodo, setGuardandoPeriodo] = useState(false)
 
   // Modal: Configurar IGV
@@ -62,21 +71,21 @@ export const PeriodosPage: React.FC = () => {
   const [motivoReapertura, setMotivoReapertura] = useState('')
   const [reabriendo, setReabriendo] = useState(false)
 
-  // Auto-compute default dates when year or month changes in create modal
-  useEffect(() => {
-    if (anio && mes) {
-      const year = Number(anio)
-      const month = Number(mes)
-      const firstDay = `${year}-${String(month).padStart(2, '0')}-01`
-      const lastDate = new Date(year, month, 0).getDate()
-      const lastDay = `${year}-${String(month).padStart(2, '0')}-${String(lastDate).padStart(2, '0')}`
-      setFechaInicio(firstDay)
-      setFechaFin(lastDay)
+  // Fechas por defecto del modal de creación: se recalculan al cambiar año o mes
+  // (antes en un efecto; ahora en el mismo evento, sin render adicional).
+  const actualizarAnioMes = (nuevoAnio: number, nuevoMes: number) => {
+    setAnio(nuevoAnio)
+    setMes(nuevoMes)
+    const rango = rangoDelMes(nuevoAnio, nuevoMes)
+    if (rango) {
+      setFechaInicio(rango.inicio)
+      setFechaFin(rango.fin)
     }
-  }, [anio, mes])
+  }
 
-  const cargarPeriodos = async () => {
-    if (!empresaActiva) return
+  const empresaId = empresaActiva?.id
+  const cargarPeriodos = useCallback(async () => {
+    if (!empresaId) return
     setLoading(true)
     setError(null)
     try {
@@ -88,11 +97,11 @@ export const PeriodosPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [empresaId])
 
   useEffect(() => {
-    cargarPeriodos()
-  }, [empresaActiva])
+    diferirCarga(cargarPeriodos)
+  }, [cargarPeriodos, empresaActiva])
 
   // Handlers
   const handleCrearPeriodo = async (e: React.FormEvent) => {
@@ -452,14 +461,14 @@ export const PeriodosPage: React.FC = () => {
                   min={2000}
                   max={2100}
                   value={anio}
-                  onChange={(e) => setAnio(Number(e.target.value))}
+                  onChange={(e) => actualizarAnioMes(Number(e.target.value), mes)}
                   required
                   className="font-mono tabular-nums"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label required>Mes Calendario</Label>
-                <Select value={mes} onChange={(e) => setMes(Number(e.target.value))} required>
+                <Select value={mes} onChange={(e) => actualizarAnioMes(anio, Number(e.target.value))} required>
                   {[
                     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                     'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre',

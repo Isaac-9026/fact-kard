@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 from decouple import config, Csv
 
-from config.seguridad import resolver_secret_key, validar_allowed_hosts
+from config.cache import configurar_caches
+from config.seguridad import resolver_secret_key, validar_allowed_hosts, validar_configuracion_produccion
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -136,6 +137,22 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Bloque 6: duración del token (segundos) y límite de intentos de login por IP.
 TOKEN_MAX_AGE_SECONDS = config('TOKEN_MAX_AGE_SECONDS', default=60 * 60 * 24 * 7, cast=int)
 LOGIN_THROTTLE_RATE = config('LOGIN_THROTTLE_RATE', default='10/min')
+
+# Bloque 7: caché (contadores del throttling). Vacía → memoria local; Redis en producción.
+CACHES = configurar_caches(
+    config('CACHE_URL', default='') or config('REDIS_URL', default=''),
+    prefijo=config('CACHE_KEY_PREFIX', default='fact-kard'),
+)
+
+# Bloque 7: sesión por cookie HttpOnly — PREPARADA, desactivada por defecto.
+# Activarla exige migrar el frontend (ver docs/SEGURIDAD_TOKEN_LOCALSTORAGE.md). Con la
+# cookie activa el login ya no devuelve el token en el cuerpo (no hay segundo token en JS).
+AUTH_COOKIE_ENABLED = config('AUTH_COOKIE_ENABLED', default=False, cast=bool)
+AUTH_COOKIE_NAME = config('AUTH_COOKIE_NAME', default='fk_sesion')
+AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE', default=not DEBUG, cast=bool)
+AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax')
+AUTH_COOKIE_DOMAIN = config('AUTH_COOKIE_DOMAIN', default='') or None
+AUTH_COOKIE_PATH = config('AUTH_COOKIE_PATH', default='/api/')
 # Bloque 6: tamaño máximo de un archivo de captura (bytes).
 CAPTURA_MAX_BYTES = config('CAPTURA_MAX_BYTES', default=10 * 1024 * 1024, cast=int)
 
@@ -172,6 +189,8 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG and config('CORS_ALLOW_ALL_ORIGINS', default=Fals
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'x-empresa-id',
 ]
+# Bloque 7: credenciales (cookies) entre orígenes solo si la sesión por cookie está activa.
+CORS_ALLOW_CREDENTIALS = AUTH_COOKIE_ENABLED
 
 # CSRF y cookies (SEC-001). En producción las cookies solo viajan por HTTPS.
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
@@ -180,3 +199,26 @@ CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=not DEBUG, cast=bool)
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=0, cast=int)
 SECURE_CONTENT_TYPE_NOSNIFF = True
+# Bloque 7: detrás de un proxy inverso que termina TLS (nginx, balanceador), Django debe
+# confiar en X-Forwarded-Proto para saber que la petición original fue HTTPS.
+if config('SECURE_PROXY_SSL_HEADER_HTTPS', default=False, cast=bool):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+X_FRAME_OPTIONS = 'DENY'
+SECURE_REFERRER_POLICY = 'same-origin'
+# Intranet sin certificado: excepción EXPLÍCITA a las reglas de HTTPS (ver config/seguridad.py).
+PRODUCCION_SIN_HTTPS = config('PRODUCCION_SIN_HTTPS', default=False, cast=bool)
+
+# Bloque 7: con DEBUG=False se rechaza una configuración insegura al arrancar.
+if not EJECUTANDO_TESTS:
+    validar_configuracion_produccion(
+        debug=DEBUG,
+        token_max_age=TOKEN_MAX_AGE_SECONDS,
+        cors_origins=CORS_ALLOWED_ORIGINS,
+        csrf_trusted_origins=CSRF_TRUSTED_ORIGINS,
+        session_cookie_secure=SESSION_COOKIE_SECURE,
+        csrf_cookie_secure=CSRF_COOKIE_SECURE,
+        sin_https=PRODUCCION_SIN_HTTPS,
+        auth_cookie_enabled=AUTH_COOKIE_ENABLED,
+        auth_cookie_secure=AUTH_COOKIE_SECURE,
+        auth_cookie_samesite=AUTH_COOKIE_SAMESITE,
+    )

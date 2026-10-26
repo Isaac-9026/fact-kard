@@ -100,7 +100,7 @@ class RecalculoListCreateView(BaseMixin, generics.ListCreateAPIView):
     serializer_class = RecalculoSerializer
     pagination_class = PaginacionOpcional
     def get_queryset(self):
-        return Recalculo.objects.filter(empresa_id=self.request.empresa_id).prefetch_related('detalles').order_by('-ejecutado_en')
+        return Recalculo.objects.filter(empresa_id=self.request.empresa_id).prefetch_related('detalles').order_by('-ejecutado_en', '-id')  # Bloque 7: orden estable al paginar
     def create(self, request, *args, **kwargs):
         EsAdminEmpresa().has_permission(request, self)
         producto = get_object_or_404(Producto.objects.filter(empresa_id=request.empresa_id), pk=request.data.get('producto'))
