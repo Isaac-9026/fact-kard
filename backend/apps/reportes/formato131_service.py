@@ -42,6 +42,9 @@ def validar_filtros_formato(*, empresa_id, periodo_id, establecimiento_id=None, 
 
 
 def _documento_sunat(movimiento):
+    # BE-005: el extorno se reporta con el comprobante del movimiento que anula.
+    if movimiento.movimiento_extornado_id and movimiento.movimiento_extornado:
+        return _documento_sunat(movimiento.movimiento_extornado)
     if movimiento.documento_detalle_id:
         documento = movimiento.documento_detalle.documento
         return {
@@ -125,6 +128,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         'documento_detalle__documento__tipo_comprobante',
         'nota_interna_detalle__nota_interna',
         'transferencia_detalle__transferencia',
+        'movimiento_extornado__tipo_operacion',
+        'movimiento_extornado__documento_detalle__documento__tipo_comprobante',
     )
     if establecimiento:
         movimientos = movimientos.filter(almacen__establecimiento_id=establecimiento.id)
@@ -250,6 +255,13 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 'fecha_emision': movimiento.fecha_movimiento.isoformat(),
                 'documento': _documento_sunat(movimiento),
                 'tipo_operacion': movimiento.tipo_operacion.codigo_sunat or '',
+                'tipo_operacion_interno': movimiento.tipo_operacion.codigo_interno,
+                'es_extorno': movimiento.es_extorno,
+                'movimiento_extornado_id': movimiento.movimiento_extornado_id,
+                'operacion_extornada': (
+                    movimiento.movimiento_extornado.tipo_operacion.codigo_interno
+                    if movimiento.movimiento_extornado_id and movimiento.movimiento_extornado else None
+                ),
                 'entrada': entrada,
                 'salida': salida,
                 'saldo_final': {
@@ -267,11 +279,18 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
             # CON-010: sin movimientos propios, el CPP al cierre del período sigue siendo
             # histórico (otros establecimientos pueden haberlo movido dentro del período).
             cpp_global = _cpp_historico(empresa_id=empresa_id, producto_id=prod_id, fecha_fin=periodo.fecha_fin)
-        saldo_final_resumen = {
-            'cantidad': texto_decimal(saldo_fisico),
-            'costo_unitario': texto_decimal(cpp_global),
-            'costo_total': texto_decimal(saldo_fisico * cpp_global),
-        } if not filas else filas[-1]['saldo_final']
+        if filas:
+            saldo_final_resumen = filas[-1]['saldo_final']
+        elif cpp_global == cpp_inicial:
+            # Bloque 3: sin movimientos y sin cambio de CPP el saldo final es exactamente el
+            # inicial valorizado (no se reconstruye como cantidad × CPP).
+            saldo_final_resumen = dict(saldo_inicial_valorizado)
+        else:
+            saldo_final_resumen = {
+                'cantidad': texto_decimal(saldo_fisico),
+                'costo_unitario': texto_decimal(cpp_global),
+                'costo_total': texto_decimal(saldo_fisico * cpp_global),
+            }
 
         microdiferencia = ZERO
         detalle_cierre = cierre_detalles.get((estab_id, prod_id))

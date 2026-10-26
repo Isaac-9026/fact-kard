@@ -772,6 +772,7 @@ class DocumentosApiTest(TestCase):
                     'tipo_operacion': self.tipo_op_compra.id,
                     'cantidad_original': '1.00000000',
                     'precio_unitario': '10.00000000',
+                    'igv': '1.80',  # Bloque 3: línea gravada
                 }
             ]
         }

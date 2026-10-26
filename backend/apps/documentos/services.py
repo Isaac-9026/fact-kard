@@ -15,14 +15,12 @@ from apps.documentos.reglas import (
     validar_linea_nota,
     validar_naturaleza_linea,
 )
+from apps.documentos.afectacion_igv import resolver_afectacion, validar_igv_linea
 from apps.empresas.models import Empresa, Periodo, ConfigIgvPeriodo
 from apps.inventario.models import Almacen, Producto, ProductoUnidad, Tercero, ProductoEquivalencia
 
 
-# CON-009: tasa general del IGV (Perú). No existe aún un campo de afectación por
-# línea; por eso se acepta IGV 0 (exonerado/inafecto/exportación) o el 18 % de la base.
-TASA_IGV = Decimal('0.18')
-TOLERANCIA_IGV = Decimal('0.01')
+# CON-009 / Bloque 3: el IGV se valida por línea según su afectación (afectacion_igv.py).
 
 
 def decimal_contable(valor, *, campo, linea_num, defecto):
@@ -40,22 +38,11 @@ def decimal_contable(valor, *, campo, linea_num, defecto):
     return numero
 
 
-def validar_igv_linea(*, igv, precio_unitario, cantidad_original, naturaleza, es_bonificacion, linea_num):
-    if es_bonificacion or igv == Decimal('0'):
-        return
+def base_imponible_linea(*, precio_unitario, cantidad_original, naturaleza):
     # Mismo criterio de base imponible que usa el motor para los ajustes de valor.
     if naturaleza == 'AJUSTE_VALOR' and cantidad_original == Decimal('0'):
-        base = precio_unitario
-    else:
-        base = precio_unitario * cantidad_original
-    esperado = (base * TASA_IGV).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    if abs(igv - esperado) > TOLERANCIA_IGV:
-        raise ValidationError({
-            'detalles': (
-                f"Línea {linea_num}: el IGV {igv.normalize():f} no corresponde a la base {base.normalize():f} "
-                f"(18 % = {esperado:f}). Envíe 0 si la línea es exonerada o inafecta."
-            )
-        })
+        return precio_unitario
+    return precio_unitario * cantidad_original
 
 
 def normalizar_serie(serie: Optional[str]) -> str:
@@ -462,9 +449,16 @@ def crear_documento(
             raise ValidationError({'detalles': f"Línea {linea_num}: El IGV no puede ser negativo."})
 
         es_bonificacion = bool(linea_data.get('es_bonificacion', False))
+        afectacion_igv, codigo_afectacion_igv = resolver_afectacion(
+            afectacion=linea_data.get('afectacion_igv'), codigo=linea_data.get('codigo_afectacion_igv'),
+            es_bonificacion=es_bonificacion, linea_num=linea_num,
+        )
         validar_igv_linea(
-            igv=igv_linea, precio_unitario=precio_unitario, cantidad_original=cantidad_original,
-            naturaleza=tipo_op.naturaleza, es_bonificacion=es_bonificacion, linea_num=linea_num,
+            igv=igv_linea, afectacion=afectacion_igv, linea_num=linea_num,
+            base=base_imponible_linea(
+                precio_unitario=precio_unitario, cantidad_original=cantidad_original,
+                naturaleza=tipo_op.naturaleza,
+            ),
         )
 
         # Cálculo de Costo Unitario PEN
@@ -547,6 +541,8 @@ def crear_documento(
             porcentaje_credito_fiscal_aplicado=porcentaje_cf,
             costo_unitario_pen=costo_unitario_pen,
             es_bonificacion=es_bonificacion,
+            afectacion_igv=afectacion_igv,
+            codigo_afectacion_igv=codigo_afectacion_igv,
             detalle_origen=detalle_origen
         )
 

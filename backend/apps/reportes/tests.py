@@ -521,8 +521,9 @@ class KardexReportesTest(TestCase):
         self.assertEqual(len(movs_g), 4)
         # Fila 1: Saldo 100
         self.assertEqual(Decimal(str(movs_g[0]['saldo_cantidad'])), Decimal('100.00000000'))
-        # Fila 2: Entra 1 -> Saldo 101
-        self.assertEqual(Decimal(str(movs_g[1]['saldo_cantidad'])), Decimal('101.00000000'))
+        # Fila 2: entra 1 por transferencia. CON-014 (Bloque 3): el consolidado muestra el
+        # saldo real de la empresa, que una transferencia no altera (antes sumaba 101).
+        self.assertEqual(Decimal(str(movs_g[1]['saldo_cantidad'])), Decimal('100.00000000'))
         # Fila 3: Sale 1 -> Saldo 100
         self.assertEqual(Decimal(str(movs_g[2]['saldo_cantidad'])), Decimal('100.00000000'))
         # Fila 4: Sale 5 -> Saldo 95

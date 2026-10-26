@@ -75,6 +75,8 @@ class Command(BaseCommand):
             ('NC_DESCUENTO_COMPRA', '99', 'DESCUENTO EN COMPRA (AJUSTE VALOR)', 'AJUSTE_VALOR', False, True, 'DOCUMENTO'),
             ('ND_CARGO_COMPRA', '99', 'CARGO EN COMPRA (AJUSTE VALOR)', 'AJUSTE_VALOR', False, True, 'DOCUMENTO'),
             ('NC_VENTA_SIN_DEVOLUCION', '99', 'DESCUENTO EN VENTA SIN DEVOLUCION', 'AJUSTE_VALOR', False, False, 'DOCUMENTO'),
+            # Bloque 3: cargo en venta (ND); no afecta el costo del inventario.
+            ('ND_CARGO_VENTA', '99', 'CARGO EN VENTA (NOTA DE DEBITO)', 'AJUSTE_VALOR', False, False, 'DOCUMENTO'),
             ('MERMA', '13', 'MERMA DE INVENTARIO', 'SALIDA', True, True, 'NOTA_INTERNA'),
             ('DESMEDRO', '14', 'DESMEDRO DE INVENTARIO', 'SALIDA', True, True, 'NOTA_INTERNA'),
             ('CONSUMO_INTERNO', '10', 'CONSUMO INTERNO', 'SALIDA', True, True, 'NOTA_INTERNA'),
@@ -85,6 +87,10 @@ class Command(BaseCommand):
             ('TRANSFERENCIA_SALIDA', '11', 'TRANSFERENCIA ENTRE ALMACENES (SALIDA)', 'SALIDA', True, True, 'TRANSFERENCIA'),
             ('TRANSFERENCIA_ENTRADA', '21', 'TRANSFERENCIA ENTRE ALMACENES (ENTRADA)', 'ENTRADA', True, True, 'TRANSFERENCIA'),
             ('RESIDUO_AUTOMATICO', '99', 'AJUSTE AUTOMATICO DE RESIDUO', 'AJUSTE_VALOR', True, True, 'MOTOR'),
+            # BE-005: extornos por anulación. Tabla 12 no tiene código específico → 99 (OTROS).
+            ('EXTORNO_ENTRADA', '99', 'EXTORNO POR ANULACION (ENTRADA)', 'ENTRADA', True, True, 'MOV_EXTORNADO'),
+            ('EXTORNO_SALIDA', '99', 'EXTORNO POR ANULACION (SALIDA)', 'SALIDA', True, True, 'MOV_EXTORNADO'),
+            ('EXTORNO_AJUSTE_VALOR', '99', 'EXTORNO POR ANULACION (AJUSTE DE VALOR)', 'AJUSTE_VALOR', True, True, 'MOV_EXTORNADO'),
         ]
         for cod_int, cod_sun, desc, nat, interna, afecta, origen in tipos_operacion:
             TipoOperacion.objects.update_or_create(

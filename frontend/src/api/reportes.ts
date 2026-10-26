@@ -34,10 +34,14 @@ export interface KardexResumen {
   total_entradas_valor: string;
   total_salidas_cantidad: string;
   total_salidas_valor: string;
+  saldo_inicial_cantidad?: string;
+  saldo_inicial_valor?: string;
   saldo_final_cantidad: string;
   cpp_final: string | null;
   saldo_final_valor: string;
   total_registros: number;
+  // CON-014: EMPRESA = saldo contable real; ALMACEN = stock del almacén × CPP global.
+  ambito_saldo?: 'EMPRESA' | 'ALMACEN';
 }
 
 export interface KardexFiltros {

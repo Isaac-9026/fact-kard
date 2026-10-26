@@ -14,6 +14,7 @@ from apps.kardex.models import (
 )
 
 Q8 = Decimal('0.00000001')
+MAX_PASADAS_DEPENDENCIA = 25
 Q6 = Decimal('0.000001')
 ZERO = Decimal('0.00000000')
 
@@ -101,6 +102,22 @@ def _incidencia(**kwargs):
     )[0]
 
 
+def _estado_previo(movimiento):
+    """(cantidad, valor) de empresa tras el movimiento inmediatamente anterior en el orden oficial."""
+    f, p, sec = movimiento.fecha_movimiento, movimiento.prioridad_dia, movimiento.secuencia
+    anterior = Movimiento.objects.filter(
+        empresa_id=movimiento.empresa_id, producto_id=movimiento.producto_id, valorizacion__isnull=False,
+    ).filter(
+        Q(fecha_movimiento__lt=f)
+        | Q(fecha_movimiento=f, prioridad_dia__lt=p)
+        | Q(fecha_movimiento=f, prioridad_dia=p, secuencia__lt=sec)
+        | Q(fecha_movimiento=f, prioridad_dia=p, secuencia=sec, id__lt=movimiento.id)
+    ).select_related('valorizacion').order_by('-fecha_movimiento', '-prioridad_dia', '-secuencia', '-id').first()
+    if anterior is None:
+        return ZERO, ZERO
+    return anterior.valorizacion.saldo_cantidad_empresa, anterior.valorizacion.saldo_valor_empresa
+
+
 def _residuo(saldo, movimiento, periodo):
     if saldo.cantidad_total != ZERO or saldo.valor_total_pen == ZERO:
         return
@@ -125,10 +142,14 @@ def _residuo(saldo, movimiento, periodo):
         valor_ajuste_pen=-saldo.valor_total_pen, generado_por_motor=True,
         creado_por_id=movimiento.creado_por_id,
     )
+    # CON-014: el residuo queda ordenado (prioridad 3) antes de la salida que lo originó;
+    # su saldo es el estado en SU posición + el ajuste, para que el Kardex sea continuo.
+    pos_cant, pos_valor = _estado_previo(ajuste)
+    pos_valor = q8(pos_valor - saldo.valor_total_pen)
     ValorizacionMovimiento.objects.create(
         movimiento=ajuste, costo_unitario_pen=ZERO,
         valor_movimiento_pen=-saldo.valor_total_pen,
-        saldo_cantidad_empresa=ZERO, saldo_valor_empresa=ZERO, cpp_empresa=ZERO,
+        saldo_cantidad_empresa=pos_cant, saldo_valor_empresa=pos_valor, cpp_empresa=cpp(pos_valor, pos_cant),
     )
     saldo.valor_total_pen = ZERO
     saldo.cpp_pen = ZERO
@@ -207,7 +228,7 @@ def aplicar_movimiento(*, empresa_id, producto_id, almacen_id, periodo, tipo_ope
     return movimiento
 
 
-def _crear_residuo_en_recalculo(*, movimiento, tipo, importe, usuario_id):
+def _crear_residuo_en_recalculo(*, movimiento, tipo, importe, usuario_id, estado_posicion=(ZERO, ZERO)):
     """Ajuste RESIDUO_AUTOMATICO nuevo surgido en un recálculo (mismo criterio que _residuo)."""
     secuencia = siguiente_secuencia_movimiento(
         empresa_id=movimiento.empresa_id, producto_id=movimiento.producto_id,
@@ -220,9 +241,11 @@ def _crear_residuo_en_recalculo(*, movimiento, tipo, importe, usuario_id):
         naturaleza='AJUSTE_VALOR', cantidad_base=ZERO, valor_ajuste_pen=importe,
         generado_por_motor=True, creado_por_id=usuario_id or movimiento.creado_por_id,
     )
+    # CON-014: saldo en la posición del residuo (antes de las salidas del día) + ajuste.
+    pos_cant, pos_valor = estado_posicion[0], q8(estado_posicion[1] + importe)
     ValorizacionMovimiento.objects.create(
         movimiento=ajuste, costo_unitario_pen=ZERO, valor_movimiento_pen=importe,
-        saldo_cantidad_empresa=ZERO, saldo_valor_empresa=ZERO, cpp_empresa=ZERO,
+        saldo_cantidad_empresa=pos_cant, saldo_valor_empresa=pos_valor, cpp_empresa=cpp(pos_valor, pos_cant),
     )
     return ajuste
 
@@ -292,18 +315,6 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
         cantidad = ZERO
         valor = ZERO
 
-    # CON-004: costo recalculado en ESTA ejecución por movimiento. Tiene prioridad
-    # sobre las valorizaciones precargadas (select_related), que quedan obsoletas
-    # en cuanto se actualizan con .update() dentro del bucle.
-    costos_recalculados = {}
-
-    def costo_de_referencia(mov_ref_id, mov_ref):
-        if mov_ref_id in costos_recalculados:
-            return costos_recalculados[mov_ref_id]
-        if mov_ref is not None and hasattr(mov_ref, 'valorizacion'):
-            return q8(mov_ref.valorizacion.costo_unitario_pen)
-        return None
-
     # CON-003: extornos presentes en el tramo recalculado, por movimiento extornado.
     extorno_de = {
         m.movimiento_extornado_id: m for m in movimientos_afectados if m.movimiento_extornado_id
@@ -324,12 +335,178 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
             and m.tipo_operacion_id == tipo_residuo.id
         )
 
-    residuos_disponibles = {}
-    for m in movimientos_afectados:
-        if es_residuo(m):
-            residuos_disponibles.setdefault(m.fecha_movimiento, []).append(m)
-    residuos_resueltos = {}   # residuo.id -> importe del ajuste
-    estado_en_residuo = {}    # residuo.id -> (cantidad, valor) en su posición, sin efecto
+    anteriores_val = {m.id: getattr(m, 'valorizacion', None) for m in movimientos_afectados}
+
+    def simular(forzados):
+        """
+        Recorre el tramo en el orden oficial SIN escribir. Devuelve los resultados y
+        las dependencias de costo del mismo día (Bloque 3: una devolución ordenada antes
+        que su movimiento origen recibe en `forzados` el costo recalculado del origen).
+        """
+        cantidad, valor = cantidad_inicial, valor_inicial
+        stocks_sim = dict(stocks)
+        # CON-004: costo recalculado en ESTA ejecución; prima sobre las valorizaciones
+        # precargadas, que quedan obsoletas al actualizarse.
+        costos = {}
+        dependencias = []
+        escrituras = []
+        incidencias = []
+        residuos_nuevos = []
+        residuos_resueltos = {}
+        estado_en_residuo = {}
+        antes_de_salidas = {}
+        residuos_disponibles = {}
+        for m in movimientos_afectados:
+            if es_residuo(m):
+                residuos_disponibles.setdefault(m.fecha_movimiento, []).append(m)
+
+        def costo_de_origen(movimiento, ref_id, ref, cpp_vigente):
+            if ref_id in costos:
+                return costos[ref_id]
+            if ref_id in ids_afectados:
+                # Origen del mismo tramo aún no procesado (p. ej. devolución de venta del
+                # mismo día: ENTRADA prioridad 2 antes que la SALIDA prioridad 4).
+                dependencias.append((movimiento.id, ref_id))
+                return forzados.get(movimiento.id, cpp_vigente)
+            if ref is not None and hasattr(ref, 'valorizacion'):
+                return q8(ref.valorizacion.costo_unitario_pen)
+            return None
+
+        def stock_negativo(movimiento):
+            incidencias.append(dict(
+                empresa_id=empresa_id, periodo_id=movimiento.periodo_id, producto_id=producto_id,
+                movimiento_id=movimiento.id, tipo='STOCK_INSUFICIENTE',
+                descripcion='El recálculo detectó stock negativo posterior.',
+            ))
+
+        for movimiento in movimientos_afectados:
+            anterior = anteriores_val[movimiento.id]
+            if es_residuo(movimiento):
+                if movimiento.id not in residuos_resueltos:
+                    estado_en_residuo[movimiento.id] = (cantidad, valor)
+                continue
+            if movimiento.prioridad_dia >= 4 and movimiento.fecha_movimiento not in antes_de_salidas:
+                antes_de_salidas[movimiento.fecha_movimiento] = (cantidad, valor)
+            cpp_vigente = cpp(valor, cantidad)
+            if movimiento.transferencia_id:
+                # Una transferencia solo redistribuye stock entre almacenes; no altera el
+                # saldo ni el CPP global de empresa + producto.
+                costo = anterior.costo_unitario_pen if anterior else cpp_vigente
+                movimiento_valor = q8(movimiento.cantidad_base * costo)
+                delta_stock = movimiento.cantidad_base if movimiento.naturaleza == 'ENTRADA' else -movimiento.cantidad_base
+                stocks_sim[movimiento.almacen_id] = q8(stocks_sim.get(movimiento.almacen_id, ZERO) + delta_stock)
+                if stocks_sim[movimiento.almacen_id] < ZERO:
+                    stock_negativo(movimiento)
+            elif movimiento.naturaleza == 'ENTRADA':
+                if movimiento.saldo_inicial_id and movimiento.saldo_inicial:
+                    movimiento_valor = q8(movimiento.saldo_inicial.valor_total_pen)
+                    costo = cpp(movimiento_valor, movimiento.cantidad_base)
+                elif movimiento.movimiento_extornado_id:
+                    # CON-003: el extorno sigue al costo recalculado del extornado; si este aún
+                    # no se procesó entra al CPP vigente y el extornado tomará este costo.
+                    if movimiento.movimiento_extornado_id in costos:
+                        costo = costos[movimiento.movimiento_extornado_id]
+                    elif movimiento.movimiento_extornado_id in ids_afectados:
+                        costo = cpp_vigente
+                    else:
+                        costo = q8(
+                            costo_de_origen(movimiento, movimiento.movimiento_extornado_id,
+                                            movimiento.movimiento_extornado, cpp_vigente)
+                            or (anterior.costo_unitario_pen if anterior else cpp_vigente)
+                        )
+                    movimiento_valor = q8(movimiento.cantidad_base * costo)
+                elif movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
+                    # CON-004 / Bloque 3: devolución al costo recalculado del movimiento origen.
+                    costo = q8(costo_de_origen(movimiento, movimiento.movimiento_origen_id,
+                                               movimiento.movimiento_origen, cpp_vigente))
+                    movimiento_valor = q8(movimiento.cantidad_base * costo)
+                else:
+                    costo = anterior.costo_unitario_pen if anterior else ZERO
+                    movimiento_valor = q8(movimiento.cantidad_base * costo)
+                cantidad = q8(cantidad + movimiento.cantidad_base)
+                valor = q8(valor + movimiento_valor)
+                stocks_sim[movimiento.almacen_id] = stocks_sim.get(movimiento.almacen_id, ZERO) + movimiento.cantidad_base
+            elif movimiento.naturaleza == 'SALIDA':
+                extorno_previo = extorno_de.get(movimiento.id)
+                if movimiento.nota_interna_detalle_id and movimiento.nota_interna_detalle.costo_unitario_pen is not None:
+                    costo = q8(movimiento.nota_interna_detalle.costo_unitario_pen)
+                elif extorno_previo is not None and extorno_previo.id in costos:
+                    # CON-003: salida ya extornada antes en el orden → mismo costo que su extorno.
+                    costo = costos[extorno_previo.id]
+                elif (movimiento.movimiento_origen_id or movimiento.es_extorno or movimiento.movimiento_extornado_id) and anterior:
+                    if movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
+                        costo = q8(costo_de_origen(movimiento, movimiento.movimiento_origen_id,
+                                                   movimiento.movimiento_origen, cpp_vigente))
+                    elif movimiento.movimiento_extornado_id and movimiento.movimiento_extornado and hasattr(movimiento.movimiento_extornado, 'valorizacion'):
+                        costo = q8(costo_de_origen(movimiento, movimiento.movimiento_extornado_id,
+                                                   movimiento.movimiento_extornado, cpp_vigente))
+                    else:
+                        costo = anterior.costo_unitario_pen
+                else:
+                    costo = cpp_vigente
+                movimiento_valor = q8(movimiento.cantidad_base * costo)
+                cantidad = q8(cantidad - movimiento.cantidad_base)
+                valor = q8(valor - movimiento_valor)
+                stocks_sim[movimiento.almacen_id] = stocks_sim.get(movimiento.almacen_id, ZERO) - movimiento.cantidad_base
+                if stocks_sim[movimiento.almacen_id] < ZERO:
+                    stock_negativo(movimiento)
+            else:
+                costo = ZERO; movimiento_valor = movimiento.valor_ajuste_pen or ZERO; valor = q8(valor + movimiento_valor)
+            costos[movimiento.id] = q8(costo)
+
+            # CON-005: cantidad 0 con valor ≠ 0 → absorber residuo o incidencia bloqueante.
+            if cantidad == ZERO and valor != ZERO:
+                if abs(valor) <= tolerancia and tipo_residuo is not None:
+                    pendientes = residuos_disponibles.get(movimiento.fecha_movimiento) or []
+                    if pendientes:
+                        residuos_resueltos[pendientes.pop(0).id] = q8(-valor)
+                    else:
+                        # Posición del nuevo residuo: tras los ajustes del día, antes de sus salidas.
+                        posicion = (antes_de_salidas.get(movimiento.fecha_movimiento, (cantidad, valor))
+                                    if movimiento.prioridad_dia >= 4 else (cantidad, valor))
+                        residuos_nuevos.append((movimiento, q8(-valor), posicion))
+                    valor = ZERO
+                else:
+                    incidencias.append(dict(
+                        empresa_id=empresa_id, periodo_id=movimiento.periodo_id, producto_id=producto_id,
+                        movimiento_id=movimiento.id, tipo='RESIDUO_VALORIZACION',
+                        descripcion=(
+                            'El residuo de valorización supera la tolerancia configurada.'
+                            if tipo_residuo is not None else
+                            'Residuo de valorización sin tipo RESIDUO_AUTOMATICO configurado.'
+                        ),
+                        detalle={'residuo': str(valor), 'tolerancia': str(tolerancia), 'origen': 'RECALCULO'},
+                    ))
+            escrituras.append((movimiento, anterior, costo, movimiento_valor, cantidad, valor))
+
+        return {
+            'cantidad': cantidad, 'valor': valor, 'stocks': stocks_sim, 'costos': costos,
+            'dependencias': dependencias, 'escrituras': escrituras, 'incidencias': incidencias,
+            'residuos_nuevos': residuos_nuevos, 'residuos_resueltos': residuos_resueltos,
+            'estado_en_residuo': estado_en_residuo,
+        }
+
+    cantidad_inicial, valor_inicial = cantidad, valor
+    # Bloque 3: resolución por dependencia causal. Si una devolución quedó antes que su
+    # origen del mismo día, se repite la simulación forzando el costo recalculado del
+    # origen hasta que coincidan (punto fijo; converge porque cada pasada acerca el CPP).
+    forzados = {}
+    for _ in range(MAX_PASADAS_DEPENDENCIA):
+        resultado = simular(forzados)
+        cambios = {
+            dep: resultado['costos'][orig] for dep, orig in resultado['dependencias']
+            if resultado['costos'].get(dep) != resultado['costos'].get(orig)
+        }
+        if not cambios:
+            break
+        forzados.update(cambios)
+    else:
+        resultado['incidencias'].append(dict(
+            empresa_id=empresa_id, periodo_id=movimientos_afectados[-1].periodo_id, producto_id=producto_id,
+            movimiento_id=None, tipo='RECALCULO_DEPENDENCIA_SIN_CONVERGER',
+            descripcion='Una devolución del mismo día no alcanzó el costo exacto de su movimiento origen.',
+            detalle={'pendientes': {str(k): str(v) for k, v in cambios.items()}},
+        ))
 
     def guardar_valorizacion(movimiento, anterior, costo, movimiento_valor, saldo_cant, saldo_valor):
         nuevo_cpp = cpp(saldo_valor, saldo_cant)
@@ -348,119 +525,27 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
             version_actual=anterior.version_actual + 1,
         )
 
-    for movimiento in movimientos_afectados:
-        anterior = getattr(movimiento, 'valorizacion', None)
-        if es_residuo(movimiento):
-            # Sin efecto en su posición; su importe se fija al evaluar el residuo del día.
-            if movimiento.id not in residuos_resueltos:
-                estado_en_residuo[movimiento.id] = (cantidad, valor)
-            continue
-        cpp_vigente = cpp(valor, cantidad)
-        if movimiento.transferencia_id:
-            # Una transferencia solo redistribuye stock entre almacenes. Sus dos
-            # movimientos conservan el mismo costo histórico y no alteran el
-            # saldo ni el CPP global de empresa + producto.
-            costo = anterior.costo_unitario_pen if anterior else cpp_vigente
-            movimiento_valor = q8(movimiento.cantidad_base * costo)
-            delta_stock = movimiento.cantidad_base if movimiento.naturaleza == 'ENTRADA' else -movimiento.cantidad_base
-            stocks[movimiento.almacen_id] = q8(stocks.get(movimiento.almacen_id, ZERO) + delta_stock)
-            if stocks[movimiento.almacen_id] < ZERO:
-                _incidencia(empresa_id=empresa_id, periodo_id=movimiento.periodo_id,
-                            producto_id=producto_id, movimiento_id=movimiento.id,
-                            tipo='STOCK_INSUFICIENTE', descripcion='El recálculo detectó stock negativo posterior.')
-        elif movimiento.naturaleza == 'ENTRADA':
-            if movimiento.saldo_inicial_id and movimiento.saldo_inicial:
-                movimiento_valor = q8(movimiento.saldo_inicial.valor_total_pen)
-                costo = cpp(movimiento_valor, movimiento.cantidad_base)
-            elif movimiento.movimiento_extornado_id:
-                # CON-003: el extorno sigue al costo recalculado del movimiento extornado.
-                # Si el extornado aún no se procesó (mismo día: la SALIDA original tiene
-                # prioridad 4 y se ordena después), entra al CPP vigente —no altera el
-                # promedio— y la salida original tomará luego exactamente este costo.
-                if movimiento.movimiento_extornado_id in costos_recalculados:
-                    costo = costos_recalculados[movimiento.movimiento_extornado_id]
-                elif movimiento.movimiento_extornado_id in ids_afectados:
-                    costo = cpp_vigente
-                else:
-                    # Extornado anterior a fecha_desde: su costo histórico no cambia.
-                    costo = q8(costo_de_referencia(movimiento.movimiento_extornado_id, movimiento.movimiento_extornado)
-                               or (anterior.costo_unitario_pen if anterior else cpp_vigente))
-                movimiento_valor = q8(movimiento.cantidad_base * costo)
-            elif movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
-                # CON-004: devolución al costo recalculado del movimiento origen.
-                costo = q8(costo_de_referencia(movimiento.movimiento_origen_id, movimiento.movimiento_origen))
-                movimiento_valor = q8(movimiento.cantidad_base * costo)
-            else:
-                costo = anterior.costo_unitario_pen if anterior else ZERO
-                movimiento_valor = q8(movimiento.cantidad_base * costo)
-            cantidad = q8(cantidad + movimiento.cantidad_base)
-            valor = q8(valor + movimiento_valor)
-            stocks[movimiento.almacen_id] = stocks.get(movimiento.almacen_id, ZERO) + movimiento.cantidad_base
-        elif movimiento.naturaleza == 'SALIDA':
-            extorno_previo = extorno_de.get(movimiento.id)
-            if movimiento.nota_interna_detalle_id and movimiento.nota_interna_detalle.costo_unitario_pen is not None:
-                costo = q8(movimiento.nota_interna_detalle.costo_unitario_pen)
-            elif extorno_previo is not None and extorno_previo.id in costos_recalculados:
-                # CON-003: salida ya extornada antes en el orden → mismo costo que su extorno.
-                costo = costos_recalculados[extorno_previo.id]
-            elif (movimiento.movimiento_origen_id or movimiento.es_extorno or movimiento.movimiento_extornado_id) and anterior:
-                if movimiento.movimiento_origen_id and movimiento.movimiento_origen and hasattr(movimiento.movimiento_origen, 'valorizacion'):
-                    costo = q8(costo_de_referencia(movimiento.movimiento_origen_id, movimiento.movimiento_origen))
-                elif movimiento.movimiento_extornado_id and movimiento.movimiento_extornado and hasattr(movimiento.movimiento_extornado, 'valorizacion'):
-                    costo = q8(costo_de_referencia(movimiento.movimiento_extornado_id, movimiento.movimiento_extornado))
-                else:
-                    costo = anterior.costo_unitario_pen
-            else:
-                costo = cpp_vigente
-            movimiento_valor = q8(movimiento.cantidad_base * costo)
-            cantidad = q8(cantidad - movimiento.cantidad_base)
-            valor = q8(valor - movimiento_valor)
-            stocks[movimiento.almacen_id] = stocks.get(movimiento.almacen_id, ZERO) - movimiento.cantidad_base
-            if stocks[movimiento.almacen_id] < ZERO:
-                _incidencia(empresa_id=empresa_id, periodo_id=movimiento.periodo_id,
-                            producto_id=producto_id, movimiento_id=movimiento.id,
-                            tipo='STOCK_INSUFICIENTE', descripcion='El recálculo detectó stock negativo posterior.')
-        else:
-            costo = ZERO; movimiento_valor = movimiento.valor_ajuste_pen or ZERO; valor = q8(valor + movimiento_valor)
-        costos_recalculados[movimiento.id] = q8(costo)
-
-        # CON-005: cantidad 0 con valor ≠ 0 → absorber residuo o dejar incidencia bloqueante.
-        if cantidad == ZERO and valor != ZERO:
-            if abs(valor) <= tolerancia and tipo_residuo is not None:
-                pendientes = residuos_disponibles.get(movimiento.fecha_movimiento) or []
-                if pendientes:
-                    residuos_resueltos[pendientes.pop(0).id] = q8(-valor)
-                else:
-                    _crear_residuo_en_recalculo(
-                        movimiento=movimiento, tipo=tipo_residuo, importe=q8(-valor), usuario_id=usuario_id,
-                    )
-                valor = ZERO
-            elif abs(valor) <= tolerancia:
-                _incidencia(
-                    empresa_id=empresa_id, periodo_id=movimiento.periodo_id, producto_id=producto_id,
-                    movimiento_id=movimiento.id, tipo='RESIDUO_VALORIZACION',
-                    descripcion='Residuo de valorización sin tipo RESIDUO_AUTOMATICO configurado.',
-                    detalle={'residuo': str(valor)},
-                )
-            else:
-                _incidencia(
-                    empresa_id=empresa_id, periodo_id=movimiento.periodo_id, producto_id=producto_id,
-                    movimiento_id=movimiento.id, tipo='RESIDUO_VALORIZACION',
-                    descripcion='El residuo de valorización supera la tolerancia configurada.',
-                    detalle={'residuo': str(valor), 'tolerancia': str(tolerancia), 'origen': 'RECALCULO'},
-                )
-        guardar_valorizacion(movimiento, anterior, costo, movimiento_valor, cantidad, valor)
-
+    # Escrituras: una sola vez, con el resultado convergido.
+    for escritura in resultado['escrituras']:
+        guardar_valorizacion(*escritura)
+    for kwargs in resultado['incidencias']:
+        _incidencia(**kwargs)
+    for causa, importe, posicion in resultado['residuos_nuevos']:
+        _crear_residuo_en_recalculo(movimiento=causa, tipo=tipo_residuo, importe=importe, usuario_id=usuario_id,
+                                    estado_posicion=posicion)
     # CON-005: cada RESIDUO_AUTOMATICO queda con el importe vigente o neutralizado (0).
     for movimiento in movimientos_afectados:
         if not es_residuo(movimiento):
             continue
-        anterior = getattr(movimiento, 'valorizacion', None)
-        if movimiento.id in residuos_resueltos:
-            guardar_valorizacion(movimiento, anterior, ZERO, residuos_resueltos[movimiento.id], ZERO, ZERO)
-        else:
-            cant_pos, valor_pos = estado_en_residuo.get(movimiento.id, (cantidad, valor))
-            guardar_valorizacion(movimiento, anterior, ZERO, ZERO, cant_pos, valor_pos)
+        anterior = anteriores_val[movimiento.id]
+        cant_pos, valor_pos = resultado['estado_en_residuo'].get(
+            movimiento.id, (resultado['cantidad'], resultado['valor']),
+        )
+        importe = resultado['residuos_resueltos'].get(movimiento.id, ZERO)
+        # CON-014: saldo en la posición del residuo + su importe (continuidad del Kardex).
+        guardar_valorizacion(movimiento, anterior, ZERO, importe, cant_pos, q8(valor_pos + importe))
+    cantidad, valor = resultado['cantidad'], resultado['valor']
+    stocks = resultado['stocks']
     saldo = SaldoCppActual.objects.select_for_update().get(empresa_id=empresa_id, producto_id=producto_id)
     saldo.cantidad_total=cantidad; saldo.valor_total_pen=valor; saldo.cpp_pen=cpp(valor, cantidad)
     ultimo_movimiento = (
@@ -611,6 +696,37 @@ def confirmar_documento_motor(*, documento_id, empresa_id, usuario_id):
     return documento
 
 
+# BE-005: tipos explícitos para los movimientos generados por anulación. La Tabla 12
+# de SUNAT no tiene un código de "anulación/extorno"; se usa 99 (OTROS) y el reporte
+# identifica el extorno y su movimiento/documento original. Nunca se reutiliza otro
+# tipo (VENTA, SALDO_INICIAL, …) solo porque comparte naturaleza.
+TIPOS_EXTORNO = {
+    'ENTRADA': ('EXTORNO_ENTRADA', 'EXTORNO POR ANULACION (ENTRADA)'),
+    'SALIDA': ('EXTORNO_SALIDA', 'EXTORNO POR ANULACION (SALIDA)'),
+    'AJUSTE_VALOR': ('EXTORNO_AJUSTE_VALOR', 'EXTORNO POR ANULACION (AJUSTE DE VALOR)'),
+}
+CODIGO_SUNAT_EXTORNO = '99'
+
+
+def tipo_operacion_extorno(naturaleza):
+    codigo, descripcion = TIPOS_EXTORNO[naturaleza]
+    tipo, _ = TipoOperacion.objects.get_or_create(
+        codigo_interno=codigo,
+        defaults={
+            'codigo_sunat': CODIGO_SUNAT_EXTORNO, 'descripcion': descripcion, 'naturaleza': naturaleza,
+            'es_interna': True, 'afecta_kardex': True, 'origen_requerido': 'MOV_EXTORNADO', 'activo': True,
+        },
+    )
+    if tipo.naturaleza != naturaleza or tipo.origen_requerido != 'MOV_EXTORNADO':
+        raise ValidationError({
+            'tipo_operacion': (
+                f"El tipo '{codigo}' del catálogo no es un extorno de naturaleza {naturaleza}. "
+                'Corrija el catálogo de tipos de operación.'
+            )
+        })
+    return tipo
+
+
 @transaction.atomic
 def anular_documento_motor(*, documento_id, empresa_id, usuario_id, motivo):
     from apps.documentos.models import Documento
@@ -649,11 +765,7 @@ def anular_documento_motor(*, documento_id, empresa_id, usuario_id, motivo):
             empresa_id=empresa_id, documento_detalle__documento=documento,
         ).select_related('tipo_operacion', 'valorizacion'):
             if original.naturaleza == 'AJUSTE_VALOR':
-                tipo = TipoOperacion.objects.filter(
-                    naturaleza='AJUSTE_VALOR', activo=True,
-                ).filter(
-                    Q(origen_requerido='MOV_EXTORNADO') | Q(id=original.tipo_operacion_id)
-                ).first() or original.tipo_operacion
+                tipo = tipo_operacion_extorno('AJUSTE_VALOR')
                 monto_ajuste_original = original.valor_ajuste_pen
                 if monto_ajuste_original is None and hasattr(original, 'valorizacion'):
                     monto_ajuste_original = original.valorizacion.valor_movimiento_pen
@@ -667,17 +779,7 @@ def anular_documento_motor(*, documento_id, empresa_id, usuario_id, motivo):
                     movimiento_extornado=original,
                 )
             else:
-                tipo = TipoOperacion.objects.filter(
-                    naturaleza='SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA',
-                    origen_requerido='MOV_EXTORNADO', activo=True,
-                ).first()
-                if tipo is None:
-                    tipo = TipoOperacion.objects.filter(
-                        naturaleza='SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA',
-                        activo=True,
-                    ).first()
-                if tipo is None:
-                    raise ValidationError({'tipo_operacion': 'Falta el tipo de operación de extorno.'})
+                tipo = tipo_operacion_extorno('SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA')
                 aplicar_movimiento(
                     empresa_id=empresa_id, producto_id=original.producto_id,
                     almacen_id=original.almacen_id, periodo=documento.periodo,

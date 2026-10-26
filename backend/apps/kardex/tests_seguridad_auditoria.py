@@ -248,6 +248,8 @@ class AuditoriaSeguridadKardexTest(TestCase):
         campos_cabecera = [
             ('ruc_emisor', self.tercero.numero_documento),
             ('razon_social_emisor', self.tercero.razon_social),
+            # Bloque 3: la clase se decide por el RUC receptor (la empresa activa = compra).
+            ('ruc_cliente', self.empresa.ruc),
             ('serie', 'F001'),
             ('numero', '00002002'),
             ('tipo_comprobante', '01'),
@@ -520,6 +522,7 @@ class AuditoriaSeguridadKardexTest(TestCase):
                 'tipo_operacion_id': tipo_op.id,
                 'cantidad_original': Decimal('1'),
                 'precio_unitario': Decimal('100'),
+                'igv': Decimal('18.00'),  # Bloque 3: línea gravada
             }],
         )
 
@@ -535,6 +538,8 @@ class AuditoriaSeguridadKardexTest(TestCase):
         for nombre, valor in [
             ('ruc_emisor', self.tercero.numero_documento),
             ('razon_social_emisor', self.tercero.razon_social),
+            # Bloque 3: la clase se decide por el RUC receptor (la empresa activa = compra).
+            ('ruc_cliente', self.empresa.ruc),
             ('serie', 'F001'),
             ('numero', '00000777'),
             ('tipo_comprobante', '01'),

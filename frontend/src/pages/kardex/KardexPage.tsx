@@ -502,6 +502,19 @@ export const KardexPage: React.FC = () => {
               </thead>
 
               <tbody className="divide-y divide-slate-100">
+                {resumen && (Number(resumen.saldo_inicial_cantidad ?? 0) !== 0 || Number(resumen.saldo_inicial_valor ?? 0) !== 0) && (
+                  <tr className="bg-slate-50/70 font-semibold text-slate-700">
+                    <td colSpan={11} className="py-2 px-3 text-right">
+                      Saldo inicial del filtro
+                      {resumen.ambito_saldo === 'ALMACEN' && (
+                        <span className="ml-2 text-[10px] font-normal text-slate-500">(stock del almacén × CPP global)</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatQty(resumen.saldo_inicial_cantidad)}</td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">—</td>
+                    <td className="py-2 px-3 text-right font-mono tabular-nums">S/ {formatMoney(resumen.saldo_inicial_valor)}</td>
+                  </tr>
+                )}
                 {movimientos.map((mov) => {
                   const isEntrada = mov.naturaleza === 'ENTRADA';
                   const isSalida = mov.naturaleza === 'SALIDA';

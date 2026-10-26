@@ -1,5 +1,7 @@
 from django.db import models
 
+from apps.documentos.afectacion_igv import AFECTACIONES
+
 
 class Documento(models.Model):
     empresa = models.ForeignKey(
@@ -202,6 +204,10 @@ class DocumentoDetalle(models.Model):
     costo_unitario_pen = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
 
     es_bonificacion = models.BooleanField(default=False, db_default=False)
+    # Bloque 3: afectación del IGV de la línea. NULL solo en líneas históricas cuya
+    # afectación no se pudo determinar al migrar (IGV 0 sin bonificación).
+    afectacion_igv = models.CharField(max_length=12, choices=AFECTACIONES, null=True, blank=True)
+    codigo_afectacion_igv = models.CharField(max_length=2, null=True, blank=True)  # Catálogo 07 SUNAT
     detalle_origen = models.ForeignKey(
         'self',
         on_delete=models.SET_NULL,

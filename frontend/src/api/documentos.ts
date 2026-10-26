@@ -26,6 +26,8 @@ export interface DocumentoDetalle {
   cantidad_base: string;
   precio_unitario: string;
   igv: string;
+  afectacion_igv?: string | null;
+  codigo_afectacion_igv?: string | null;
   porcentaje_credito_fiscal_aplicado: string;
   costo_unitario_pen: string | null;
   es_bonificacion: boolean;
@@ -83,6 +85,7 @@ export interface CrearDocumentoDetallePayload {
   cantidad_original: string | number;
   precio_unitario?: string | number;
   igv?: string | number;
+  afectacion_igv?: 'GRAVADO' | 'EXONERADO' | 'INAFECTO' | 'EXPORTACION' | 'GRATUITO';
   es_bonificacion?: boolean;
   descripcion_original?: string;
   detalle_origen?: number | null;

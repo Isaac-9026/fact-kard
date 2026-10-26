@@ -24,37 +24,99 @@ TIPOS_OPERACION = (
     ('NC_DESCUENTO_COMPRA', 'AJUSTE_VALOR', True, 'DOCUMENTO'),
     ('ND_CARGO_COMPRA', 'AJUSTE_VALOR', True, 'DOCUMENTO'),
     ('NC_VENTA_SIN_DEVOLUCION', 'AJUSTE_VALOR', False, 'DOCUMENTO'),
+    ('ND_CARGO_VENTA', 'AJUSTE_VALOR', False, 'DOCUMENTO'),
     ('EXTORNO_ENTRADA', 'ENTRADA', True, 'MOV_EXTORNADO'),
     ('EXTORNO_SALIDA', 'SALIDA', True, 'MOV_EXTORNADO'),
+    ('EXTORNO_AJUSTE_VALOR', 'AJUSTE_VALOR', True, 'MOV_EXTORNADO'),
     ('RESIDUO_AUTOMATICO', 'AJUSTE_VALOR', True, 'MOTOR'),
+    ('SALDO_INICIAL', 'ENTRADA', True, 'SALDO_INICIAL'),
 )
 
-XML_UBL = """<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+# Códigos Tabla 12 como en seed_catalogos_sunat (BE-005: extornos → 99 OTROS).
+CODIGOS_SUNAT = {
+    'COMPRA': '02', 'VENTA': '01', 'DEVOLUCION_VENTA': '05', 'DEVOLUCION_COMPRA': '06',
+    'NC_DESCUENTO_COMPRA': '99', 'ND_CARGO_COMPRA': '99', 'NC_VENTA_SIN_DEVOLUCION': '99', 'ND_CARGO_VENTA': '99',
+    'EXTORNO_ENTRADA': '99', 'EXTORNO_SALIDA': '99', 'EXTORNO_AJUSTE_VALOR': '99',
+    'RESIDUO_AUTOMATICO': '99', 'SALDO_INICIAL': '16',
+}
+
+XML_LINEA = """
+  <cac:{linea_tag}>
+    <cbc:ID>{n}</cbc:ID>
+    <cbc:{cantidad_tag} unitCode="NIU">{cantidad}</cbc:{cantidad_tag}>
+    <cbc:LineExtensionAmount>{valor}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount>{igv}</cbc:TaxAmount>
+      <cac:TaxSubtotal><cbc:TaxAmount>{igv}</cbc:TaxAmount>
+        <cac:TaxCategory><cbc:TaxExemptionReasonCode>{afectacion}</cbc:TaxExemptionReasonCode></cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item><cbc:Description>{descripcion}</cbc:Description>
+      <cac:SellersItemIdentification><cbc:ID>{codigo}</cbc:ID></cac:SellersItemIdentification></cac:Item>
+    <cac:Price><cbc:PriceAmount>{precio}</cbc:PriceAmount></cac:Price>
+  </cac:{linea_tag}>"""
+
+
+def construir_xml_ubl(*, tipo='01', serie='F001', numero='501', fecha='2026-01-10', moneda='PEN',
+                      emisor='20555000111', emisor_nombre='PROVEEDOR XML QA S.A.C.',
+                      receptor='20100100100', receptor_nombre='EMPRESA B2 S.A.C.',
+                      motivo=None, referencia=None, lineas=None):
+    """XML UBL 2.1 mínimo: Invoice (01/03), CreditNote (07) o DebitNote (08)."""
+    raiz = {'07': 'CreditNote', '08': 'DebitNote'}.get(tipo, 'Invoice')
+    linea_tag = {'07': 'CreditNoteLine', '08': 'DebitNoteLine'}.get(tipo, 'InvoiceLine')
+    cantidad_tag = {'07': 'CreditedQuantity', '08': 'DebitedQuantity'}.get(tipo, 'InvoicedQuantity')
+    lineas = lineas or [{'codigo': 'SKU-QA-1', 'descripcion': 'ITEM XML QA', 'cantidad': '10', 'precio': '10.00'}]
+    cuerpo, subtotal, igv_total = '', 0.0, 0.0
+    for n, l in enumerate(lineas, start=1):
+        valor = float(l['cantidad']) * float(l['precio'])
+        afectacion = l.get('afectacion', '10')
+        igv = l.get('igv', f'{valor * 0.18:.2f}' if afectacion == '10' else '0.00')
+        subtotal += valor
+        igv_total += float(igv)
+        cuerpo += XML_LINEA.format(
+            linea_tag=linea_tag, cantidad_tag=cantidad_tag, n=n, cantidad=l['cantidad'],
+            valor=f'{valor:.2f}', igv=igv, afectacion=afectacion, descripcion=l['descripcion'],
+            codigo=l['codigo'], precio=l['precio'],
+        )
+    tipo_code = f'<cbc:InvoiceTypeCode>{tipo}</cbc:InvoiceTypeCode>' if raiz == 'Invoice' else ''
+    referencia_xml = ''
+    if raiz != 'Invoice':
+        motivo_xml = f'<cbc:ResponseCode>{motivo}</cbc:ResponseCode>' if motivo else ''
+        referencia_xml = (
+            f'<cac:DiscrepancyResponse><cbc:ReferenceID>{referencia or ""}</cbc:ReferenceID>{motivo_xml}'
+            '<cbc:Description>QA</cbc:Description></cac:DiscrepancyResponse>'
+        )
+        if referencia:
+            referencia_xml += (
+                '<cac:BillingReference><cac:InvoiceDocumentReference>'
+                f'<cbc:ID>{referencia}</cbc:ID></cac:InvoiceDocumentReference></cac:BillingReference>'
+            )
+    receptor_xml = '' if receptor is None else (
+        '<cac:AccountingCustomerParty><cac:Party>'
+        f'<cac:PartyIdentification><cbc:ID>{receptor}</cbc:ID></cac:PartyIdentification>'
+        f'<cac:PartyLegalEntity><cbc:RegistrationName>{receptor_nombre}</cbc:RegistrationName></cac:PartyLegalEntity>'
+        '</cac:Party></cac:AccountingCustomerParty>'
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<{raiz} xmlns="urn:oasis:names:specification:ubl:schema:xsd:{raiz}-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
   <cbc:ID>{serie}-{numero}</cbc:ID>
   <cbc:IssueDate>{fecha}</cbc:IssueDate>
-  <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>
+  {tipo_code}
   <cbc:DocumentCurrencyCode>{moneda}</cbc:DocumentCurrencyCode>
+  {referencia_xml}
   <cac:AccountingSupplierParty><cac:Party>
-    <cac:PartyIdentification><cbc:ID>{ruc}</cbc:ID></cac:PartyIdentification>
-    <cac:PartyLegalEntity><cbc:RegistrationName>PROVEEDOR XML QA S.A.C.</cbc:RegistrationName></cac:PartyLegalEntity>
+    <cac:PartyIdentification><cbc:ID>{emisor}</cbc:ID></cac:PartyIdentification>
+    <cac:PartyLegalEntity><cbc:RegistrationName>{emisor_nombre}</cbc:RegistrationName></cac:PartyLegalEntity>
   </cac:Party></cac:AccountingSupplierParty>
-  <cac:TaxTotal><cbc:TaxAmount>18.00</cbc:TaxAmount></cac:TaxTotal>
+  {receptor_xml}
+  <cac:TaxTotal><cbc:TaxAmount>{igv_total:.2f}</cbc:TaxAmount></cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount>
-    <cbc:PayableAmount>118.00</cbc:PayableAmount>
-  </cac:LegalMonetaryTotal>
-  <cac:InvoiceLine>
-    <cbc:ID>1</cbc:ID>
-    <cbc:InvoicedQuantity unitCode="NIU">10</cbc:InvoicedQuantity>
-    <cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount>
-    <cac:Item><cbc:Description>ITEM XML QA</cbc:Description>
-      <cac:SellersItemIdentification><cbc:ID>SKU-QA-1</cbc:ID></cac:SellersItemIdentification></cac:Item>
-    <cac:Price><cbc:PriceAmount>10.00</cbc:PriceAmount></cac:Price>
-  </cac:InvoiceLine>
-</Invoice>
+    <cbc:LineExtensionAmount>{subtotal:.2f}</cbc:LineExtensionAmount>
+    <cbc:PayableAmount>{subtotal + igv_total:.2f}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>{cuerpo}
+</{raiz}>
 """
 
 
@@ -101,7 +163,8 @@ class Bloque2Fixture:
         for codigo, naturaleza, afecta, origen in TIPOS_OPERACION:
             self.op[codigo] = TipoOperacion.objects.create(
                 codigo_interno=codigo, descripcion=codigo, naturaleza=naturaleza,
-                es_interna=codigo in ('EXTORNO_ENTRADA', 'EXTORNO_SALIDA', 'RESIDUO_AUTOMATICO'),
+                codigo_sunat=CODIGOS_SUNAT[codigo],
+                es_interna=codigo.startswith('EXTORNO_') or codigo in ('RESIDUO_AUTOMATICO', 'SALDO_INICIAL'),
                 afecta_kardex=afecta, origen_requerido=origen,
             )
         self.diciembre = Periodo.objects.create(
@@ -211,9 +274,11 @@ class Bloque2Fixture:
 
     # ---- Captura -------------------------------------------------------------
 
-    def subir_xml(self, *, fecha='2026-01-10', moneda='PEN', numero='501'):
-        xml = XML_UBL.format(serie='F001', numero=numero, fecha=fecha, moneda=moneda, ruc=self.RUC_PROVEEDOR)
-        archivo = SimpleUploadedFile(f'factura_{numero}.xml', xml.encode('utf-8'), content_type='text/xml')
+    def subir_xml(self, *, fecha='2026-01-10', moneda='PEN', numero='501', **kwargs):
+        kwargs.setdefault('emisor', self.RUC_PROVEEDOR)
+        kwargs.setdefault('receptor', self.empresa.ruc)
+        xml = construir_xml_ubl(numero=numero, fecha=fecha, moneda=moneda, **kwargs)
+        archivo = SimpleUploadedFile(f'comprobante_{numero}.xml', xml.encode('utf-8'), content_type='text/xml')
         resp = self.client.post(
             reverse('documento-captura-subir'), {'archivo': archivo, 'tipo': 'XML'},
             format='multipart', **self.headers,

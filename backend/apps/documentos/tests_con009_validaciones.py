@@ -81,7 +81,8 @@ class DetalleTipadoApiTests(Bloque2Fixture, TestCase):
         self.crear(self.payload('COMPRA', [self.linea('COMPRA', '3', '3.33', igv='1.79820000')]))
 
     def test_igv_cero_exonerado_permitido(self):
-        self.crear(self.payload('COMPRA', [self.linea('COMPRA', '10', '10', igv='0')]))
+        # Bloque 3: el IGV 0 requiere afectación explícita (ver tests_b3_afectacion_igv).
+        self.crear(self.payload('COMPRA', [self.linea('COMPRA', '10', '10', igv='0', afectacion_igv='EXONERADO')]))
 
     def test_bonificacion_no_valida_tasa(self):
         self.crear(self.payload('COMPRA', [self.linea('COMPRA', '2', '0', igv='3.60', es_bonificacion=True)]))
@@ -107,6 +108,7 @@ class ServicioDirectoTests(Bloque2Fixture, TestCase):
         linea = {
             'producto_id': self.producto.id, 'almacen_id': self.almacen.id,
             'tipo_operacion_id': self.op['COMPRA'].id, 'cantidad_original': '10', 'precio_unitario': '10',
+            'igv': '18.00',  # Bloque 3: línea gravada por defecto → IGV 18 %
         }
         linea.update(campos)
         return crear_documento(

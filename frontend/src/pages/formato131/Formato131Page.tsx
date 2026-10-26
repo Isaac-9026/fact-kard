@@ -35,12 +35,14 @@ import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
+import { filaSaldoFinal, filaSaldoInicial } from '../../utils/formato131Saldos';
 
 const apiError = (error: unknown) => {
   const data = (error as { response?: { data?: Record<string, string | string[]> | string } }).response?.data;
   if (!data || typeof data === 'string') return 'No se pudo completar la operación. Intente nuevamente.';
   return Object.values(data).flat().join(' ');
 };
+
 
 const n = (value?: string | null) => (value !== null && value !== undefined && value !== '' ? value : '—');
 
@@ -427,6 +429,24 @@ export const Formato131Page: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono tabular-nums text-[11px]">
+                    {(() => {
+                      const ini = filaSaldoInicial(r);
+                      return (
+                        <tr className="bg-slate-50 font-semibold text-slate-800">
+                          <td colSpan={11} className="py-2 px-3 text-right font-sans text-[11px] uppercase tracking-wide text-slate-600">
+                            Saldo inicial
+                          </td>
+                          <td className="py-2 px-2.5 text-right bg-indigo-50/20">{ini.cantidad}</td>
+                          <td className="py-2 px-2.5 text-right bg-indigo-50/20">{ini.costoUnitario}</td>
+                          <td className="py-2 px-2.5 text-right bg-indigo-50/20 font-bold">{ini.costoTotal}</td>
+                        </tr>
+                      );
+                    })()}
+                    {r.movimientos.length === 0 && (
+                      <tr>
+                        <td colSpan={14} className="py-2 px-3 text-center font-sans text-slate-400">Sin movimientos en el período</td>
+                      </tr>
+                    )}
                     {r.movimientos.map((m) => (
                       <tr key={m.movimiento_id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-2 px-3 text-center text-slate-700 whitespace-nowrap">{m.fecha_emision}</td>
@@ -459,6 +479,19 @@ export const Formato131Page: React.FC = () => {
                         </td>
                       </tr>
                     ))}
+                    {(() => {
+                      const fin = filaSaldoFinal(r);
+                      return (
+                        <tr className="bg-indigo-50/40 font-semibold text-slate-900 border-t-2 border-indigo-100">
+                          <td colSpan={11} className="py-2 px-3 text-right font-sans text-[11px] uppercase tracking-wide text-indigo-900">
+                            Saldo final
+                          </td>
+                          <td className="py-2 px-2.5 text-right">{fin.cantidad}</td>
+                          <td className="py-2 px-2.5 text-right">{fin.costoUnitario}</td>
+                          <td className="py-2 px-2.5 text-right font-bold">{fin.costoTotal}</td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>

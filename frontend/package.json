@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --experimental-strip-types --test src/context/authState.test.ts src/utils/date.test.ts src/utils/kardexFiltros.test.ts src/utils/notaInternaForm.test.ts src/utils/reaperturaPeriodo.test.ts src/utils/tipoCambioForm.test.ts src/utils/sesion.test.ts",
+    "test": "node --experimental-strip-types --test src/context/authState.test.ts src/utils/date.test.ts src/utils/kardexFiltros.test.ts src/utils/notaInternaForm.test.ts src/utils/reaperturaPeriodo.test.ts src/utils/tipoCambioForm.test.ts src/utils/sesion.test.ts src/utils/afectacionIgv.test.ts src/utils/formato131Saldos.test.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

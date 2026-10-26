@@ -57,6 +57,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table'
 import { Badge } from '../../components/ui/badge'
+import { AFECTACIONES_IGV, igvEditable, igvSugerido, type AfectacionIgv } from '../../utils/afectacionIgv'
 import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
@@ -71,6 +72,7 @@ interface LineaFormulario {
   cantidadOriginal: string
   precioUnitario: string
   igv: string
+  afectacionIgv: AfectacionIgv
   esBonificacion: boolean
   descripcionOriginal: string
   detalleOrigenId?: number | ''
@@ -216,6 +218,7 @@ export const DocumentosPage: React.FC = () => {
         cantidadOriginal: '1.00000000',
         precioUnitario: '0.00000000',
         igv: '0.00000000',
+        afectacionIgv: 'GRAVADO',
         esBonificacion: false,
         descripcionOriginal: '',
         unidadesDisponibles: [],
@@ -234,17 +237,20 @@ export const DocumentosPage: React.FC = () => {
         if (l.tempId !== tempId) return l
         const actualizada = { ...l, [campo]: valor }
 
-        if (campo === 'precioUnitario' || campo === 'cantidadOriginal') {
-          const cant = parseFloat(campo === 'cantidadOriginal' ? String(valor) : l.cantidadOriginal) || 0
-          const precio = parseFloat(campo === 'precioUnitario' ? String(valor) : l.precioUnitario) || 0
-          if (!l.esBonificacion) {
-            actualizada.igv = (cant * precio * 0.18).toFixed(8)
+        if (campo === 'precioUnitario' || campo === 'cantidadOriginal' || campo === 'afectacionIgv') {
+          if (!actualizada.esBonificacion) {
+            const sugerido = igvSugerido(actualizada.afectacionIgv, actualizada.cantidadOriginal, actualizada.precioUnitario)
+            if (sugerido !== null) actualizada.igv = sugerido
           }
         }
 
-        if (campo === 'esBonificacion' && valor === true) {
-          actualizada.precioUnitario = '0.00000000'
-          actualizada.igv = '0.00000000'
+        if (campo === 'esBonificacion') {
+          // Una bonificación es una transferencia gratuita (el backend lo exige).
+          actualizada.afectacionIgv = valor === true ? 'GRATUITO' : 'GRAVADO'
+          if (valor === true) {
+            actualizada.precioUnitario = '0.00000000'
+            actualizada.igv = '0.00000000'
+          }
         }
 
         return actualizada
@@ -378,6 +384,7 @@ export const DocumentosPage: React.FC = () => {
         cantidad_original: l.cantidadOriginal,
         precio_unitario: l.precioUnitario,
         igv: l.igv,
+        afectacion_igv: l.afectacionIgv,
         es_bonificacion: l.esBonificacion,
         descripcion_original: l.descripcionOriginal,
         detalle_origen: l.detalleOrigenId ? Number(l.detalleOrigenId) : null,
@@ -977,6 +984,7 @@ export const DocumentosPage: React.FC = () => {
                       <th className="p-2 min-w-[140px]">Operación *</th>
                       <th className="p-2 w-24 text-right">Cantidad</th>
                       <th className="p-2 w-24 text-right">Precio Unit.</th>
+                      <th className="p-2 min-w-[110px]">Afectación IGV</th>
                       <th className="p-2 w-20 text-right">IGV</th>
                       <th className="p-2 w-16 text-center">Bonif?</th>
                       <th className="p-2 w-20 text-right">Cant. Base</th>
@@ -1074,11 +1082,23 @@ export const DocumentosPage: React.FC = () => {
                             />
                           </td>
                           <td className="p-2">
+                            <select
+                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              value={linea.afectacionIgv}
+                              disabled={linea.esBonificacion}
+                              onChange={(e) => actualizarLinea(linea.tempId, 'afectacionIgv', e.target.value)}
+                            >
+                              {AFECTACIONES_IGV.map((a) => (
+                                <option key={a.valor} value={a.valor}>{a.etiqueta}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="p-2">
                             <input
                               type="number"
                               step="0.01"
                               min="0"
-                              disabled={linea.esBonificacion}
+                              disabled={linea.esBonificacion || !igvEditable(linea.afectacionIgv)}
                               className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-right font-mono tabular-nums text-xs"
                               value={linea.igv}
                               onChange={(e) => actualizarLinea(linea.tempId, 'igv', e.target.value)}
@@ -1181,6 +1201,9 @@ export const DocumentosPage: React.FC = () => {
                       </TableCell>
                       <TableCell numeric>
                         {Number(det.igv).toFixed(2)}
+                        {det.afectacion_igv && det.afectacion_igv !== 'GRAVADO' && (
+                          <span className="ml-1 text-[10px] text-slate-500">{det.afectacion_igv}</span>
+                        )}
                       </TableCell>
                       <TableCell numeric className="font-bold text-slate-900">
                         {(Number(det.cantidad_original) * Number(det.precio_unitario)).toFixed(2)}

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 
+from apps.documentos.afectacion_igv import AFECTACIONES
 from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
 from apps.documentos.services import crear_documento, revisar_documento, anular_documento
 
@@ -38,6 +39,8 @@ class DocumentoDetalleSerializer(serializers.ModelSerializer):
             'cantidad_base',
             'precio_unitario',
             'igv',
+            'afectacion_igv',
+            'codigo_afectacion_igv',
             'porcentaje_credito_fiscal_aplicado',
             'costo_unitario_pen',
             'es_bonificacion',
@@ -188,6 +191,9 @@ class DocumentoDetalleEntradaSerializer(serializers.Serializer):
         max_digits=20, decimal_places=8, required=False, default=Decimal('0'), min_value=Decimal('0'),
     )
     es_bonificacion = serializers.BooleanField(required=False, default=False)
+    # Bloque 3: afectación del IGV. Si se omite: GRATUITO para bonificaciones, GRAVADO en otro caso.
+    afectacion_igv = serializers.ChoiceField(choices=AFECTACIONES, required=False, allow_null=True)
+    codigo_afectacion_igv = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=2)
 
 
 class DocumentoCreateSerializer(serializers.ModelSerializer):

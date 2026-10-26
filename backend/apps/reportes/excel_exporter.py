@@ -161,7 +161,10 @@ def generar_libro_excel_kardex(
     if almacen_filtro:
         almacen_txt = f"{almacen_filtro.codigo} - {almacen_filtro.nombre}"
 
-    ws1["A3"] = f"Período: {periodo_txt} | Producto: {prod_txt} | Almacén: {almacen_txt}"
+    ws1["A3"] = (
+        f"Período: {periodo_txt} | Producto: {prod_txt} | Almacén: {almacen_txt}"
+        + (" | Saldo valorizado: stock del almacén × CPP global" if almacen_filtro else "")
+    )
     ws1["A3"].font = HEADER_VAL_FONT
     ws1["A4"] = "Método de Valuación: PROMEDIO PONDERADO (CPP GLOBAL EN PEN)"
     ws1["A4"].font = SUBTITLE_FONT
@@ -215,6 +218,28 @@ def generar_libro_excel_kardex(
 
     # Filas de datos
     current_row = 8
+
+    # CON-014: con fecha inicial o período, el Kardex arranca del saldo contable previo
+    # al rango (mismo valor que la API: resumen.saldo_inicial_*).
+    if fecha_desde or periodo_id:
+        saldos_ini = data_kardex['saldos_iniciales']
+        ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=11)
+        ws1.cell(row=current_row, column=1, value="SALDO INICIAL").alignment = Alignment(horizontal="right", vertical="center")
+        cpp_ini = saldos_ini[0]['cpp'] if len(saldos_ini) == 1 else None
+        for col, valor, fmt in (
+            (12, resumen['saldo_inicial_cantidad'], FMT_QTY),
+            (13, cpp_ini, FMT_COST),
+            (14, resumen['saldo_inicial_valor'], FMT_MONEY),
+        ):
+            celda = ws1.cell(row=current_row, column=col, value=float(valor) if valor is not None else None)
+            celda.number_format = fmt
+            celda.alignment = ALIGN_RIGHT
+        for col_idx in range(1, 15):
+            celda = ws1.cell(row=current_row, column=col_idx)
+            celda.font = TOTALS_FONT
+            celda.border = DATA_BORDER
+        current_row += 1
+
     for row_data in movimientos:
         fill_to_use = DATA_ALT_FILL if current_row % 2 == 0 else PatternFill(fill_type=None)
 

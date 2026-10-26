@@ -8,11 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
+from apps.documentos.afectacion_igv import TASA_IGV, resolver_afectacion, validar_igv_linea
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import Moneda, TipoComprobante, TipoOperacion
+from apps.documentos.clasificacion_captura import clasificar_comprobante
 from apps.documentos.models import Documento, DocumentoCaptura, DocumentoDetalle, CapturaCampo
+from apps.empresas.models import Empresa
 from apps.empresas.periodos import parsear_fecha_calendario, periodo_abierto_para_fecha
-from apps.inventario.models import Almacen, ProductoEquivalencia, Tercero
+from apps.inventario.models import Almacen, Producto, ProductoEquivalencia, Tercero
 from apps.kardex.models import Incidencia
 
 DECIMAL_CERO = Decimal('0.00000000')
@@ -117,9 +120,14 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
 
     # 6. Adquiriente (Cliente / Empresa receptora)
     ruc_cliente = ''
+    razon_social_cliente = ''
     customer = root.find('.//AccountingCustomerParty')
     if customer is not None:
         ruc_cliente = _find_text(customer, 'ID') or _find_text(customer, 'CompanyID') or ''
+        razon_social_cliente = _find_text(customer, 'RegistrationName') or _find_text(customer, 'Name') or ''
+
+    # 6.1 Motivo de la nota (Catálogos 09/10 SUNAT): decide devolución vs ajuste de valor.
+    motivo_nota = _find_text(root, 'DiscrepancyResponse/ResponseCode') or ''
 
     # 7. Totales monetarios
     subtotal_str = _find_text(root, 'LineExtensionAmount') or '0.00'
@@ -194,6 +202,18 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
         except Exception:
             val_total_dec = (cant_dec * precio_dec).quantize(Q8, rounding=ROUND_HALF_UP)
 
+        # Bloque 3: IGV y afectación (Catálogo 07) de la línea, tal como vienen en el XML.
+        igv_linea_txt = None
+        codigo_afectacion = ''
+        tax_linea = line.find('TaxTotal')
+        if tax_linea is not None:
+            igv_linea_txt = _find_text(tax_linea, 'TaxAmount')
+            codigo_afectacion = (_find_text(tax_linea, 'TaxExemptionReasonCode') or '').strip()
+        try:
+            igv_linea_dec = Decimal(igv_linea_txt).quantize(Q8, rounding=ROUND_HALF_UP) if igv_linea_txt else None
+        except Exception:
+            igv_linea_dec = None
+
         detalles.append({
             'numero_linea': index,
             'codigo_externo': codigo_externo,
@@ -202,6 +222,8 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
             'cantidad': cant_dec,
             'precio_unitario': precio_dec,
             'valor_total': val_total_dec,
+            'igv': igv_linea_dec,
+            'codigo_afectacion_igv': codigo_afectacion,
         })
 
     return {
@@ -216,10 +238,12 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
             'ruc_emisor': ruc_emisor,
             'razon_social_emisor': razon_social_emisor,
             'ruc_cliente': ruc_cliente,
+            'razon_social_cliente': razon_social_cliente,
             'subtotal': str(subtotal),
             'igv': str(igv),
             'total': str(total),
             'doc_modificado': doc_modificado,
+            'motivo_nota': motivo_nota,
         },
         'detalles': detalles,
         'confianza_global': Decimal('100.0000'),
@@ -239,10 +263,13 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
         except Exception:
             texto = ''
 
-    # RUC (11 dígitos, empieza en 10 o 20)
-    ruc_match = re.search(r'\b(10\d{9}|20\d{9})\b', texto)
-    ruc_emisor = ruc_match.group(1) if ruc_match else '20000000001'
-    conf_ruc = Decimal('95.0000') if ruc_match else Decimal('60.0000')
+    # RUC (11 dígitos, empieza en 10 o 20). El primero es el emisor; el siguiente
+    # distinto, el receptor. Sin dato no se inventa: queda vacío y con confianza 0.
+    rucs = list(dict.fromkeys(re.findall(r'\b(10\d{9}|20\d{9})\b', texto)))
+    ruc_emisor = rucs[0] if rucs else ''
+    conf_ruc = Decimal('95.0000') if rucs else Decimal('0.0000')
+    ruc_cliente = rucs[1] if len(rucs) > 1 else ''
+    conf_ruc_cliente = Decimal('80.0000') if ruc_cliente else Decimal('0.0000')
 
     # Tipo Comprobante
     tipo_comp = '01'
@@ -330,6 +357,7 @@ def extraer_ocr_basico(content: bytes, filename: str, texto_ocr: Optional[str] =
             'fecha_emision': (fecha_emision, conf_fecha),
             'moneda': (moneda, conf_moneda),
             'ruc_emisor': (ruc_emisor, conf_ruc),
+            'ruc_cliente': (ruc_cliente, conf_ruc_cliente),
             'razon_social_emisor': (razon_social, conf_rz),
             'subtotal': (str(subtotal_dec), Decimal('85.0000')),
             'igv': (str(igv_dec), Decimal('85.0000')),
@@ -394,7 +422,8 @@ def procesar_subida_captura(
         # Poblar detalle
         for item in datos['detalles']:
             num_linea = item['numero_linea']
-            for campo_nombre in ('codigo_externo', 'descripcion', 'unidad_medida', 'cantidad', 'precio_unitario', 'valor_total'):
+            for campo_nombre in ('codigo_externo', 'descripcion', 'unidad_medida', 'cantidad', 'precio_unitario',
+                                 'valor_total', 'igv', 'codigo_afectacion_igv'):
                 val = item.get(campo_nombre)
                 CapturaCampo.objects.create(
                     documento_captura=captura,
@@ -527,28 +556,41 @@ def generar_borrador_desde_captura(
                 detalles[linea_num] = {}
             detalles[linea_num][c.nombre_campo] = val
 
-    # 1. Tercero Proveedor
-    ruc_emisor = cabecera.get('ruc_emisor', '').strip()
-    if not ruc_emisor:
-        ruc_emisor = '20000000001'
-    rz_emisor = cabecera.get('razon_social_emisor', '').strip() or f'PROVEEDOR RUC {ruc_emisor}'
+    # 1. Clasificación (Bloque 3): COMPRA/VENTA y tipo de operación según RUC
+    #    emisor/receptor, tipo de comprobante y motivo de la nota. Sin adivinar.
+    empresa = Empresa.objects.get(pk=empresa_id)
+    clasificacion = clasificar_comprobante(cabecera=cabecera, ruc_empresa=empresa.ruc)
+    clase = clasificacion['clase']
+    ruc_emisor = ''.join(ch for ch in cabecera.get('ruc_emisor', '') if ch.isdigit())
 
-    tercero, _ = Tercero.objects.get_or_create(
-        empresa_id=empresa_id,
-        numero_documento=ruc_emisor,
-        defaults={
-            'tipo_documento': '6',
-            'razon_social': rz_emisor,
-            'es_proveedor': True,
-            'es_cliente': False,
-        }
-    )
+    tipo_comp = TipoComprobante.objects.filter(codigo_sunat=clasificacion['tipo_comprobante'], activo=True).first()
+    if tipo_comp is None:
+        raise ValidationError({
+            'tipo_comprobante': f"El tipo de comprobante {clasificacion['tipo_comprobante']} no está registrado en el catálogo."
+        })
+    tipo_op = TipoOperacion.objects.filter(codigo_interno=clasificacion['codigo_operacion'], activo=True).first()
+    if tipo_op is None:
+        raise ValidationError({
+            'tipo_operacion': (
+                f"Falta el tipo de operación '{clasificacion['codigo_operacion']}' en el catálogo "
+                '(ejecute seed_catalogos_sunat). No se usará otro tipo en su lugar.'
+            )
+        })
 
-    # 2. Tipo de comprobante
-    tipo_comp_cod = cabecera.get('tipo_comprobante', '01').strip()
-    tipo_comp = TipoComprobante.objects.filter(codigo_sunat=tipo_comp_cod).first()
-    if not tipo_comp:
-        tipo_comp = TipoComprobante.objects.filter(codigo_sunat='01').first()
+    # 2. Tercero: proveedor (compra) o cliente (venta).
+    doc_tercero = clasificacion['contraparte_documento']
+    tercero = None
+    if len(doc_tercero) in (8, 11):
+        tercero = Tercero.objects.filter(empresa_id=empresa_id, numero_documento=doc_tercero).order_by('id').first()
+        if tercero is None:
+            tercero = Tercero.objects.create(
+                empresa_id=empresa_id, numero_documento=doc_tercero,
+                tipo_documento='6' if len(doc_tercero) == 11 else '1',
+                razon_social=clasificacion['contraparte_nombre'] or f'{"PROVEEDOR" if clase == "COMPRA" else "CLIENTE"} {doc_tercero}',
+                es_proveedor=clase == 'COMPRA', es_cliente=clase == 'VENTA',
+            )
+    elif clase == 'COMPRA':
+        raise ValidationError({'ruc_emisor': 'El RUC del proveedor no es válido.'})
 
     # 3. Serie y Número normalizados con función centralizada de documentos (A-06)
     from apps.documentos.services import normalizar_numero, normalizar_serie, validar_duplicado_documento
@@ -582,10 +624,11 @@ def generar_borrador_desde_captura(
                 ref_num = normalizar_numero(ref_doc[4:])
             documento_origen = Documento.objects.filter(
                 empresa_id=empresa_id,
+                clase=clase,
                 ruc_emisor=ruc_emisor,
                 serie_normalizada=ref_serie,
                 numero_normalizado=ref_num,
-            ).first()
+            ).exclude(tipo_comprobante__es_nota=True).order_by('id').first()
 
     # 4. Fecha de emisión (CON-001): debe ser válida; nunca se reemplaza por "hoy".
     fecha_emision = parsear_fecha_calendario(cabecera.get('fecha_emision'), campo='fecha_emision')
@@ -640,23 +683,12 @@ def generar_borrador_desde_captura(
     if not almacen:
         raise ValidationError({'almacen': 'La empresa no cuenta con un almacén activo disponible.'})
 
-    # 9. Tipo de operación de compra / ajuste por defecto según comprobante (A-06)
-    if tipo_comp.es_nota:
-        if getattr(tipo_comp, 'efecto_nota', None) == 'CREDITO':
-            tipo_op = TipoOperacion.objects.filter(codigo_interno='NC_COMPRA').first()
-        else:
-            tipo_op = TipoOperacion.objects.filter(codigo_interno='ND_COMPRA').first()
-        if not tipo_op:
-            tipo_op = TipoOperacion.objects.filter(naturaleza='AJUSTE_VALOR', es_interna=False).first()
-    else:
-        tipo_op = TipoOperacion.objects.filter(codigo_interno='COMPRA').first()
-        if not tipo_op:
-            tipo_op = TipoOperacion.objects.filter(naturaleza='ENTRADA', es_interna=False).first()
+    # 9. Tipo de operación: ya resuelto por la clasificación (sin tipos "parecidos").
 
     # 10. Crear Documento en BORRADOR estricto
     documento = Documento.objects.create(
         empresa_id=empresa_id,
-        clase='COMPRA',
+        clase=clase,
         periodo=periodo,
         tercero=tercero,
         ruc_emisor=ruc_emisor,
@@ -694,8 +726,10 @@ def generar_borrador_desde_captura(
             bloquea_cierre=True,
             estado='PENDIENTE',
             descripcion=(
-                f"La Nota {serie_norm}-{num_norm} del proveedor {tercero.razon_social} "
-                f"no tiene comprobante de origen vinculado. Debe asociarse antes de confirmar."
+                f"La Nota {serie_norm}-{num_norm} ({clase}) "
+                f"{'de ' + tercero.razon_social + ' ' if tercero else ''}"
+                f"no tiene un comprobante de origen identificable ({cabecera.get('doc_modificado') or 'sin referencia'}). "
+                "Regístrela manualmente o registre primero el documento de origen."
             ),
             detalle={'captura_id': captura.id, 'referencia': cabecera.get('doc_modificado', '')},
         )
@@ -717,9 +751,15 @@ def generar_borrador_desde_captura(
         precio = parse_dec(line_fields.get('precio_unitario', '0.0'), default=DECIMAL_CERO)
         val_linea = parse_dec(line_fields.get('valor_total', str(cant * precio)), default=cant * precio)
 
-        # Buscar homologación en ProductoEquivalencia
+        # Buscar homologación. Compra: equivalencias confirmadas del proveedor.
+        # Venta: el comprobante lo emitió la empresa, con su propio código interno.
         equiv = None
-        if cod_ext:
+        prod_venta = None
+        if clase == 'VENTA' and cod_ext:
+            prod_venta = Producto.objects.filter(
+                empresa_id=empresa_id, codigo_interno__iexact=cod_ext,
+            ).prefetch_related('unidades').first()
+        if clase == 'COMPRA' and cod_ext:
             equiv = ProductoEquivalencia.objects.filter(
                 empresa_id=empresa_id,
                 tercero=tercero,
@@ -728,7 +768,7 @@ def generar_borrador_desde_captura(
                 confirmado_por__isnull=False,
             ).select_related('producto_unidad__producto', 'producto_unidad__unidad_codigo').first()
 
-        if not equiv and desc_ext:
+        if clase == 'COMPRA' and not equiv and desc_ext:
             equiv = ProductoEquivalencia.objects.filter(
                 empresa_id=empresa_id,
                 tercero=tercero,
@@ -743,6 +783,12 @@ def generar_borrador_desde_captura(
             factor = equiv.factor_conversion
             cant_base = (cant * factor).quantize(Q8, rounding=ROUND_HALF_UP)
             tiene_homologacion = True
+        elif prod_venta is not None and next((u for u in prod_venta.unidades.all() if u.es_base), None):
+            prod = prod_venta
+            prod_und = next(u for u in prod_venta.unidades.all() if u.es_base)
+            factor = DECIMAL_UNO
+            cant_base = cant
+            tiene_homologacion = True
         else:
             prod = None
             prod_und = None
@@ -750,7 +796,19 @@ def generar_borrador_desde_captura(
             cant_base = cant
             tiene_homologacion = False
 
-        igv_linea = (val_linea * Decimal('0.18')).quantize(Q8, rounding=ROUND_HALF_UP)
+        # Bloque 3: afectación e IGV de la línea. XML: los del comprobante, validados igual
+        # que en el registro manual. OCR (sin esos datos): gravado al 18 %, como antes.
+        codigo_afectacion = (line_fields.get('codigo_afectacion_igv') or '').strip() or None
+        if 'igv' in line_fields and (line_fields.get('igv') or '').strip():
+            igv_linea = parse_dec(line_fields['igv'])
+        else:
+            igv_linea = None
+        afectacion_igv, codigo_afectacion = resolver_afectacion(
+            afectacion=None, codigo=codigo_afectacion, es_bonificacion=False, linea_num=index,
+        )
+        if igv_linea is None:
+            igv_linea = (val_linea * TASA_IGV).quantize(Q8, rounding=ROUND_HALF_UP) if afectacion_igv == 'GRAVADO' else DECIMAL_CERO
+        validar_igv_linea(igv=igv_linea, base=val_linea, afectacion=afectacion_igv, linea_num=index)
 
         # Cálculo de Costo Unitario PEN (C-04: factor de empaque, moneda USD e IGV no recuperable)
         valor_linea_calc = cant * precio
@@ -763,10 +821,21 @@ def generar_borrador_desde_captura(
         else:
             costo_linea_pen = costo_linea_doc
 
-        if cant_base > DECIMAL_CERO:
+        if clase != 'COMPRA':
+            # Venta: el costo lo asigna el motor (CPP o costo del movimiento origen),
+            # nunca el precio de venta del comprobante.
+            costo_unitario_pen = None
+        elif cant_base > DECIMAL_CERO:
             costo_unitario_pen = (costo_linea_pen / cant_base).quantize(Q8, rounding=ROUND_HALF_UP)
         else:
             costo_unitario_pen = DECIMAL_CERO
+
+        # Devolución física: vincular la línea del documento de origen cuando es inequívoca.
+        detalle_origen = None
+        if documento_origen is not None and prod is not None and tipo_op.naturaleza in ('ENTRADA', 'SALIDA'):
+            candidatas = list(documento_origen.detalles.filter(producto=prod)[:2])
+            if len(candidatas) == 1:
+                detalle_origen = candidatas[0]
 
         det = DocumentoDetalle.objects.create(
             documento=documento,
@@ -775,7 +844,7 @@ def generar_borrador_desde_captura(
             producto_unidad=prod_und,
             almacen=almacen,
             tipo_operacion=tipo_op,
-            afecta_kardex_aplicado=True,
+            afecta_kardex_aplicado=tipo_op.afecta_kardex,
             equivalencia=equiv,
             descripcion_original=desc_ext or (prod.descripcion if prod else f'Ítem {index}'),
             cantidad_original=cant,
@@ -786,7 +855,25 @@ def generar_borrador_desde_captura(
             porcentaje_credito_fiscal_aplicado=porcentaje_cf,
             costo_unitario_pen=costo_unitario_pen,
             es_bonificacion=False,
+            afectacion_igv=afectacion_igv,
+            codigo_afectacion_igv=codigo_afectacion,
+            detalle_origen=detalle_origen,
         )
+
+        if (tipo_comp.es_nota and documento_origen is not None and prod is not None
+                and tipo_op.naturaleza in ('ENTRADA', 'SALIDA') and detalle_origen is None):
+            inc_det = Incidencia.objects.create(
+                empresa_id=empresa_id, periodo=periodo, documento=documento, documento_detalle=det,
+                producto=prod, tipo='DETALLE_ORIGEN_PENDIENTE', severidad='ADVERTENCIA',
+                bloquea_cierre=True, estado='PENDIENTE',
+                descripcion=(
+                    f'Línea #{det.linea}: no se pudo identificar de forma única la línea del documento de origen '
+                    f'{documento_origen.serie_normalizada}-{documento_origen.numero_normalizado} para '
+                    f'{prod.codigo_interno}. Regístrela manualmente.'
+                ),
+                detalle={'documento_id': documento.id, 'documento_origen_id': documento_origen.id},
+            )
+            incidencias_creadas.append({'incidencia_id': inc_det.id, 'tipo': 'DETALLE_ORIGEN_PENDIENTE', 'linea': det.linea})
 
         if not tiene_homologacion:
             # Regla: Registrar Incidencia bloqueante 'PRODUCTO_SIN_HOMOLOGAR'
@@ -801,14 +888,15 @@ def generar_borrador_desde_captura(
                 bloquea_cierre=True,
                 estado='PENDIENTE',
                 descripcion=(
-                    f"Línea #{det.linea} ({cod_ext or desc_ext}) del proveedor {tercero.razon_social} "
+                    f"Línea #{det.linea} ({cod_ext or desc_ext}) "
+                    f"{'del proveedor ' + tercero.razon_social + ' ' if clase == 'COMPRA' and tercero else ''}"
                     f"no cuenta con equivalencia confirmada en ProductoEquivalencia."
                 ),
                 detalle={
                     'documento_id': documento.id,
                     'documento_detalle_id': det.id,
                     'linea': det.linea,
-                    'tercero_id': tercero.id,
+                    'tercero_id': tercero.id if tercero else None,
                     'codigo_externo': cod_ext,
                     'descripcion_externa': desc_ext,
                     'unidad_externa': und_ext,
@@ -845,6 +933,8 @@ def generar_borrador_desde_captura(
 
     return {
         'documento_id': documento.id,
+        'clase': documento.clase,
+        'tipo_operacion': tipo_op.codigo_interno,
         'serie_numero': f"{documento.serie_normalizada}-{documento.numero_normalizado}",
         'estado': documento.estado,
         'estado_revision': documento.estado_revision,
