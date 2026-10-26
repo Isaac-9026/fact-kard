@@ -15,6 +15,7 @@ Contra Gunicorn directo (sin Nginx), dentro del VPS:
 Código de salida: 0 si todo pasó, 1 si algo falló. Nunca imprime la contraseña ni el token.
 """
 import argparse
+import http.cookiejar
 import getpass
 import json
 import os
@@ -33,6 +34,15 @@ class Cliente:
         self.token = None
         self.empresa_id = None
         self.contexto = ssl._create_unverified_context() if inseguro else None  # noqa: S323 — solo pruebas locales
+        # Bloque 9: con AUTH_COOKIE_ENABLED=True la sesión viaja en la cookie HttpOnly.
+        self.cookies = http.cookiejar.CookieJar()
+        self.abridor = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=self.contexto), urllib.request.HTTPCookieProcessor(self.cookies),
+        )
+        self.modo_cookie = False
+
+    def cookie(self, nombre):
+        return next((c.value for c in self.cookies if c.name == nombre), None)
 
     def pedir(self, metodo, ruta, datos=None, params=None, crudo=False):
         url = self.base + ruta
@@ -47,11 +57,14 @@ class Cliente:
             req.add_header('Host', self.host)
         if self.token:
             req.add_header('Authorization', f'Bearer {self.token}')
+        if self.modo_cookie and metodo not in ('GET', 'HEAD', 'OPTIONS') and self.cookie('csrftoken'):
+            req.add_header('X-CSRFToken', self.cookie('csrftoken'))
+            req.add_header('Referer', self.base + '/')
         if self.empresa_id:
             req.add_header('X-Empresa-Id', str(self.empresa_id))
         inicio = time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=60, context=self.contexto) as resp:
+            with self.abridor.open(req, timeout=60) as resp:
                 contenido = resp.read()
                 estado = resp.status
         except urllib.error.HTTPError as err:
@@ -119,11 +132,13 @@ def main():
 
     estado, data, ms = c.pedir('POST', '/api/usuarios/login/', {'username': args.usuario, 'password': clave})
     del clave
-    r.ok('Login', estado == 200 and bool((data or {}).get('token')), estado, ms)
-    if estado != 200 or not data.get('token'):
+    c.token = (data or {}).get('token')
+    c.modo_cookie = estado == 200 and not c.token and c.cookie('fk_sesion') is not None
+    r.ok('Login', estado == 200 and (bool(c.token) or c.modo_cookie), estado, ms,
+         'sesión por cookie HttpOnly' if c.modo_cookie else 'sesión por token')
+    if estado != 200 or not (c.token or c.modo_cookie):
         print('\nNo se pudo iniciar sesión; se detiene la prueba.')
         return 1
-    c.token = data['token']
     empresas = data.get('empresas') or []
     try:
         c.empresa_id = args.empresa or (empresas[0]['id'] if empresas else None)
@@ -179,6 +194,8 @@ def main():
         estado, _, ms = c.pedir('GET', '/api/usuarios/me/')
         r.ok('Token revocado tras logout', estado == 401, estado, ms)
         c.token = None
+        if c.modo_cookie:
+            r.ok('Cookie de sesión borrada', not c.cookie('fk_sesion'), '-', 0)
 
     print(f"\n{'TODO OK' if not r.fallos else f'{r.fallos} FALLO(S)'}")
     return 1 if r.fallos else 0

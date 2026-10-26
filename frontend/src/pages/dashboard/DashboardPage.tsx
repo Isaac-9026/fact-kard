@@ -31,11 +31,11 @@ import {
 import { PageHeader } from '../../components/ui/page-header'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, KpiCard } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
+import { formatearDecimal } from '../../utils/decimal'
 
-const formatQty = (v: string | number) =>
-  Number(v).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-const formatMoney = (v: string | number) =>
-  `S/ ${Number(v).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+// Bloque 9: redondeo decimal ROUND_HALF_UP (sin pasar por float).
+const formatQty = (v: string | number) => formatearDecimal(v, { min: 2, max: 6 })
+const formatMoney = (v: string | number) => `S/ ${formatearDecimal(v)}`
 
 interface DatosDashboard {
   periodo: PeriodoDashboard | null

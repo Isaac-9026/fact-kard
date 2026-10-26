@@ -30,7 +30,8 @@ export interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   verificandoSesion: boolean;
-  login: (token: string, usuario: Usuario, empresas: EmpresaAsociada[]) => void;
+  /** token null/ausente = sesión por cookie HttpOnly. */
+  login: (token: string | null, usuario: Usuario, empresas: EmpresaAsociada[]) => void;
   logout: () => void;
   registrarEmpresaDisponible: (empresa: EmpresaAsociada) => void;
   refrescarEmpresasDisponibles: () => Promise<EmpresaAsociada[]>;

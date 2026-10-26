@@ -52,6 +52,7 @@ import { Label } from '../../components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs'
 import { Modal } from '../../components/ui/modal'
 import { diferirCarga } from '../../utils/efectos'
+import { formatearDecimal } from '../../utils/decimal'
 
 type TabId = 'saldos' | 'notas'
 
@@ -702,13 +703,13 @@ export const OperacionesInternasPage = () => {
                           </Badge>
                         </TableCell>
                         <TableCell numeric className="font-bold text-slate-800">
-                          {Number(s.cantidad).toFixed(4)}
+                          {formatearDecimal(s.cantidad, { min: 4, max: 8 })}
                         </TableCell>
                         <TableCell numeric className="font-bold text-slate-900">
-                          S/ {Number(s.valor_pen).toFixed(2)}
+                          S/ {formatearDecimal(s.valor_pen)}
                         </TableCell>
                         <TableCell numeric className="font-bold text-indigo-700">
-                          S/ {Number(s.cpp_inicial).toFixed(6)}
+                          S/ {formatearDecimal(s.cpp_inicial, { min: 6, max: 6 })}
                         </TableCell>
                         <TableCell>
                           <Badge variant={s.estado === 'CONFIRMADO' ? 'success' : 'warning'} dot>

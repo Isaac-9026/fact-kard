@@ -44,27 +44,16 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
+import { formatearDecimal } from '../../utils/decimal';
 
-const formatQty = (val: string | null | undefined): string => {
+// Bloque 9: formato con redondeo decimal ROUND_HALF_UP (sin pasar por float).
+const formatear = (val: string | null | undefined, min: number, max: number): string => {
   if (val === null || val === undefined || val === '') return '—';
-  const num = Number(val);
-  if (isNaN(num)) return String(val);
-  return num.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  return formatearDecimal(val, { min, max, vacio: String(val) });
 };
-
-const formatCost = (val: string | null | undefined): string => {
-  if (val === null || val === undefined || val === '') return '—';
-  const num = Number(val);
-  if (isNaN(num)) return String(val);
-  return num.toLocaleString('es-PE', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
-};
-
-const formatMoney = (val: string | null | undefined): string => {
-  if (val === null || val === undefined || val === '') return '—';
-  const num = Number(val);
-  if (isNaN(num)) return String(val);
-  return num.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+const formatQty = (val: string | null | undefined): string => formatear(val, 2, 6);
+const formatCost = (val: string | null | undefined): string => formatear(val, 4, 6);
+const formatMoney = (val: string | null | undefined): string => formatear(val, 2, 2);
 
 export const KardexPage: React.FC = () => {
   const { empresaActiva } = useAuth();

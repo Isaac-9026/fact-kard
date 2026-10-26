@@ -12,11 +12,13 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table'
 import { Badge } from '../../components/ui/badge'
 import { Input } from '../../components/ui/input'
+import { formatearDecimal } from '../../utils/decimal'
 
-const formatQty = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-const formatCost = (n: number | null) =>
-  n === null ? '—' : n.toLocaleString('es-PE', { minimumFractionDigits: 4, maximumFractionDigits: 6 })
-const formatMoney = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// La API de saldos actuales entrega números; se formatean desde su representación decimal
+// más corta con redondeo ROUND_HALF_UP (Bloque 9).
+const formatQty = (n: number) => formatearDecimal(n, { min: 2, max: 6 })
+const formatCost = (n: number | null) => formatearDecimal(n, { min: 4, max: 6 })
+const formatMoney = (n: number) => formatearDecimal(n)
 
 /**
  * Inventario (stock actual): lectura de los saldos vigentes que mantiene el motor Kardex

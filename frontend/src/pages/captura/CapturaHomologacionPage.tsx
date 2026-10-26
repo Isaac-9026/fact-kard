@@ -56,6 +56,7 @@ import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
+import { formatearDecimal } from '../../utils/decimal';
 
 export const CapturaHomologacionPage: React.FC = () => {
   const { empresaActiva } = useAuth();
@@ -639,8 +640,8 @@ export const CapturaHomologacionPage: React.FC = () => {
                   {/* Barra de Acciones de la Captura */}
                   <Card>
                     <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-bold text-slate-900">
                             Captura #{capturaDetalle.id} [{capturaDetalle.tipo}]
                           </span>
@@ -654,7 +655,7 @@ export const CapturaHomologacionPage: React.FC = () => {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-[11px] font-mono text-slate-500 mt-1 select-all">
+                        <p className="text-[11px] font-mono text-slate-500 mt-1 select-all break-all">
                           Hash SHA-256: {capturaDetalle.hash_sha256}
                         </p>
                       </div>
@@ -849,13 +850,13 @@ export const CapturaHomologacionPage: React.FC = () => {
                                   </td>
                                   <td className="py-2 px-3 text-slate-600">{undVal}</td>
                                   <td className="py-2 px-3 text-right text-slate-800">
-                                    {Number(cantVal).toFixed(2)}
+                                    {formatearDecimal(cantVal, { min: 2, max: 8, vacio: String(cantVal ?? '') })}
                                   </td>
                                   <td className="py-2 px-3 text-right text-slate-600">
-                                    S/ {Number(precVal).toFixed(4)}
+                                    S/ {formatearDecimal(precVal, { min: 4, max: 8, vacio: String(precVal ?? '') })}
                                   </td>
                                   <td className="py-2 px-3 text-right font-bold text-slate-900">
-                                    S/ {Number(totVal).toFixed(2)}
+                                    S/ {formatearDecimal(totVal, { vacio: String(totVal ?? '') })}
                                   </td>
                                   <td className="py-2 px-3 text-center">
                                     {renderConfianzaBadge(codCampo?.confianza || '100.0000')}
@@ -1026,7 +1027,7 @@ export const CapturaHomologacionPage: React.FC = () => {
                           </td>
                           <td className="py-2.5 px-3 text-slate-600 font-mono">{eq.producto_info?.unidad_codigo}</td>
                           <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">
-                            {Number(eq.factor_conversion).toFixed(4)}
+                            {formatearDecimal(eq.factor_conversion, { min: 4, max: 8 })}
                           </td>
                           <td className="py-2.5 px-3 text-slate-600 text-[11px]">
                             <span>{eq.confirmado_por_username || 'Admin'}</span>

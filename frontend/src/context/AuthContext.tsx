@@ -4,13 +4,16 @@ import { registrarManejadorSesionInvalida, reiniciarControlSesion } from '../api
 import type { Usuario, EmpresaAsociada, EmpresaActiva } from '../types/auth';
 import { reconciliarEstadoEmpresas } from './authState';
 import { AuthContext } from './useAuth';
+import { borrarCredencial, guardarCredencial, leerCredencial } from '../utils/credencialSesion';
 
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const refrescoEmpresasEnCurso = useRef<Promise<EmpresaAsociada[]> | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
-  // FE-002: con un token guardado, no se muestra contenido privado hasta que /me lo valide.
-  const [verificandoSesion, setVerificandoSesion] = useState<boolean>(() => Boolean(localStorage.getItem('token')));
+  // Bloque 9: `token` es la credencial de sesión: el token (modo actual) o la marca de cookie
+  // HttpOnly (el token real no es accesible para JavaScript). Ver utils/credencialSesion.ts.
+  const [token, setToken] = useState<string | null>(() => leerCredencial(localStorage));
+  // FE-002: con una sesión guardada, no se muestra contenido privado hasta que /me la valide.
+  const [verificandoSesion, setVerificandoSesion] = useState<boolean>(() => Boolean(leerCredencial(localStorage)));
   const [usuario, setUsuario] = useState<Usuario | null>(() => {
     const saved = localStorage.getItem('usuario');
     if (!saved) return null;
@@ -98,14 +101,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .finally(() => setVerificandoSesion(false));
   }, [refrescarEmpresasDisponibles, token]);
 
-  const login = (newToken: string, newUsuario: Usuario, empresas: EmpresaAsociada[]) => {
+  const login = (newToken: string | null, newUsuario: Usuario, empresas: EmpresaAsociada[]) => {
     reiniciarControlSesion();
     setVerificandoSesion(false);
-    setToken(newToken);
+    // Sin token en la respuesta → sesión por cookie HttpOnly (no se guarda ningún token).
+    setToken(guardarCredencial(localStorage, newToken));
     setUsuario(newUsuario);
     setEmpresasDisponibles(empresas);
 
-    localStorage.setItem('token', newToken);
     localStorage.setItem('usuario', JSON.stringify(newUsuario));
     localStorage.setItem('empresas_disponibles', JSON.stringify(empresas));
 
@@ -132,8 +135,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = useCallback(() => {
-    const tokenActual = localStorage.getItem('token');
-    if (tokenActual) void logoutApi(tokenActual);
+    const credencial = leerCredencial(localStorage);
+    if (credencial) void logoutApi(credencial);
     setVerificandoSesion(false);
     setToken(null);
     setUsuario(null);
@@ -142,7 +145,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     sessionStorage.removeItem('empresa_id');
     sessionStorage.removeItem('empresa_activa');
-    localStorage.removeItem('token');
+    borrarCredencial(localStorage);
     localStorage.removeItem('empresa_id');
     localStorage.removeItem('usuario');
     localStorage.removeItem('empresas_disponibles');

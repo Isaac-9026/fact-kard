@@ -1,5 +1,6 @@
 // Bloque 3: afectación del IGV por línea. Solo sugiere el IGV en pantalla;
 // el backend es quien valida (GRAVADO 18 %, EXONERADO/INAFECTO/EXPORTACION 0).
+import { baseImponible, igvEsperado } from './documentoCalculo.ts';
 
 export type AfectacionIgv = 'GRAVADO' | 'EXONERADO' | 'INAFECTO' | 'EXPORTACION' | 'GRATUITO';
 
@@ -15,16 +16,19 @@ export const AFECTACIONES_IGV: { valor: AfectacionIgv; etiqueta: string }[] = [
 // solo se usa mientras no se haya leído la configuración.
 export const TASA_IGV_POR_DEFECTO_PCT = '18.00';
 
-/** IGV sugerido para la línea, o null si la afectación no tiene tasa que sugerir (GRATUITO). */
+/**
+ * IGV sugerido para la línea, o null si la afectación no tiene tasa que sugerir (GRATUITO).
+ * Bloque 9: es exactamente el IGV que espera el backend (base × tasa a céntimos, ROUND_HALF_UP,
+ * en decimal exacto). Antes se calculaba con float y 8 decimales sin redondear a céntimos
+ * (p. ej. 2.5 × 0.066775 al 18 % → 0.03004875 en vez de 0.03).
+ */
 export function igvSugerido(
   afectacion: AfectacionIgv, cantidad: string, precio: string, tasaPct: string = TASA_IGV_POR_DEFECTO_PCT,
+  naturaleza?: string,
 ): string | null {
   if (afectacion === 'GRATUITO') return null;
   if (afectacion !== 'GRAVADO') return '0.00000000';
-  const cant = parseFloat(cantidad) || 0;
-  const pu = parseFloat(precio) || 0;
-  const tasa = (parseFloat(tasaPct) || 0) / 100;
-  return (cant * pu * tasa).toFixed(8);
+  return igvEsperado(baseImponible(precio, cantidad, naturaleza), tasaPct);
 }
 
 export interface TasaIgvVigencia { vigente_desde: string; tasa_pct: string }

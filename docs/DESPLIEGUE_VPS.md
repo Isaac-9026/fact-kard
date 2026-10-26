@@ -399,17 +399,13 @@ Nada de esto se automatiza: cada paso lo decide una persona.
 
 ---
 
-## Cookie HttpOnly (preparada, sigue APAGADA)
+## Cookie HttpOnly (lista, sigue APAGADA hasta tener HTTPS)
 
-La autenticación actual (token en `Authorization: Bearer`) funciona sin cambios. Con el VPS
-ya publicado en `https://sistema.asescon.net` se cumplen las condiciones técnicas para la
-cookie (frontend y API en el **mismo dominio**, HTTPS, Nginx), pero falta migrar el frontend.
-Pasos, en este orden, como cambio propio con su prueba:
+Bloque 9: backend **y frontend** soportan la sesión por cookie HttpOnly; el frontend detecta el
+modo por la respuesta del login. La autenticación actual (token) sigue siendo la de por
+defecto. Para activarla en el VPS, con HTTPS ya funcionando:
 
-1. Frontend: `withCredentials: true` en axios, `xsrfCookieName: 'csrftoken'` /
-   `xsrfHeaderName: 'X-CSRFToken'`, quitar el token de `localStorage` y del encabezado,
-   decidir la sesión con `GET /api/usuarios/me/` (detalle en `SEGURIDAD_TOKEN_LOCALSTORAGE.md`).
-2. `backend/.env`:
+1. `backend/.env`:
    ```
    AUTH_COOKIE_ENABLED=True
    AUTH_COOKIE_SECURE=True
@@ -417,11 +413,15 @@ Pasos, en este orden, como cambio propio con su prueba:
    AUTH_COOKIE_DOMAIN=            # vacío: cookie solo para sistema.asescon.net
    CSRF_TRUSTED_ORIGINS=https://sistema.asescon.net
    ```
-3. Nginx: sin cambios (ya pasa `Host`, `X-Forwarded-Proto` y sirve todo en el mismo origen).
-4. Desplegar backend y frontend **juntos** (activar la cookie con el frontend actual rompe el
-   login, porque el login deja de devolver el token).
-5. Smoke test; verificar en el navegador que `fk_sesion` aparezca como `HttpOnly; Secure;
-   SameSite=Lax` y que `localStorage` ya no tenga `token`.
+2. Frontend: nada que cambiar (mismo dominio: el navegador envía la cookie solo).
+   `VITE_AUTH_COOKIE=true` solo hace falta si frontend y API quedaran en dominios distintos.
+3. Nginx: sin cambios (pasa `Host` y `X-Forwarded-Proto`; todo en el mismo origen).
+4. `sudo systemctl restart fact-kard`. Las sesiones por token abiertas siguen siendo válidas
+   hasta que expiren; los nuevos inicios de sesión usan la cookie.
+5. Smoke test (`deploy/scripts/smoke_test.py`, detecta el modo) y revisión en el navegador:
+   `fk_sesion` como `HttpOnly; Secure; SameSite=Lax` y `localStorage` sin `token`.
+
+Volver al modo token: `AUTH_COOKIE_ENABLED=False` y reiniciar.
 
 El backend valida al arrancar que `SameSite=None` lleve `Secure` y que en producción la cookie
 sea `Secure` (`apps/usuarios/tests_b7_produccion.py`, `tests_b8_produccion.py`).

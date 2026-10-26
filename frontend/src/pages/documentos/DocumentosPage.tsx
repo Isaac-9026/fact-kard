@@ -62,6 +62,8 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table'
 import { Badge } from '../../components/ui/badge'
+import { cantidadBase, importeLinea, totalesDocumento } from '../../utils/documentoCalculo'
+import { esMayorQueCero, formatearDecimal } from '../../utils/decimal'
 import { AFECTACIONES_IGV, TASA_IGV_POR_DEFECTO_PCT, igvEditable, igvSugerido, tasaVigente, type AfectacionIgv, type TasaIgvVigencia } from '../../utils/afectacionIgv'
 import { obtenerConfigEmpresa } from '../../api/empresas'
 import { Input } from '../../components/ui/input'
@@ -89,7 +91,8 @@ interface LineaFormulario {
   descripcionOriginal: string
   detalleOrigenId?: number | ''
   unidadesDisponibles: ProductoUnidad[]
-  factorConversion: number
+  /** Texto decimal tal como lo entrega la API (sin pasar por float). */
+  factorConversion: string
 }
 
 export interface DocumentosPageProps {
@@ -292,7 +295,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     esBonificacion: false,
     descripcionOriginal: '',
     unidadesDisponibles: [],
-    factorConversion: 1,
+    factorConversion: '1',
   }), [almacenes, tiposOperacion])
 
   const agregarLinea = () => {
@@ -303,15 +306,33 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     setLineas((prev) => prev.filter((l) => l.tempId !== tempId))
   }
 
+  // Bloque 9: IGV sugerido en decimal exacto (= igv_esperado del backend), con la naturaleza
+  // de la operación (un ajuste de valor sin cantidad usa el precio como base).
+  const sugerirIgvLinea = (linea: LineaFormulario, tasaPct: string) => {
+    const naturaleza = tiposOperacion.find((t) => t.id === linea.tipoOperacionId)?.naturaleza
+    return igvSugerido(linea.afectacionIgv, linea.cantidadOriginal, linea.precioUnitario, tasaPct, naturaleza)
+  }
+
+  // Al cambiar la fecha puede cambiar la tasa vigente (Bloque 5): se vuelve a sugerir el IGV.
+  const cambiarFechaEmision = (fecha: string) => {
+    setFormFechaEmision(fecha)
+    const tasa = tasaVigente(tasasIgv, fecha, tasaIgvActual)
+    setLineas((prev) => prev.map((l) => {
+      if (l.esBonificacion) return l
+      const sugerido = sugerirIgvLinea(l, tasa)
+      return sugerido === null ? l : { ...l, igv: sugerido }
+    }))
+  }
+
   const actualizarLinea = async (tempId: string, campo: string, valor: unknown) => {
     setLineas((prev) =>
       prev.map((l) => {
         if (l.tempId !== tempId) return l
         const actualizada = { ...l, [campo]: valor }
 
-        if (campo === 'precioUnitario' || campo === 'cantidadOriginal' || campo === 'afectacionIgv') {
+        if (campo === 'precioUnitario' || campo === 'cantidadOriginal' || campo === 'afectacionIgv' || campo === 'tipoOperacionId') {
           if (!actualizada.esBonificacion) {
-            const sugerido = igvSugerido(actualizada.afectacionIgv, actualizada.cantidadOriginal, actualizada.precioUnitario, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
+            const sugerido = sugerirIgvLinea(actualizada, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
             if (sugerido !== null) actualizada.igv = sugerido
           }
         }
@@ -340,7 +361,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
               ...l,
               unidadesDisponibles: unidades,
               productoUnidadId: unidadBase ? unidadBase.id : '',
-              factorConversion: unidadBase ? parseFloat(unidadBase.factor_a_base) : 1,
+              factorConversion: unidadBase ? unidadBase.factor_a_base : '1',
             }
           })
         )
@@ -356,7 +377,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           const u = l.unidadesDisponibles.find((unit) => unit.id === Number(valor))
           return {
             ...l,
-            factorConversion: u ? parseFloat(u.factor_a_base) : 1,
+            factorConversion: u ? u.factor_a_base : '1',
           }
         })
       )
@@ -364,23 +385,13 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   }
 
   // Totales en vivo
+  // Los importes del formulario están en la moneda del comprobante (no se convierten a PEN aquí).
+  const simboloMoneda = formMoneda === 'USD' ? 'US$' : 'S/'
+
+  // Bloque 9: mismos totales que guardará el backend (decimal exacto, ROUND_HALF_UP).
   const totalesCalculados = useMemo(() => {
-    let subtotal = 0
-    let igvTotal = 0
-
-    lineas.forEach((l) => {
-      const cant = parseFloat(l.cantidadOriginal) || 0
-      const precio = parseFloat(l.precioUnitario) || 0
-      const igv = parseFloat(l.igv) || 0
-      subtotal += cant * precio
-      igvTotal += igv
-    })
-
-    return {
-      subtotal: subtotal.toFixed(2),
-      igv: igvTotal.toFixed(2),
-      total: (subtotal + igvTotal).toFixed(2),
-    }
+    const t = totalesDocumento(lineas.map((l) => ({ cantidad: l.cantidadOriginal, precio: l.precioUnitario, igv: l.igv })))
+    return { subtotal: formatearDecimal(t.subtotal), igv: formatearDecimal(t.igv), total: formatearDecimal(t.total) }
   }, [lineas])
 
   const handleGuardarDocumento = async (e: React.FormEvent) => {
@@ -431,7 +442,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
         setErrorGlobal(`Línea ${i + 1}: Debe seleccionar un tipo de operación.`)
         return
       }
-      if (parseFloat(l.cantidadOriginal) <= 0) {
+      if (!esMayorQueCero(l.cantidadOriginal)) {
         setErrorGlobal(`Línea ${i + 1}: La cantidad debe ser mayor a 0.`)
         return
       }
@@ -772,19 +783,19 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                           <span className="font-mono font-bold text-xs text-slate-800">{doc.moneda_codigo}</span>
                           {doc.moneda_codigo === 'USD' && (
                             <span className="font-mono text-[10px] text-slate-500">
-                              TC: {doc.monto_tc ? Number(doc.monto_tc).toFixed(4) : '-'}
+                              TC: {formatearDecimal(doc.monto_tc, { min: 4, max: 4, vacio: '-' })}
                             </span>
                           )}
                         </div>
                       </TableCell>
                       <TableCell numeric className="font-medium text-slate-800">
-                        {Number(doc.subtotal).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatearDecimal(doc.subtotal)}
                       </TableCell>
                       <TableCell numeric className="text-slate-600">
-                        {Number(doc.igv).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatearDecimal(doc.igv)}
                       </TableCell>
                       <TableCell numeric className="font-bold text-slate-950 text-sm">
-                        {Number(doc.total).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatearDecimal(doc.total)}
                       </TableCell>
                       <TableCell>
                         <Badge variant={revVariant} size="sm" dot>
@@ -887,13 +898,13 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           title="Registrar Comprobante Comercial"
           description="Captura manual de facturas, boletas y notas de crédito/débito con validación estricta."
           footer={
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-4 text-xs font-mono tabular-nums">
-                <span>Subtotal: <strong className="text-slate-900">S/ {totalesCalculados.subtotal}</strong></span>
-                <span>IGV: <strong className="text-slate-900">S/ {totalesCalculados.igv}</strong></span>
-                <span className="text-sm">Total: <strong className="text-indigo-600 font-bold">S/ {totalesCalculados.total}</strong></span>
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono tabular-nums">
+                <span>Subtotal: <strong className="text-slate-900">{simboloMoneda} {totalesCalculados.subtotal}</strong></span>
+                <span>IGV: <strong className="text-slate-900">{simboloMoneda} {totalesCalculados.igv}</strong></span>
+                <span className="text-sm">Total: <strong className="text-indigo-600 font-bold">{simboloMoneda} {totalesCalculados.total}</strong></span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={() => setModalNuevoAbierto(false)}>
                   Cancelar
                 </Button>
@@ -1007,7 +1018,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                   <Input
                     type="date"
                     value={formFechaEmision}
-                    onChange={(e) => setFormFechaEmision(e.target.value)}
+                    onChange={(e) => cambiarFechaEmision(e.target.value)}
                     required
                     className="font-mono tabular-nums"
                   />
@@ -1031,7 +1042,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                       disabled
                       value={
                         tcResuelto
-                          ? `${Number(tcResuelto.venta).toFixed(4)} (${tcResuelto.fecha_publicacion})`
+                          ? `${formatearDecimal(tcResuelto.venta, { min: 4, max: 4 })} (${tcResuelto.fecha_publicacion})`
                           : 'Sin TC registrado a la fecha'
                       }
                       className={tcResuelto ? 'text-emerald-700 font-bold font-mono' : 'text-rose-600 font-mono'}
@@ -1090,9 +1101,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {lineas.map((linea, idx) => {
-                      const cant = parseFloat(linea.cantidadOriginal) || 0
-                      const factor = linea.factorConversion || 1
-                      const cantBase = (cant * factor).toFixed(2)
+                      const cantBase = formatearDecimal(cantidadBase(linea.cantidadOriginal, linea.factorConversion), { min: 2, max: 6 })
 
                       return (
                         <tr key={linea.tempId} className="hover:bg-slate-50/50">
@@ -1265,7 +1274,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
               <div>
                 <span className="text-slate-400 block">Moneda / Total:</span>
                 <strong className="font-mono text-slate-900 text-sm">
-                  {modalDetalleDocumento.moneda_codigo} {Number(modalDetalleDocumento.total).toFixed(2)}
+                  {modalDetalleDocumento.moneda_codigo} {formatearDecimal(modalDetalleDocumento.total)}
                 </strong>
               </div>
             </div>
@@ -1291,19 +1300,19 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                       </TableCell>
                       <TableCell>{det.almacen_nombre || det.almacen}</TableCell>
                       <TableCell numeric className="font-bold">
-                        {Number(det.cantidad_original).toFixed(4)}
+                        {formatearDecimal(det.cantidad_original, { min: 2, max: 8 })}
                       </TableCell>
                       <TableCell numeric>
-                        {Number(det.precio_unitario).toFixed(4)}
+                        {formatearDecimal(det.precio_unitario, { min: 4, max: 8 })}
                       </TableCell>
                       <TableCell numeric>
-                        {Number(det.igv).toFixed(2)}
+                        {formatearDecimal(det.igv)}
                         {det.afectacion_igv && det.afectacion_igv !== 'GRAVADO' && (
                           <span className="ml-1 text-[10px] text-slate-500">{det.afectacion_igv}</span>
                         )}
                       </TableCell>
                       <TableCell numeric className="font-bold text-slate-900">
-                        {(Number(det.cantidad_original) * Number(det.precio_unitario)).toFixed(2)}
+                        {formatearDecimal(importeLinea(det.cantidad_original, det.precio_unitario))}
                       </TableCell>
                     </TableRow>
                   ))}

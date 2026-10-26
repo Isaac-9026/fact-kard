@@ -34,7 +34,7 @@ export const LoginPage: React.FC = () => {
         password,
       })
 
-      login(data.token, data.usuario, data.empresas)
+      login(data.token ?? null, data.usuario, data.empresas)
       navigate(RUTA_INICIAL)
     } catch (err) {
       const axiosError = err as AxiosError<{ detail?: string }>

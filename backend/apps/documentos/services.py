@@ -556,9 +556,12 @@ def crear_documento(
 
     # Actualizar totales en la cabecera
     total_acum = subtotal_acum + igv_acum
-    documento.subtotal = subtotal_acum.quantize(Decimal('0.00000001'))
-    documento.igv = igv_acum.quantize(Decimal('0.00000001'))
-    documento.total = total_acum.quantize(Decimal('0.00000001'))
+    # Bloque 9: redondeo explícito ROUND_HALF_UP (antes, sin `rounding`, Python usaba
+    # ROUND_HALF_EVEN y un empate en el 9.º decimal se redondeaba distinto al resto del sistema).
+    ocho = Decimal('0.00000001')
+    documento.subtotal = subtotal_acum.quantize(ocho, rounding=ROUND_HALF_UP)
+    documento.igv = igv_acum.quantize(ocho, rounding=ROUND_HALF_UP)
+    documento.total = total_acum.quantize(ocho, rounding=ROUND_HALF_UP)
     documento.save(update_fields=['subtotal', 'igv', 'total'])
 
     registrar_auditoria(

@@ -36,14 +36,13 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Select } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
+import { formatearDecimal } from '../../utils/decimal';
 
 const etiqueta = (p: { anio: number; mes: number }) => `${p.anio}-${String(p.mes).padStart(2, '0')}`;
-const dinero = (v: string | number | undefined) =>
-  Number(v || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const cant = (v: string | number | undefined) =>
-  Number(v || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
-const cpp = (v: string | number | undefined) =>
-  Number(v || 0).toLocaleString('es-PE', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+// Bloque 9: redondeo decimal ROUND_HALF_UP (sin pasar por float); vacío se muestra como 0.
+const dinero = (v: string | number | undefined) => formatearDecimal(v || 0);
+const cant = (v: string | number | undefined) => formatearDecimal(v || 0, { min: 2, max: 6 });
+const cpp = (v: string | number | undefined) => formatearDecimal(v || 0, { min: 4, max: 6 });
 
 export const CierresPage: React.FC = () => {
   const { empresaActiva, usuario } = useAuth();
@@ -222,7 +221,7 @@ export const CierresPage: React.FC = () => {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="primary"
@@ -387,9 +386,9 @@ export const CierresPage: React.FC = () => {
                   Detalle de Cierre {etiqueta(seleccion.periodo_info)} · Versión v{seleccion.version_calculo}
                 </CardTitle>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-xs text-slate-500">Hash SHA-256 Completo:</span>
-                <code className="font-mono text-[10px] bg-slate-100 px-2 py-1 rounded border border-slate-200 text-slate-700 select-all">
+                <code className="min-w-0 break-all font-mono text-[10px] bg-slate-100 px-2 py-1 rounded border border-slate-200 text-slate-700 select-all">
                   {seleccion.hash_resultado}
                 </code>
               </div>

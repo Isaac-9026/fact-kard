@@ -38,6 +38,7 @@ import { Paginacion } from '../../components/ui/paginacion'
 import {
   PAGE_SIZE_DEFECTO, claveConsulta, irAPagina, paginaVigente, paramsPaginacion, type EstadoPagina,
 } from '../../utils/paginacion'
+import { formatearDecimal, restar } from '../../utils/decimal'
 
 export const IncidenciasPage: React.FC = () => {
   const { empresaActiva, usuario } = useAuth()
@@ -507,14 +508,14 @@ export const IncidenciasPage: React.FC = () => {
                       Mov #{det.movimiento_id}
                     </TableCell>
                     <TableCell numeric className="text-slate-500 font-mono">
-                      S/ {Number(det.cpp_anterior || 0).toFixed(6)}
+                      S/ {formatearDecimal(det.cpp_anterior || 0, { min: 6, max: 6 })}
                     </TableCell>
                     <TableCell className="text-center font-bold text-indigo-600">→</TableCell>
                     <TableCell numeric className="font-bold text-indigo-950 font-mono">
-                      S/ {Number(det.cpp_nuevo || 0).toFixed(6)}
+                      S/ {formatearDecimal(det.cpp_nuevo || 0, { min: 6, max: 6 })}
                     </TableCell>
                     <TableCell numeric className="font-mono text-slate-700">
-                      S/ {(Number(det.saldo_nuevo || 0) - Number(det.saldo_anterior || 0)).toFixed(4)}
+                      S/ {formatearDecimal(restar(det.saldo_nuevo || 0, det.saldo_anterior || 0).toString(), { min: 4, max: 4 })}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -44,7 +44,8 @@ export function TabsList({ className, ...props }: TabsListProps) {
   return (
     <div
       className={cn(
-        'inline-flex h-9 items-center justify-start rounded-lg bg-slate-100 p-1 text-slate-500 border border-slate-200/60',
+        // En pantallas angostas las pestañas se desplazan horizontalmente dentro de la barra.
+        'inline-flex h-9 max-w-full items-center justify-start overflow-x-auto rounded-lg bg-slate-100 p-1 text-slate-500 border border-slate-200/60',
         className
       )}
       {...props}
@@ -67,7 +68,7 @@ export function TabsTrigger({ className, value, icon, children, ...props }: Tabs
     <button
       type="button"
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer select-none',
+        'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer select-none',
         isActive
           ? 'bg-white text-slate-900 shadow-xs font-semibold'
           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50',

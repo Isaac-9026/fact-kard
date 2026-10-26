@@ -5,7 +5,8 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs transition-shadow', className)}
+      // min-w-0: dentro de un grid/flex, una tabla ancha no estira la tarjeta (la tabla se desplaza dentro).
+      className={cn('min-w-0 rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xs transition-shadow', className)}
       {...props}
     />
   )

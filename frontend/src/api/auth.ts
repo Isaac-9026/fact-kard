@@ -1,5 +1,6 @@
-import { apiClient } from './http';
+import { apiClient, asegurarCsrf } from './http';
 import type { Usuario, EmpresaAsociada } from '../types/auth';
+import { encabezadoAutorizacion, esSesionCookie } from '../utils/credencialSesion';
 
 export interface LoginCredentials {
   username: string;
@@ -7,7 +8,8 @@ export interface LoginCredentials {
 }
 
 export interface LoginResponse {
-  token: string;
+  /** Ausente cuando el backend usa la cookie HttpOnly (AUTH_COOKIE_ENABLED=True). */
+  token?: string;
   usuario: Usuario;
   empresas: EmpresaAsociada[];
 }
@@ -70,9 +72,17 @@ export const asignarUsuarioApi = async (payload: AsignarUsuarioPayload): Promise
  * Bloque 6: revoca el token en el servidor (logout efectivo). Es "best effort": si falla
  * (sin red o token ya inválido) la sesión local se limpia igual.
  */
-export const logoutApi = async (token: string): Promise<void> => {
+export const logoutApi = async (credencial: string): Promise<void> => {
   try {
-    await apiClient.post('/usuarios/logout/', {}, { headers: { Authorization: `Bearer ${token}` } });
+    // Los encabezados se fijan aquí porque la sesión local se limpia enseguida (el interceptor
+    // ya no la vería). Modo token: Authorization. Modo cookie: la cookie HttpOnly + CSRF.
+    const autorizacion = encabezadoAutorizacion(credencial);
+    const headers: Record<string, string> = autorizacion ? { Authorization: autorizacion } : {};
+    if (esSesionCookie(credencial)) {
+      const csrf = await asegurarCsrf();
+      if (csrf) headers['X-CSRFToken'] = csrf;
+    }
+    await apiClient.post('/usuarios/logout/', {}, { headers });
   } catch {
     // sin acción: el token igual se elimina del navegador
   }

@@ -96,3 +96,36 @@ servidor listo y probado, apagado por defecto.
 4. Desplegar backend y frontend juntos (activar la cookie sin el frontend nuevo rompe el
    login actual, que espera `token` en la respuesta).
 5. Agregar Content-Security-Policy en el servidor web del frontend.
+
+## Bloque 9 — soporte HttpOnly completo (frontend + backend), sigue APAGADO por defecto
+
+El frontend ya soporta los dos modos y los distingue por la respuesta del login:
+
+| | Modo token (actual, por defecto) | Modo cookie HttpOnly |
+| --- | --- | --- |
+| Backend | `AUTH_COOKIE_ENABLED=False` | `AUTH_COOKIE_ENABLED=True` |
+| Respuesta del login | `token` en el cuerpo | sin `token`; cookie `fk_sesion` HttpOnly |
+| `localStorage` | `token` | solo la marca `sesion_cookie=1` (no es una credencial) |
+| Peticiones | `Authorization: Bearer` | la cookie viaja sola; escrituras con `X-CSRFToken` |
+| Logout | revoca el token | revoca la sesión y borra la cookie |
+
+Nunca se guardan ambas cosas: no hay un segundo token de respaldo
+(`frontend/src/utils/credencialSesion.ts`, con tests).
+
+**Probado en local (HTTP, sin VPS):** login sin token en la respuesta, `fk_sesion`
+`HttpOnly; SameSite=Lax; Path=/api/` invisible para JavaScript, navegación y recarga de la
+página con la sesión validada por `/me`, POST sin CSRF → 403, creación de un comprobante desde
+la aplicación con CSRF → 201, logout → 204 y `/me` → 401. El smoke test
+(`deploy/scripts/smoke_test.py`) funciona en ambos modos.
+
+Desarrollo con cookie (opcional):
+```
+# backend/.env
+AUTH_COOKIE_ENABLED=True
+CSRF_TRUSTED_ORIGINS=http://localhost:5173
+# frontend: VITE_AUTH_COOKIE=true npm run dev   (orígenes distintos 5173 → 8000)
+```
+
+**Qué falta para activarlo en producción (Bloque 10):** solo configuración, cuando el VPS
+tenga HTTPS. Pasos en `DESPLIEGUE_VPS.md` §Cookie HttpOnly. No se activa antes porque la
+cookie `Secure` exige HTTPS real.
