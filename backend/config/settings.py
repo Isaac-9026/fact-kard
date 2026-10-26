@@ -9,7 +9,11 @@ from pathlib import Path
 from decouple import config, Csv
 
 from config.cache import configurar_caches
-from config.seguridad import resolver_secret_key, validar_allowed_hosts, validar_configuracion_produccion
+from config.registro import construir_logging
+from config.seguridad import (
+    permisos_docs_api, resolver_docs_api, resolver_secret_key, validar_allowed_hosts,
+    validar_configuracion_produccion,
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -96,6 +100,9 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD', default='cambiar_esto'),
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
+        # Bloque 8: conexiones persistentes en producción (segundos; 0 = cerrar en cada petición).
+        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=0, cast=int),
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 
@@ -128,8 +135,21 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Bloque 8: en producción Nginx sirve STATIC_ROOT en /static/ (python manage.py collectstatic).
+STATIC_URL = config('STATIC_URL', default='/static/')
+STATIC_ROOT = config('STATIC_ROOT', default=str(BASE_DIR / 'staticfiles'))
+# Las capturas XML/PDF se procesan en memoria y no se guardan en disco: no hay MEDIA_ROOT.
+# Límite del cuerpo de peticiones no-archivo (JSON grandes); los archivos usan CAPTURA_MAX_BYTES.
+DATA_UPLOAD_MAX_MEMORY_SIZE = config('DATA_UPLOAD_MAX_MEMORY_SIZE', default=5 * 1024 * 1024, cast=int)
+
+# Bloque 8: logging (stdout → journald con systemd; LOG_FILE opcional con rotación).
+LOGGING = construir_logging(
+    nivel=config('LOG_LEVEL', default='INFO'),
+    archivo=config('LOG_FILE', default=''),
+    max_mb=config('LOG_FILE_MAX_MB', default=20, cast=int),
+    respaldos=config('LOG_FILE_BACKUPS', default=10, cast=int),
+    silencioso=EJECUTANDO_TESTS,
+)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -165,7 +185,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # Bloque 8: cuántos proxies confiables hay delante (Nginx = 1). Con 0 se usa REMOTE_ADDR.
+    # Antes (None) DRF usaba el X-Forwarded-For enviado por el cliente: se podía falsear la IP
+    # y saltarse el límite de intentos de login.
+    'NUM_PROXIES': config('NUM_PROXIES', default=0, cast=int),
 }
+
+# Bloque 8: documentación Swagger/OpenAPI solo si se pide (por defecto: solo en desarrollo).
+# Vacía → sigue a DEBUG. En producción solo se enciende con API_DOCS_ENABLED=True explícito,
+# y entonces exige usuario autenticado (config/seguridad.py: resolver_docs_api / permisos_docs_api).
+API_DOCS_ENABLED = resolver_docs_api(debug=DEBUG, valor=config('API_DOCS_ENABLED', default=''))
 
 # DRF Spectacular (Swagger / OpenAPI 3)
 SPECTACULAR_SETTINGS = {
@@ -173,6 +202,11 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Documentación de la API de FACT-KARD - Sistema de Facturación y Kardex Valorizado',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    # Bloque 8: con la documentación apagada (producción) no se reportan los avisos de
+    # generación del esquema OpenAPI en `check --deploy` (no son de seguridad).
+    'DISABLE_ERRORS_AND_WARNINGS': not API_DOCS_ENABLED,
+    'ENABLE_DJANGO_DEPLOY_CHECK': API_DOCS_ENABLED,
+    'SERVE_PERMISSIONS': permisos_docs_api(debug=DEBUG),
 }
 
 # CORS Configuration
@@ -198,6 +232,11 @@ SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=not DEBUG, cast=
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=not DEBUG, cast=bool)
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=0, cast=int)
+# Bloque 8: con la app en un subdominio (sistema.<dominio>), includeSubDomains solo afecta a
+# *.sistema.<dominio> (no al dominio raíz ni a su correo). PRELOAD requiere el dominio raíz:
+# dejar en False.
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=False, cast=bool)
+SECURE_HSTS_PRELOAD = config('SECURE_HSTS_PRELOAD', default=False, cast=bool)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 # Bloque 7: detrás de un proxy inverso que termina TLS (nginx, balanceador), Django debe
 # confiar en X-Forwarded-Proto para saber que la petición original fue HTTPS.
@@ -221,4 +260,7 @@ if not EJECUTANDO_TESTS:
         auth_cookie_enabled=AUTH_COOKIE_ENABLED,
         auth_cookie_secure=AUTH_COOKIE_SECURE,
         auth_cookie_samesite=AUTH_COOKIE_SAMESITE,
+        db_password=DATABASES['default']['PASSWORD'],
+        num_proxies=REST_FRAMEWORK['NUM_PROXIES'],
+        proxy_ssl_header=bool(globals().get('SECURE_PROXY_SSL_HEADER')),
     )

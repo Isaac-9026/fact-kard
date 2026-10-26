@@ -1,4 +1,9 @@
-# Configuración de producción (Bloque 7)
+# Configuración de producción (Bloques 7 y 8)
+
+> Despliegue paso a paso en el VPS (Nginx, Gunicorn, PostgreSQL, Redis, SSL, DNS, firewall,
+> backup, rollback, smoke test): **`docs/DESPLIEGUE_VPS.md`**.
+> Plantilla del `.env` de producción para `https://sistema.asescon.net`:
+> **`deploy/env.produccion.example`** (el dominio no está fijo en el código).
 
 Todas las variables van en `backend/.env` (ver `backend/.env.example`). Con `DEBUG=False`
 el backend **no arranca** si la configuración es insegura (`config/seguridad.py`) y
@@ -22,7 +27,24 @@ el backend **no arranca** si la configuración es insegura (`config/seguridad.py
 | `CACHE_URL` (alias `REDIS_URL`) | `redis://[:clave@]host:6379/0` o `rediss://…` | Vacía → memoria local (cada worker cuenta por separado; aviso `fact_kard.W001`). |
 | `CACHE_KEY_PREFIX` | `fact-kard` | Si el Redis se comparte. |
 | `PRODUCCION_SIN_HTTPS` | `False` | Excepción explícita para una intranet sin certificado (aviso `fact_kard.W003`). |
-| `AUTH_COOKIE_*` | ver `docs/SEGURIDAD_TOKEN_LOCALSTORAGE.md` | Sesión por cookie HttpOnly preparada, apagada. |
+| `AUTH_COOKIE_*` | `AUTH_COOKIE_ENABLED=False` | Sesión por cookie HttpOnly preparada, apagada (ver `DESPLIEGUE_VPS.md` §Cookie HttpOnly). |
+| `NUM_PROXIES` | `1` (Nginx delante) | **Bloque 8.** IP real para el throttling. `0` (desarrollo) usa la IP de la conexión. Con `SECURE_PROXY_SSL_HEADER_HTTPS=True` y `0` el backend no arranca. |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `True` | Solo afecta a `*.sistema.asescon.net`. `SECURE_HSTS_PRELOAD` queda en `False` (exige el dominio raíz; aviso `security.W021` esperado). |
+| `DB_NAME`, `DB_USER`, `DB_HOST`, `DB_PORT` | `fact_kard`, `fact_kard_user`, `127.0.0.1`, `5432` | PostgreSQL solo local. |
+| `DB_PASSWORD` | larga y aleatoria | **Bloque 8.** Vacía o de ejemplo (`cambiar_esto`…) → no arranca en producción. |
+| `DB_CONN_MAX_AGE` | `60` | Conexiones persistentes (con chequeo de salud). |
+| `STATIC_ROOT` | `/srv/fact-kard/app/backend/staticfiles` | `collectstatic`; Nginx lo sirve en `/static/`. Las capturas no se guardan en disco (no hay `MEDIA_ROOT`). |
+| `DATA_UPLOAD_MAX_MEMORY_SIZE` | `5242880` | Cuerpo máximo de peticiones no-archivo. Archivos: `CAPTURA_MAX_BYTES` (10 MB) y `client_max_body_size 12m` en Nginx. |
+| `LOG_LEVEL`, `LOG_FILE`, `LOG_FILE_MAX_MB`, `LOG_FILE_BACKUPS` | `INFO`, vacío | **Bloque 8.** Sin archivo → journald. Con archivo → rotación. Tokens/contraseñas/SECRET_KEY se enmascaran. |
+| `API_DOCS_ENABLED` | `False` | **Bloque 8.** Swagger (`/api/docs/`, `/api/schema/`) solo en desarrollo. |
+| `GUNICORN_BIND`, `GUNICORN_WORKERS`, `GUNICORN_TIMEOUT` | `127.0.0.1:8001`, `3`, `120` | `backend/gunicorn.conf.py`. |
+
+## Health check (Bloque 8)
+
+`GET /api/health/` (sin autenticación) → `200 {"status":"ok","database":"ok","cache":"ok"}`.
+`503` si PostgreSQL no responde o si la caché (Redis) falla —el login depende de ella—. No
+devuelve hosts, versiones, mensajes de error ni configuración; el detalle va al log
+(`fact_kard.health`).
 
 ## Redis
 
@@ -37,6 +59,7 @@ el backend **no arranca** si la configuración es insegura (`config/seguridad.py
 ## Verificación antes de publicar
 
 ```bash
-python manage.py check --deploy
+python manage.py check --deploy     # esperado: solo security.W021 (HSTS preload)
 python manage.py migrate
+python3 ../deploy/scripts/smoke_test.py --base https://sistema.asescon.net --usuario <usuario> --frontend
 ```

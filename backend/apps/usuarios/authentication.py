@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from django.conf import settings
@@ -153,3 +154,12 @@ class LoginRateThrottle(SimpleRateThrottle):
 
     def get_cache_key(self, request, view):
         return self.cache_format % {'scope': self.scope, 'ident': self.get_ident(request)}
+
+    def throttle_failure(self):
+        # Bloque 8: intento de fuerza bruta visible en los logs de seguridad.
+        logging.getLogger('fact_kard.auth').warning('Login bloqueado por exceso de intentos: ip=%s', getattr(self, 'ident_actual', '-'))
+        return super().throttle_failure()
+
+    def allow_request(self, request, view):
+        self.ident_actual = self.get_ident(request)
+        return super().allow_request(request, view)

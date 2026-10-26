@@ -72,6 +72,33 @@ def resolver_secret_key(*, valor, debug: bool, ejecutando_tests: bool, ruta_clav
     raise ImproperlyConfigured(MENSAJE_SIN_SECRET_KEY)
 
 
+def resolver_docs_api(*, debug: bool, valor) -> bool:
+    """
+    Bloque 8 — ¿se publica Swagger/OpenAPI (/api/docs/, /api/schema/)?
+
+    - Sin API_DOCS_ENABLED (vacía): sigue a DEBUG → encendida en desarrollo, apagada en producción.
+    - API_DOCS_ENABLED=True/False: decisión explícita e intencional del administrador. En
+      producción, si se enciende, la documentación exige usuario autenticado
+      (ver permisos_docs_api).
+    - Cualquier otro valor es un error de configuración (no se adivina).
+    """
+    texto = '' if valor is None else str(valor).strip().lower()
+    if texto == '':
+        return bool(debug)
+    if texto in ('true', '1', 'yes', 'on'):
+        return True
+    if texto in ('false', '0', 'no', 'off'):
+        return False
+    raise ImproperlyConfigured("API_DOCS_ENABLED debe ser True o False (o quedar vacía para seguir a DEBUG).")
+
+
+def permisos_docs_api(*, debug: bool) -> list[str]:
+    """En desarrollo la documentación es abierta; en producción, solo para usuarios autenticados."""
+    if debug:
+        return ['rest_framework.permissions.AllowAny']
+    return ['rest_framework.permissions.IsAuthenticated']
+
+
 def validar_allowed_hosts(hosts, *, debug: bool):
     hosts = [h.strip() for h in hosts if h and h.strip()]
     if not debug and '*' in hosts:
@@ -89,6 +116,7 @@ from urllib.parse import urlsplit  # noqa: E402
 TOKEN_MAX_AGE_PRODUCCION_MAXIMO = 60 * 60 * 24 * 30  # 30 días
 SAMESITE_VALIDOS = ('Lax', 'Strict', 'None')
 HOSTS_LOCALES = frozenset({'localhost', '127.0.0.1', '::1'})
+DB_PASSWORDS_INSEGURAS = frozenset({'cambiar_esto', 'postgres', 'password', 'fact_kard', 'fact_kard_user'})
 
 
 def _es_origen_local(origen: str) -> bool:
@@ -107,6 +135,9 @@ def validar_configuracion_produccion(
     auth_cookie_enabled: bool,
     auth_cookie_secure: bool,
     auth_cookie_samesite: str,
+    db_password: str | None = None,
+    num_proxies: int | None = None,
+    proxy_ssl_header: bool = False,
 ) -> None:
     """
     Lanza ImproperlyConfigured con TODOS los problemas encontrados. Con DEBUG=True solo se
@@ -123,7 +154,17 @@ def validar_configuracion_produccion(
     elif auth_cookie_enabled and auth_cookie_samesite == 'None' and not auth_cookie_secure:
         errores.append('AUTH_COOKIE_SAMESITE=None exige AUTH_COOKIE_SECURE=True (los navegadores la rechazan).')
 
+    if num_proxies is not None and num_proxies < 0:
+        errores.append('NUM_PROXIES no puede ser negativo.')
+
     if not debug:
+        # Bloque 8: la contraseña de la BD no puede faltar ni ser la de ejemplo.
+        if db_password is not None and (not db_password.strip() or db_password in DB_PASSWORDS_INSEGURAS):
+            errores.append('DB_PASSWORD es obligatoria en producción y no puede ser un valor de ejemplo.')
+        # Detrás de Nginx (cabecera X-Forwarded-Proto) todas las peticiones llegan desde el proxy:
+        # sin NUM_PROXIES=1 el throttling del login trataría a todos los usuarios como una sola IP.
+        if proxy_ssl_header and num_proxies == 0:
+            errores.append('Con SECURE_PROXY_SSL_HEADER_HTTPS=True define NUM_PROXIES=1 (Nginx delante de Gunicorn).')
         if token_max_age > TOKEN_MAX_AGE_PRODUCCION_MAXIMO:
             errores.append('TOKEN_MAX_AGE_SECONDS no puede superar 30 días en producción (recomendado: 8–12 horas).')
         origenes = [o.strip() for o in cors_origins if o and o.strip()]

@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.contrib.auth.hashers import make_password
@@ -25,6 +26,18 @@ from apps.usuarios.serializers import (
 )
 from apps.auditoria.services import registrar_auditoria
 from apps.empresas.models import Empresa
+
+# Bloque 8: eventos de autenticación. Nunca se registran contraseñas ni tokens.
+logger_auth = logging.getLogger('fact_kard.auth')
+
+
+def ip_cliente(request) -> str:
+    """Misma IP que usa el throttling (respeta NUM_PROXIES detrás de Nginx)."""
+    return LoginRateThrottle().get_ident(request) or '-'
+
+
+def nombre_para_log(valor) -> str:
+    return str(valor or '')[:64].replace('\n', ' ').replace('\r', ' ')
 
 
 def obtener_empresas_usuario(usuario: Usuario):
@@ -98,13 +111,16 @@ class LoginView(APIView):
         usuario = Usuario.objects.filter(username=username).first()
         if usuario is None:
             make_password(password)  # equipara el tiempo de respuesta
+            logger_auth.warning('Login fallido: usuario=%s existe=no ip=%s', nombre_para_log(username), ip_cliente(request))
             return Response({'detail': 'Credenciales de acceso inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         if not usuario.check_password(password):
+            logger_auth.warning('Login fallido: usuario=%s existe=si ip=%s', nombre_para_log(username), ip_cliente(request))
             return Response({'detail': 'Credenciales de acceso inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         # Solo con la contraseña correcta se informa que la cuenta está inactiva.
         if not usuario.activo:
+            logger_auth.warning('Login rechazado: usuario inactivo id=%s ip=%s', usuario.id, ip_cliente(request))
             return Response(
                 {'detail': 'El usuario se encuentra inactivo. Contacte al administrador.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -112,6 +128,7 @@ class LoginView(APIView):
 
         token = generar_token(usuario)
         empresas_data = obtener_empresas_usuario(usuario)
+        logger_auth.info('Login correcto: usuario id=%s (%s) ip=%s', usuario.id, nombre_para_log(usuario.username), ip_cliente(request))
 
         datos = {
             'usuario': UsuarioResponseSerializer(usuario).data,
@@ -151,6 +168,7 @@ class LogoutView(APIView):
         TokenRevocado.objects.get_or_create(jti=payload['jti'], defaults={'usuario': request.user, 'expira_en': expira})
         # Limpieza oportunista de revocaciones ya expiradas.
         TokenRevocado.objects.filter(expira_en__lt=timezone.now()).delete()
+        logger_auth.info('Logout: usuario id=%s ip=%s (sesión revocada)', request.user.id, ip_cliente(request))
         respuesta = Response(status=status.HTTP_204_NO_CONTENT)
         if cookie_sesion_activa():
             borrar_cookie_sesion(respuesta)

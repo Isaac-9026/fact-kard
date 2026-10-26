@@ -1,0 +1,14 @@
+# Backup diario de PostgreSQL (copiar a /etc/systemd/system/). Lo dispara fact-kard-backup.timer.
+[Unit]
+Description=FACT-KARD backup de PostgreSQL
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=FK_DB_NAME=fact_kard
+Environment=FK_BACKUP_DIR=/var/backups/fact-kard
+Environment=FK_RETENCION_DIAS=14
+Environment=FK_RETENCION_MESES=12
+ExecStart=/bin/bash /srv/fact-kard/app/deploy/scripts/fk-backup.sh
