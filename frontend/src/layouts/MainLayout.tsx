@@ -30,10 +30,29 @@ import {
   ChevronRight,
   Menu,
   X,
+  SlidersHorizontal,
+  Database,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
 import { Badge } from '../components/ui/badge'
+import {
+  Sidebar,
+  SidebarHeader,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarFooter,
+  SidebarSeparator,
+} from '../components/ui/sidebar'
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '../components/ui/collapsible'
 import { NAV_SECCIONES, itemActivo, type IconoNav } from '../navegacion'
 
 // El orden y las rutas del menú viven en src/navegacion.ts (probado con node --test).
@@ -58,6 +77,132 @@ const ICONOS: Record<IconoNav, LucideIcon> = {
   cierres: Lock,
   formato131: FileCheck2,
   auditoria: ShieldCheck,
+}
+
+const ICONOS_SECCION: Record<string, LucideIcon> = {
+  INICIO: LayoutDashboard,
+  CONFIGURACIÓN: SlidersHorizontal,
+  MAESTROS: Database,
+  'INVENTARIO INICIAL': Layers,
+  OPERACIONES: ArrowLeftRight,
+  KARDEX: BookOpenCheck,
+  'CIERRE Y REPORTES': FileCheck2,
+  SEGURIDAD: ShieldCheck,
+}
+
+interface NavSectionGroupProps {
+  section: (typeof NAV_SECCIONES)[number]
+  compacto: boolean
+  onItemClick: () => void
+  currentPath: string
+}
+
+const NavSectionGroup: React.FC<NavSectionGroupProps> = ({
+  section,
+  compacto,
+  onItemClick,
+  currentPath,
+}) => {
+  const tieneActivo = section.items.some(
+    (item) => currentPath === item.path || (item.path !== '/' && currentPath.startsWith(item.path))
+  )
+  const [open, setOpen] = useState(true)
+  const SectionIcon = ICONOS_SECCION[section.title] || Boxes
+
+  React.useEffect(() => {
+    if (tieneActivo) {
+      setOpen(true)
+    }
+  }, [tieneActivo, currentPath])
+
+  if (compacto) {
+    return (
+      <SidebarGroup key={section.title} className="py-1">
+        <SidebarSeparator />
+        <SidebarGroupContent>
+          <SidebarMenu className="gap-1">
+            {section.items.map((item) => {
+              const ItemIcon = ICONOS[item.icono]
+              return (
+                <SidebarMenuItem key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    onClick={onItemClick}
+                    title={item.label}
+                    className={({ isActive }) =>
+                      `peer/menu-button flex w-full items-center justify-center rounded-lg py-1.5 text-xs font-medium transition-colors select-none outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-2xs border border-indigo-100/60'
+                          : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                      }`
+                    }
+                  >
+                    <ItemIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                  </NavLink>
+                </SidebarMenuItem>
+              )
+            })}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    )
+  }
+
+  return (
+    <Collapsible
+      key={section.title}
+      open={open}
+      onOpenChange={setOpen}
+      className="group/collapsible"
+    >
+      <SidebarGroup className="py-1">
+        <SidebarGroupLabel className="p-0 h-auto">
+          <CollapsibleTrigger className="flex h-7 w-full items-center justify-between rounded-md px-2 py-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100/80 transition-colors cursor-pointer select-none group/trigger">
+            <div className="flex items-center gap-2 min-w-0">
+              <SectionIcon
+                className="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover/trigger:text-slate-900 transition-colors"
+                strokeWidth={1.75}
+              />
+              <span className="text-[11px] font-bold tracking-wider uppercase truncate text-slate-700 group-hover/trigger:text-slate-900">
+                {section.title}
+              </span>
+            </div>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500 group-hover/trigger:text-slate-800 transition-transform duration-200 ease-out group-data-[state=open]/collapsible:rotate-90" />
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+
+        <CollapsibleContent>
+          <div className="ml-3.5 pl-2 my-0.5 border-l border-slate-200/80">
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {section.items.map((item) => {
+                  const ItemIcon = ICONOS[item.icono]
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <NavLink
+                        to={item.path}
+                        onClick={onItemClick}
+                        className={({ isActive }) =>
+                          `peer/menu-button flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors select-none outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer ${
+                            isActive
+                              ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-2xs border border-indigo-100/70'
+                              : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                          }`
+                        }
+                      >
+                        <ItemIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                        <span className="truncate">{item.label}</span>
+                      </NavLink>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </div>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
+  )
 }
 
 export const MainLayout: React.FC = () => {
@@ -87,23 +232,16 @@ export const MainLayout: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50/60 font-sans text-slate-900 antialiased">
-      {/* 1. SIDEBAR IZQUIERDO */}
-      {menuMovilAbierto && (
-        <div
-          className="fixed inset-0 z-30 bg-slate-900/30 md:hidden"
-          aria-hidden="true"
-          onClick={() => setMenuMovilAbierto(false)}
-        />
-      )}
-      <aside
+      {/* 1. SIDEBAR IZQUIERDO (shadcn sidebar) */}
+      <Sidebar
         id="menu-principal"
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200/80 bg-white transition-all duration-200 ease-in-out shadow-xs md:translate-x-0 ${
-          menuMovilAbierto ? 'translate-x-0' : '-translate-x-full'
-        } ${collapsed ? 'md:w-18' : 'md:w-64'}`}
+        collapsed={compacto}
+        mobileOpen={menuMovilAbierto}
+        onCloseMobile={() => setMenuMovilAbierto(false)}
       >
-        {/* Branding */}
-        <div className="flex h-16 items-center px-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 overflow-hidden">
+        {/* Branding (SidebarHeader) */}
+        <SidebarHeader>
+          <div className="flex items-center gap-3 overflow-hidden w-full">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
               <Boxes className="h-5 w-5" strokeWidth={1.75} />
             </div>
@@ -114,61 +252,50 @@ export const MainLayout: React.FC = () => {
               </div>
             )}
           </div>
-        </div>
+        </SidebarHeader>
 
-        {/* Navigation list */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
+        {/* Navigation list (SidebarContent) */}
+        <SidebarContent>
           {NAV_SECCIONES.map((section) => (
-            <div key={section.title} className="space-y-1">
-              {!compacto ? (
-                <div className="px-2 pb-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                  {section.title}
-                </div>
-              ) : (
-                <div className="my-2 border-t border-slate-100" />
-              )}
-              {section.items.map((item) => {
-                const ItemIcon = ICONOS[item.icono]
-                return (
-                  <NavLink
-                    key={item.path}
-                    to={item.path}
-                    onClick={() => setMenuMovilAbierto(false)}
-                    title={compacto ? item.label : undefined}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors select-none ${
-                        isActive
-                          ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-2xs border border-indigo-100/60'
-                          : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
-                      } ${compacto ? 'justify-center px-0' : ''}`
-                    }
-                  >
-                    <ItemIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                    {!compacto && <span className="truncate">{item.label}</span>}
-                  </NavLink>
-                )
-              })}
-            </div>
+            <NavSectionGroup
+              key={section.title}
+              section={section}
+              compacto={compacto}
+              onItemClick={() => setMenuMovilAbierto(false)}
+              currentPath={location.pathname}
+            />
           ))}
-        </nav>
+        </SidebarContent>
 
-        {/* Sidebar Footer info */}
-        {!compacto && (
-          <div className="p-3 border-t border-slate-100 bg-slate-50/50">
-            <div className="rounded-lg bg-white p-2.5 border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center justify-between text-[11px] font-medium text-slate-600">
-                <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                  SUNAT Res. 234-2006
+        {/* Sidebar Footer */}
+        <SidebarFooter className="border-t border-slate-100 bg-slate-50/50 p-2.5">
+          {!compacto ? (
+            <div className="flex items-center gap-2.5 rounded-lg bg-white p-2.5 border border-slate-200/80 shadow-2xs">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-50 border border-indigo-100/80 text-indigo-700 font-semibold text-xs shadow-2xs">
+                {usuario?.username?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className="flex flex-col min-w-0 leading-tight">
+                <span className="text-xs font-semibold text-slate-800 truncate">
+                  {usuario?.username || 'Usuario'}
                 </span>
-                <span className="text-[10px] font-mono text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                  CPP 6 DEC
+                <span className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium mt-0.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  {esAdmin ? 'Administrador' : 'Operador'}
                 </span>
               </div>
             </div>
-          </div>
-        )}
-      </aside>
+          ) : (
+            <div
+              className="flex justify-center"
+              title={`${usuario?.username || 'Usuario'} (${esAdmin ? 'ADMIN' : 'USUARIO'})`}
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-slate-200/80 text-indigo-700 font-semibold text-xs shadow-2xs select-none">
+                {usuario?.username?.charAt(0).toUpperCase() || 'U'}
+              </div>
+            </div>
+          )}
+        </SidebarFooter>
+      </Sidebar>
 
       {/* 2. ÁREA PRINCIPAL */}
       {/* min-w-0: sin esto una tabla ancha estira toda la columna y la página entera se desborda */}
