@@ -20,14 +20,13 @@ import { Paginacion } from '../../components/ui/paginacion';
 const KARDEX_PAGE_SIZE = 100;
 import {
   BookOpenCheck,
-  FileDown,
+  FileSpreadsheet,
   Package,
   Scale,
   Coins,
-  ArrowDownLeft,
-  ArrowUpRight,
+  Activity,
+  Calendar,
   Search,
-  Filter,
   RotateCcw,
   Loader2,
   Inbox,
@@ -38,7 +37,7 @@ import {
   SIN_DATO, filaSaldoInicialKardex, guardarPeriodo, leerPeriodoGuardado, periodoInicialKardex, textoCppFinal,
   type SaldoInicialProducto,
 } from '../../utils/kardexVista';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, KpiCard } from '../../components/ui/card';
+import { KpiCard } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -195,228 +194,252 @@ export const KardexPage: React.FC = () => {
   }, [productoId, productos]);
 
   return (
-    <div className="space-y-6">
-      {/* 1. Encabezado principal */}
+    <div className="space-y-4">
+      {/* 1. Encabezado principal compacto */}
       <PageHeader
-        title="Consulta de Kardex Permanente Valorizado"
+        title="Kardex Permanente Valorizado"
         description={`Control contable con Costo Promedio Ponderado Móvil (CPP Global en PEN) · ${
           empresaActiva?.razon_social ?? 'Empresa Activa'
         }${empresaActiva?.ruc ? ` · RUC: ${empresaActiva.ruc}` : ''}`}
         icon={BookOpenCheck}
         badge={
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Badge variant="info">Fase 8 · Bloque 5</Badge>
-            <Badge variant="success" dot>SUNAT Formato 13.1</Badge>
+            <Badge variant="info" size="xs">Fase 8 · Bloque 5</Badge>
+            <Badge variant="success" size="xs" dot>SUNAT Formato 13.1</Badge>
           </div>
-        }
-        actions={
-          <Button
-            type="button"
-            onClick={handleExportarExcel}
-            disabled={exporting || loading}
-            variant="success"
-            className="shadow-sm"
-            title="Descargar libro Excel con 4 hojas oficiales (Kardex, Movimientos, Incidencias, Saldos)"
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-            ) : (
-              <FileDown className="h-4 w-4 mr-1.5" />
-            )}
-            {exporting ? 'Generando Excel...' : 'Exportar Excel Oficial (.xlsx)'}
-          </Button>
         }
       />
 
-      {/* 2. Tarjetas KPI de Resumen Superior */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-        <KpiCard
-          title="Stock Total Empresa"
-          value={loading ? '...' : formatQty(resumen?.saldo_final_cantidad)}
-          subtitle={
-            productoSeleccionado
-              ? `${productoSeleccionado.codigo_interno} (Unidad Base)`
-              : 'Balance físico acumulado'
-          }
-          icon={Package}
-        />
-        <KpiCard
-          title="CPP Vigente (PEN)"
-          value={loading ? '...' : resumen ? textoCppFinal(resumen.cpp_final, formatCost) : SIN_DATO}
-          subtitle="Costo Promedio Ponderado Móvil (6 dec.)"
-          icon={Scale}
-        />
-        <KpiCard
-          title="Saldo Valorizado"
-          value={loading ? '...' : `S/ ${formatMoney(resumen?.saldo_final_valor)}`}
-          subtitle="Valor monetario contable en PEN"
-          icon={Coins}
-        />
-        <KpiCard
-          title="Total Entradas"
-          value={loading ? '...' : formatQty(resumen?.total_entradas_cantidad)}
-          subtitle={loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_entradas_valor)}`}
-          icon={ArrowDownLeft}
-        />
-        <KpiCard
-          title="Total Salidas"
-          value={loading ? '...' : formatQty(resumen?.total_salidas_cantidad)}
-          subtitle={loading ? '...' : `Valor: S/ ${formatMoney(resumen?.total_salidas_valor)}`}
-          icon={ArrowUpRight}
-        />
-      </div>
-
-      {/* 3. Barra de Filtros Oficiales */}
-      <Card>
-        <CardHeader className="pb-3 border-b border-slate-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <Filter className="h-4 w-4 text-indigo-600" />
-                Filtros de Consulta Contable
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Filtre por producto, período contable, almacén o rango de fechas
-              </CardDescription>
+      {/* 2. Toolbar Financiero: Grid Responsivo 4 Columnas + Barra de Acciones Dedicada */}
+      <div className="bg-white rounded-lg border border-slate-200/90 shadow-2xs p-3.5 space-y-3">
+        <form onSubmit={handleActualizarConsulta} className="space-y-3">
+          {/* Fila 1: Selectores Principales */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Producto */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="kardex-producto" className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                  Producto / Existencia
+                </Label>
+                {productoSeleccionado && (
+                  <span className="text-[10px] font-mono font-semibold text-indigo-600 truncate max-w-[90px]" title={productoSeleccionado.codigo_interno}>
+                    {productoSeleccionado.codigo_interno}
+                  </span>
+                )}
+              </div>
+              <Select
+                id="kardex-producto"
+                name="producto_id"
+                value={productoId}
+                onChange={(e) => setProductoId(e.target.value)}
+                className="h-8 text-xs w-full"
+              >
+                <option value="">Todos los productos</option>
+                {productos.map((prod) => (
+                  <option key={prod.id} value={prod.id}>
+                    {prod.codigo_interno} — {prod.descripcion}
+                  </option>
+                ))}
+              </Select>
             </div>
-            {productoSeleccionado && (
-              <Badge variant="neutral" className="text-xs font-mono">
-                {productoSeleccionado.codigo_interno} — {productoSeleccionado.descripcion}
-              </Badge>
-            )}
+
+            {/* Período Contable */}
+            <div className="space-y-1">
+              <Label htmlFor="kardex-periodo" className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                Período Contable
+              </Label>
+              <Select
+                id="kardex-periodo"
+                name="periodo_id"
+                value={periodoId}
+                onChange={(e) => setPeriodoId(e.target.value)}
+                className="h-8 text-xs w-full"
+              >
+                <option value="">Todos los períodos</option>
+                {periodos.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.anio}-{String(p.mes).padStart(2, '0')} ({p.estado})
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Almacén */}
+            <div className="space-y-1">
+              <Label htmlFor="kardex-almacen" className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                Almacén
+              </Label>
+              <Select
+                id="kardex-almacen"
+                name="almacen_id"
+                value={almacenId}
+                onChange={(e) => setAlmacenId(e.target.value)}
+                className="h-8 text-xs w-full"
+              >
+                <option value="">Todos (Consolidado)</option>
+                {almacenes.map((alm) => (
+                  <option key={alm.id} value={alm.id}>
+                    {alm.codigo} — {alm.nombre}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Tipo de Operación */}
+            <div className="space-y-1">
+              <Label htmlFor="kardex-operacion" className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                Tipo de Operación
+              </Label>
+              <Select
+                id="kardex-operacion"
+                name="tipo_operacion_id"
+                value={tipoOperacionId}
+                onChange={(e) => setTipoOperacionId(e.target.value)}
+                className="h-8 text-xs w-full"
+              >
+                <option value="">Todas las operaciones</option>
+                {tiposOperacion.map((op) => (
+                  <option key={op.id} value={op.id}>
+                    {op.codigo_sunat || op.codigo_interno} — {op.descripcion}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <form onSubmit={handleActualizarConsulta} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-              {/* Producto */}
-              <div className="lg:col-span-2 space-y-1.5">
-                <Label htmlFor="kardex-producto">Producto</Label>
-                <Select
-                  id="kardex-producto"
-                  name="producto_id"
-                  value={productoId}
-                  onChange={(e) => setProductoId(e.target.value)}
-                >
-                  <option value="">Todos los productos</option>
-                  {productos.map((prod) => (
-                    <option key={prod.id} value={prod.id}>
-                      {prod.codigo_interno} — {prod.descripcion}
-                    </option>
-                  ))}
-                </Select>
-              </div>
 
-              {/* Período */}
-              <div className="space-y-1.5">
-                <Label htmlFor="kardex-periodo">Período Contable</Label>
-                <Select
-                  id="kardex-periodo"
-                  name="periodo_id"
-                  value={periodoId}
-                  onChange={(e) => setPeriodoId(e.target.value)}
-                >
-                  <option value="">Todos los períodos</option>
-                  {periodos.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.anio}-{String(p.mes).padStart(2, '0')} ({p.estado})
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {/* Almacén */}
-              <div className="space-y-1.5">
-                <Label htmlFor="kardex-almacen">Almacén</Label>
-                <Select
-                  id="kardex-almacen"
-                  name="almacen_id"
-                  value={almacenId}
-                  onChange={(e) => setAlmacenId(e.target.value)}
-                >
-                  <option value="">Todos (Consolidado)</option>
-                  {almacenes.map((alm) => (
-                    <option key={alm.id} value={alm.id}>
-                      {alm.codigo} — {alm.nombre}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {/* Tipo de Operación */}
-              <div className="space-y-1.5">
-                <Label htmlFor="kardex-operacion">Tipo de Operación</Label>
-                <Select
-                  id="kardex-operacion"
-                  name="tipo_operacion_id"
-                  value={tipoOperacionId}
-                  onChange={(e) => setTipoOperacionId(e.target.value)}
-                >
-                  <option value="">Todas las operaciones</option>
-                  {tiposOperacion.map((op) => (
-                    <option key={op.id} value={op.id}>
-                      {op.codigo_sunat || op.codigo_interno} — {op.descripcion}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {/* Fechas */}
-              <div className="space-y-1.5">
-                <Label htmlFor="kardex-desde">Fecha Desde</Label>
+          {/* Fila 2: Sub-toolbar de Rango de Fechas + Botones de Acción (Separados e Independientes) */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2.5 border-t border-slate-100">
+            {/* Fechas */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                Rango Fechas:
+              </span>
+              <div className="flex items-center gap-1.5">
                 <Input
                   id="kardex-desde"
                   type="date"
                   name="fecha_desde"
                   value={fechaDesde}
                   onChange={(e) => setFechaDesde(e.target.value)}
+                  className="h-7 w-32 text-xs py-0 px-2"
+                  placeholder="Desde"
                 />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="kardex-hasta">Fecha Hasta</Label>
+                <span className="text-slate-400 text-xs">—</span>
                 <Input
                   id="kardex-hasta"
                   type="date"
                   name="fecha_hasta"
                   value={fechaHasta}
                   onChange={(e) => setFechaHasta(e.target.value)}
+                  className="h-7 w-32 text-xs py-0 px-2"
+                  placeholder="Hasta"
                 />
               </div>
+              {productoSeleccionado && (
+                <div className="hidden xl:flex items-center gap-1 text-[11px] text-slate-600 bg-slate-50 border border-slate-200/80 rounded px-2 py-0.5">
+                  <span className="font-semibold text-slate-700">Producto:</span>
+                  <span className="font-mono text-indigo-700 font-medium">{productoSeleccionado.codigo_interno}</span>
+                  <span className="text-slate-400">·</span>
+                  <span className="truncate max-w-[200px]">{productoSeleccionado.descripcion}</span>
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            {/* Grupo de Botones de Acción */}
+            <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={handleLimpiarFiltros}
                 disabled={loading}
+                className="h-8 px-2.5 text-xs text-slate-600 hover:text-slate-900"
+                title="Limpiar filtros de búsqueda"
               >
-                <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                Limpiar Filtros
+                <RotateCcw className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                Limpiar
               </Button>
               <Button
                 type="submit"
                 variant="primary"
                 size="sm"
                 disabled={loading}
+                className="h-8 px-3.5 text-xs font-semibold shadow-xs"
               >
                 {loading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
                 ) : (
                   <Search className="h-3.5 w-3.5 mr-1.5" />
                 )}
-                {loading ? 'Consultando...' : 'Actualizar Consulta'}
+                Actualizar Consulta
+              </Button>
+              <Button
+                type="button"
+                onClick={handleExportarExcel}
+                disabled={exporting || loading}
+                variant="success"
+                size="sm"
+                className="h-8 px-3 text-xs font-semibold shadow-xs"
+                title="Exportar Kardex Oficial en Excel (.xlsx)"
+              >
+                {exporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                ) : (
+                  <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {exporting ? 'Exportando...' : 'Exportar Excel'}
               </Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </form>
+      </div>
+
+      {/* 3. Cinta Horizontal de 4 Indicadores Compactos */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard
+          title="Stock Físico Actual"
+          value={loading ? '...' : formatQty(resumen?.saldo_final_cantidad)}
+          subtitle={
+            productoSeleccionado
+              ? `${productoSeleccionado.codigo_interno} · Unidad Base`
+              : 'Balance físico acumulado'
+          }
+          icon={Package}
+        />
+        <KpiCard
+          title="CPP Global Vigente"
+          value={loading ? '...' : resumen ? textoCppFinal(resumen.cpp_final, formatCost) : SIN_DATO}
+          subtitle="Costo Promedio Ponderado (6 dec.)"
+          icon={Scale}
+          badge={<Badge variant="info" size="xs">PEN</Badge>}
+        />
+        <KpiCard
+          title="Saldo Valorizado Total"
+          value={loading ? '...' : `S/ ${formatMoney(resumen?.saldo_final_valor)}`}
+          subtitle="Valor monetario contable en PEN"
+          icon={Coins}
+        />
+        <KpiCard
+          title="Total de Movimientos"
+          value={loading ? '...' : totalMovimientos.toLocaleString()}
+          subtitle={
+            loading
+              ? '...'
+              : `Entradas: ${formatQty(resumen?.total_entradas_cantidad)} | Salidas: ${formatQty(resumen?.total_salidas_cantidad)}`
+          }
+          icon={Activity}
+          badge={
+            <Badge variant="neutral" size="xs" className="font-mono">
+              pág. {consulta.page}
+            </Badge>
+          }
+        />
+      </div>
 
       {/* 4. Mensaje de Error */}
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex items-start gap-2.5">
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 flex items-start gap-2.5">
           <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
           <div>
             <p className="font-semibold">Error al consultar Kardex Valorizado</p>
@@ -426,106 +449,110 @@ export const KardexPage: React.FC = () => {
       )}
 
       {/* 5. Tabla Oficial de Kardex Valorizado */}
-      <Card className="overflow-hidden">
-        <CardHeader className="py-3 px-4 border-b border-slate-200 bg-slate-50/50 flex flex-row items-center justify-between">
+      <div className="rounded-lg border border-slate-200/90 bg-white shadow-2xs overflow-hidden">
+        <div className="py-2 px-3 border-b border-slate-200 bg-slate-50/70 flex flex-row items-center justify-between gap-3">
           <div>
-            <CardTitle className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-              <BookOpenCheck className="h-4 w-4 text-slate-700" />
-              Movimientos Contables Registrados
-            </CardTitle>
-            <CardDescription className="text-xs">
+            <div className="flex items-center gap-1.5">
+              <BookOpenCheck className="h-3.5 w-3.5 text-slate-700" />
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                Movimientos Contables Registrados
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
               <span className="font-mono font-semibold text-slate-900">{totalMovimientos}</span>{' '}
               movimiento(s) valorizados cronológicamente por el motor CPP
-            </CardDescription>
+            </p>
           </div>
-          <div className="flex items-center gap-3 text-xs">
-            <span className="flex items-center gap-1.5 text-slate-600">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          <div className="flex items-center gap-2.5 text-[10px] font-medium">
+            <span className="flex items-center gap-1 text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Entrada
             </span>
-            <span className="flex items-center gap-1.5 text-slate-600">
-              <span className="h-2 w-2 rounded-full bg-rose-500" />
+            <span className="flex items-center gap-1 text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
               Salida
             </span>
-            <span className="flex items-center gap-1.5 text-slate-600">
-              <span className="h-2 w-2 rounded-full bg-indigo-500" />
+            <span className="flex items-center gap-1 text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
               Ajuste Valor
             </span>
           </div>
-        </CardHeader>
+        </div>
 
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center text-slate-500">
             <Loader2 className="h-8 w-8 animate-spin text-slate-900 mb-3" />
-            <p className="text-sm font-medium">Procesando y valorizando movimientos de Kardex...</p>
+            <p className="text-xs font-medium">Procesando y valorizando movimientos de Kardex...</p>
           </div>
         ) : movimientos.length === 0 && !saldoInicial.mostrar ? (
           <div className="py-16 text-center">
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
-              <Inbox className="h-6 w-6" />
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-2.5">
+              <Inbox className="h-5 w-5" />
             </div>
-            <h3 className="text-sm font-semibold text-slate-900">No se encontraron movimientos registrados</h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+            <h3 className="text-xs font-semibold text-slate-900">No se encontraron movimientos registrados</h3>
+            <p className="text-[11px] text-slate-500 max-w-md mx-auto mt-0.5">
               No hay operaciones registradas para los filtros seleccionados o el producto aún no tiene movimientos confirmados.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[640px] relative">
             <table className="w-full text-xs text-left border-collapse">
-              <thead>
+              <thead className="sticky top-0 z-10 select-none">
                 {/* Nivel 1: Agrupación oficial con estilo B2B */}
-                <tr className="text-[11px] font-bold uppercase tracking-wider text-center border-b border-slate-200">
-                  <th colSpan={5} className="py-2 px-3 bg-slate-100 text-slate-700 border-r border-slate-200">
+                <tr className="text-[10px] font-bold uppercase tracking-wider text-center border-b border-slate-200">
+                  <th colSpan={5} className="py-1 px-2 bg-slate-100/95 text-slate-700">
                     Datos de la Operación
                   </th>
-                  <th colSpan={3} className="py-2 px-3 bg-emerald-50/80 text-emerald-900 border-r border-emerald-100">
+                  <th colSpan={3} className="py-1 px-1.5 bg-emerald-50/90 text-emerald-900 border-l border-slate-200">
                     Entradas
                   </th>
-                  <th colSpan={3} className="py-2 px-3 bg-amber-50/80 text-amber-900 border-r border-amber-100">
+                  <th colSpan={3} className="py-1 px-1.5 bg-amber-50/90 text-amber-900 border-l border-slate-200">
                     Salidas
                   </th>
-                  <th colSpan={3} className="py-2 px-3 bg-indigo-50/80 text-indigo-950 font-extrabold">
+                  <th colSpan={3} className="py-1 px-1.5 bg-indigo-50/90 text-indigo-950 font-extrabold border-l border-slate-200">
                     Saldo Final Valorizado
                   </th>
                 </tr>
 
-                {/* Nivel 2: Subcolumnas */}
-                <tr className="bg-slate-50 text-[11px] font-semibold text-slate-600 border-b border-slate-200">
-                  <th className="py-2 px-3 text-center w-24">Fecha</th>
-                  <th className="py-2 px-3">Documento Ref.</th>
-                  <th className="py-2 px-3">Tipo Operación</th>
-                  <th className="py-2 px-3 text-center w-24">Naturaleza</th>
-                  <th className="py-2 px-3 border-r border-slate-200">Almacén</th>
+                {/* Nivel 2: Subcolumnas Proporcionales con Moneda en Cabecera */}
+                <tr className="bg-slate-100/90 text-[10px] font-semibold text-slate-600 border-b border-slate-200">
+                  <th className="py-1.5 px-2 text-center w-[84px] shrink-0">Fecha</th>
+                  <th className="py-1.5 px-2 text-left min-w-[95px]">Doc. Ref.</th>
+                  <th className="py-1.5 px-2 text-left min-w-[110px]">Tipo Op.</th>
+                  <th className="py-1.5 px-1 text-center w-[46px]">Nat.</th>
+                  <th className="py-1.5 px-1.5 text-center w-[65px]">Almacén</th>
 
                   {/* Entradas */}
-                  <th className="py-2 px-3 text-right bg-emerald-50/40">Cantidad</th>
-                  <th className="py-2 px-3 text-right bg-emerald-50/40">Costo Unit.</th>
-                  <th className="py-2 px-3 text-right bg-emerald-50/40 border-r border-emerald-100">Valor Total</th>
+                  <th className="py-1.5 px-2 text-right bg-emerald-50/70 text-emerald-900 border-l border-slate-200 min-w-[75px]">Cantidad</th>
+                  <th className="py-1.5 px-2 text-right bg-emerald-50/70 text-emerald-900 min-w-[75px]">Costo Unit.</th>
+                  <th className="py-1.5 px-2 text-right bg-emerald-50/70 text-emerald-900 font-bold min-w-[85px]">Total (PEN)</th>
 
                   {/* Salidas */}
-                  <th className="py-2 px-3 text-right bg-amber-50/40">Cantidad</th>
-                  <th className="py-2 px-3 text-right bg-amber-50/40">Costo Unit.</th>
-                  <th className="py-2 px-3 text-right bg-amber-50/40 border-r border-amber-100">Valor Total</th>
+                  <th className="py-1.5 px-2 text-right bg-amber-50/70 text-amber-900 border-l border-slate-200 min-w-[75px]">Cantidad</th>
+                  <th className="py-1.5 px-2 text-right bg-amber-50/70 text-amber-900 min-w-[75px]">Costo Unit.</th>
+                  <th className="py-1.5 px-2 text-right bg-amber-50/70 text-amber-900 font-bold min-w-[85px]">Total (PEN)</th>
 
                   {/* Saldo Final */}
-                  <th className="py-2 px-3 text-right bg-indigo-50/40">Cantidad</th>
-                  <th className="py-2 px-3 text-right bg-indigo-50/40">C.P.P.</th>
-                  <th className="py-2 px-3 text-right bg-indigo-50/40 font-bold text-slate-900">Valor Total</th>
+                  <th className="py-1.5 px-2 text-right bg-indigo-50/70 text-indigo-950 border-l border-slate-200 min-w-[75px]">Cantidad</th>
+                  <th className="py-1.5 px-2 text-right bg-indigo-50/70 text-indigo-950 min-w-[75px]">C.P.P.</th>
+                  <th className="py-1.5 px-2 text-right bg-indigo-50/70 text-indigo-950 font-bold min-w-[88px]">Total (PEN)</th>
                 </tr>
               </thead>
 
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-200/70 text-[11px]">
                 {mostrarSaldoInicial && (
-                  <tr className="bg-slate-50/70 font-semibold text-slate-700">
-                    <td colSpan={11} className="py-2 px-3 text-right">
+                  <tr className="bg-slate-50/90 font-semibold text-slate-700">
+                    <td colSpan={5} className="py-1.5 px-2.5 text-right text-[11px] font-sans">
                       SALDO INICIAL
                       {resumen?.ambito_saldo === 'ALMACEN' && (
-                        <span className="ml-2 text-[10px] font-normal text-slate-500">(stock del almacén × CPP global)</span>
+                        <span className="ml-1 text-[10px] font-normal text-slate-500">(stock alm. × CPP)</span>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatQty(saldoInicial.cantidad)}</td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">{formatCost(saldoInicial.cpp)}</td>
-                    <td className="py-2 px-3 text-right font-mono tabular-nums">S/ {formatMoney(saldoInicial.valor)}</td>
+                    <td colSpan={3} className="py-1.5 px-2 text-center text-slate-300 border-l border-slate-200 bg-emerald-50/10 font-mono select-none">—</td>
+                    <td colSpan={3} className="py-1.5 px-2 text-center text-slate-300 border-l border-slate-200 bg-amber-50/10 font-mono select-none">—</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums border-l border-slate-200 bg-indigo-50/30 text-slate-900">{formatQty(saldoInicial.cantidad)}</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums bg-indigo-50/30 text-slate-800">{formatCost(saldoInicial.cpp)}</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums bg-indigo-50/30 font-bold text-slate-950">{formatMoney(saldoInicial.valor)}</td>
                   </tr>
                 )}
                 {mostrarSaldoInicial && movimientos.length === 0 && (
@@ -543,88 +570,89 @@ export const KardexPage: React.FC = () => {
                   return (
                     <tr
                       key={mov.id}
-                      className="hover:bg-slate-50/80 transition-colors"
+                      className="even:bg-slate-50/40 hover:bg-indigo-50/30 transition-colors duration-75"
                     >
                       {/* Fecha */}
-                      <td className="py-2 px-3 text-center font-mono tabular-nums whitespace-nowrap text-slate-700">
+                      <td className="py-1.5 px-2 text-center font-mono tabular-nums whitespace-nowrap text-slate-700">
                         {mov.fecha}
                       </td>
 
                       {/* Documento Ref */}
-                      <td className="py-2 px-3 font-medium text-slate-900">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-mono tabular-nums">{mov.documento_referencia || '—'}</span>
+                      <td className="py-1.5 px-2 font-medium text-slate-900">
+                        <div className="flex items-center gap-1 truncate max-w-[110px]" title={mov.documento_referencia || '—'}>
+                          <span className="font-mono tabular-nums truncate">{mov.documento_referencia || '—'}</span>
                           {mov.es_extorno && (
-                            <Badge variant="warning" size="xs">EXTORNO</Badge>
+                            <Badge variant="warning" size="xs" className="px-1 py-0 text-[8px]">EXT</Badge>
                           )}
                           {mov.generado_por_motor && (
-                            <Badge variant="info" size="xs">MOTOR</Badge>
+                            <Badge variant="info" size="xs" className="px-1 py-0 text-[8px]">MOT</Badge>
                           )}
                         </div>
                       </td>
 
                       {/* Tipo Operación */}
-                      <td className="py-2 px-3 max-w-[200px]" title={mov.tipo_operacion_descripcion}>
+                      <td className="py-1.5 px-2 max-w-[120px]" title={`${mov.tipo_operacion_codigo} — ${mov.tipo_operacion_descripcion}`}>
                         <div className="truncate">
-                          <span className="font-mono font-semibold text-slate-900">{mov.tipo_operacion_codigo}</span>{' '}
-                          <span className="text-slate-500 text-[11px]">{mov.tipo_operacion_descripcion}</span>
+                          <span className="font-mono font-bold text-slate-900">{mov.tipo_operacion_codigo}</span>{' '}
+                          <span className="text-slate-500 text-[10px]">{mov.tipo_operacion_descripcion}</span>
                         </div>
                       </td>
 
                       {/* Naturaleza */}
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-1.5 px-1 text-center" title={mov.naturaleza}>
                         <Badge
-                          variant={isEntrada ? 'success' : isSalida ? 'destructive' : 'info'}
+                          variant={isEntrada ? 'success' : isSalida ? 'warning' : 'info'}
                           size="xs"
+                          className="px-1.5 py-0 text-[9px] font-semibold font-mono uppercase"
                         >
-                          {mov.naturaleza}
+                          {isEntrada ? 'ENT' : isSalida ? 'SAL' : 'AJU'}
                         </Badge>
                       </td>
 
                       {/* Almacén */}
-                      <td className="py-2 px-3 border-r border-slate-200 text-slate-600 truncate max-w-[150px]">
-                        <span className="font-mono">{mov.almacen_codigo}</span> - {mov.almacen_nombre}
+                      <td className="py-1.5 px-1.5 text-center text-slate-600 truncate" title={`${mov.almacen_codigo} — ${mov.almacen_nombre}`}>
+                        <span className="font-mono font-medium text-slate-800 text-[10px]">{mov.almacen_codigo}</span>
                       </td>
 
                       {/* Bloque Entradas */}
-                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 ${
-                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-semibold' : 'text-slate-400'
+                      <td className={`py-1.5 px-2 text-right font-mono tabular-nums border-l border-slate-200 bg-emerald-50/20 ${
+                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-semibold' : 'text-slate-300'
                       }`}>
-                        {formatQty(mov.entrada_cantidad)}
+                        {mov.entrada_cantidad ? formatQty(mov.entrada_cantidad) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 text-slate-600">
-                        {formatCost(mov.entrada_costo_unitario)}
+                      <td className="py-1.5 px-2 text-right font-mono tabular-nums bg-emerald-50/20 text-slate-600">
+                        {mov.entrada_costo_unitario ? formatCost(mov.entrada_costo_unitario) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
-                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-emerald-50/20 border-r border-emerald-100 ${
-                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-bold' : 'text-slate-400'
+                      <td className={`py-1.5 px-2 text-right font-mono tabular-nums bg-emerald-50/20 ${
+                        isEntrada || (isAjuste && mov.entrada_valor) ? 'text-emerald-700 font-bold' : 'text-slate-300'
                       }`}>
-                        {mov.entrada_valor ? `S/ ${formatMoney(mov.entrada_valor)}` : '—'}
+                        {mov.entrada_valor ? formatMoney(mov.entrada_valor) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
 
                       {/* Bloque Salidas */}
-                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 ${
-                        isSalida || (isAjuste && mov.salida_valor) ? 'text-rose-700 font-semibold' : 'text-slate-400'
+                      <td className={`py-1.5 px-2 text-right font-mono tabular-nums border-l border-slate-200 bg-amber-50/20 ${
+                        isSalida || (isAjuste && mov.salida_valor) ? 'text-amber-800 font-semibold' : 'text-slate-300'
                       }`}>
-                        {formatQty(mov.salida_cantidad)}
+                        {mov.salida_cantidad ? formatQty(mov.salida_cantidad) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 text-slate-600">
-                        {formatCost(mov.salida_costo_unitario)}
+                      <td className="py-1.5 px-2 text-right font-mono tabular-nums bg-amber-50/20 text-slate-600">
+                        {mov.salida_costo_unitario ? formatCost(mov.salida_costo_unitario) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
-                      <td className={`py-2 px-3 text-right font-mono tabular-nums bg-amber-50/20 border-r border-amber-100 ${
-                        isSalida || (isAjuste && mov.salida_valor) ? 'text-rose-700 font-bold' : 'text-slate-400'
+                      <td className={`py-1.5 px-2 text-right font-mono tabular-nums bg-amber-50/20 ${
+                        isSalida || (isAjuste && mov.salida_valor) ? 'text-amber-800 font-bold' : 'text-slate-300'
                       }`}>
-                        {mov.salida_valor ? `S/ ${formatMoney(mov.salida_valor)}` : '—'}
+                        {mov.salida_valor ? formatMoney(mov.salida_valor) : <span className="text-slate-300 font-mono select-none">—</span>}
                       </td>
 
                       {/* Bloque Saldo Final */}
-                      <td className="py-2 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 bg-indigo-50/20">
+                      <td className="py-1.5 px-2 text-right font-mono tabular-nums font-semibold text-slate-900 border-l border-slate-200 bg-indigo-50/25">
                         {formatQty(mov.saldo_cantidad)}
                       </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-800 bg-indigo-50/20">
+                      <td className="py-1.5 px-2 text-right font-mono tabular-nums text-slate-800 bg-indigo-50/25">
                         {formatCost(mov.cpp)}
                       </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums font-bold text-slate-950 bg-indigo-50/20">
-                        S/ {formatMoney(mov.saldo_valor)}
+                      <td className="py-1.5 px-2 text-right font-mono tabular-nums font-bold text-slate-950 bg-indigo-50/25">
+                        {formatMoney(mov.saldo_valor)}
                       </td>
                     </tr>
                   );
@@ -634,34 +662,34 @@ export const KardexPage: React.FC = () => {
               {/* Pie de tabla con totales oficiales */}
               {resumen && (
                 <tfoot>
-                  <tr className="bg-slate-100/90 font-semibold border-t-2 border-slate-900 text-xs">
-                    <td colSpan={5} className="py-2.5 px-3 text-right font-bold text-slate-900 border-r border-slate-200">
-                      TOTALES DEL PERÍODO:
+                  <tr className="bg-slate-100/95 font-semibold border-t-2 border-slate-900 text-[11px]">
+                    <td colSpan={5} className="py-2 px-2.5 text-right font-bold text-slate-900">
+                      TOTALES DEL PERÍODO (PEN):
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-800 bg-emerald-50/50">
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-bold text-emerald-800 border-l border-slate-200 bg-emerald-50/50">
                       {formatQty(resumen.total_entradas_cantidad)}
                     </td>
-                    <td className="py-2.5 px-3 text-center text-slate-400 bg-emerald-50/50">—</td>
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-800 bg-emerald-50/50 border-r border-emerald-200">
-                      S/ {formatMoney(resumen.total_entradas_valor)}
+                    <td className="py-2 px-2 text-center text-slate-300 bg-emerald-50/50 font-mono select-none">—</td>
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-bold text-emerald-800 bg-emerald-50/50">
+                      {formatMoney(resumen.total_entradas_valor)}
                     </td>
 
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-rose-800 bg-amber-50/50">
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-bold text-amber-900 border-l border-slate-200 bg-amber-50/50">
                       {formatQty(resumen.total_salidas_cantidad)}
                     </td>
-                    <td className="py-2.5 px-3 text-center text-slate-400 bg-amber-50/50">—</td>
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-rose-800 bg-amber-50/50 border-r border-amber-200">
-                      S/ {formatMoney(resumen.total_salidas_valor)}
+                    <td className="py-2 px-2 text-center text-slate-300 bg-amber-50/50 font-mono select-none">—</td>
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-bold text-amber-900 bg-amber-50/50">
+                      {formatMoney(resumen.total_salidas_valor)}
                     </td>
 
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-slate-950 bg-indigo-50/50">
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-extrabold text-slate-950 border-l border-slate-200 bg-indigo-50/50">
                       {formatQty(resumen.saldo_final_cantidad)}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900 bg-indigo-50/50">
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-bold text-slate-900 bg-indigo-50/50">
                       {formatCost(resumen.cpp_final)}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono tabular-nums font-extrabold text-slate-950 bg-indigo-50/50">
-                      S/ {formatMoney(resumen.saldo_final_valor)}
+                    <td className="py-2 px-2 text-right font-mono tabular-nums font-extrabold text-slate-950 bg-indigo-50/50">
+                      {formatMoney(resumen.saldo_final_valor)}
                     </td>
                   </tr>
                 </tfoot>
@@ -670,17 +698,19 @@ export const KardexPage: React.FC = () => {
           </div>
         )}
         {!loading && totalMovimientos > 0 && (
-          <Paginacion
-            page={consulta.page}
-            pageSize={KARDEX_PAGE_SIZE}
-            count={totalMovimientos}
-            enPagina={movimientos.length}
-            cargando={loading}
-            etiqueta="movimientos"
-            onCambiarPagina={(page) => void cargarKardex(consulta.filtros, page)}
-          />
+          <div className="border-t border-slate-200 bg-white">
+            <Paginacion
+              page={consulta.page}
+              pageSize={KARDEX_PAGE_SIZE}
+              count={totalMovimientos}
+              enPagina={movimientos.length}
+              cargando={loading}
+              etiqueta="movimientos"
+              onCambiarPagina={(page) => void cargarKardex(consulta.filtros, page)}
+            />
+          </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 };

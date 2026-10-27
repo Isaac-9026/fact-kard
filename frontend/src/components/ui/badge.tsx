@@ -49,7 +49,7 @@ export function Badge({ className, variant = 'neutral', size, dot, children, ...
   const dotColor = dotColorMap[variant || 'neutral'] || 'bg-slate-400'
   return (
     <div className={cn(badgeVariants({ variant, size }), className)} {...props}>
-      {dot && <span className={cn('h-1.5 w-1.5 rounded-full shrink-0 animate-pulse', dotColor)} />}
+      {dot && <span className={cn('h-1.5 w-1.5 rounded-full shrink-0 motion-safe:animate-pulse', dotColor)} />}
       {children}
     </div>
   )
