@@ -5,6 +5,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from apps.reportes.excel_seguro import neutralizar_formulas
 from apps.reportes.formato131_service import generar_formato_131
 
 
@@ -100,6 +101,7 @@ def generar_excel_formato_131(**filtros):
     if not data['reportes']:
         hoja = libro.create_sheet('Formato 13.1')
         hoja['A1'] = 'No existen movimientos para los filtros seleccionados.'
+    neutralizar_formulas(libro)
     buffer = io.BytesIO()
     libro.save(buffer)
     buffer.seek(0)

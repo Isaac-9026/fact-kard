@@ -410,7 +410,7 @@ def ejecutar_recalculo_producto(*, empresa_id, producto_id, fecha_desde, usuario
                     stock_negativo(movimiento)
             elif movimiento.naturaleza == 'ENTRADA':
                 if movimiento.saldo_inicial_id and movimiento.saldo_inicial:
-                    movimiento_valor = q8(movimiento.saldo_inicial.valor_total_pen)
+                    movimiento_valor = q8(movimiento.saldo_inicial.valor_pen)
                     costo = cpp(movimiento_valor, movimiento.cantidad_base)
                 elif movimiento.movimiento_extornado_id:
                     # CON-003: el extorno sigue al costo recalculado del extornado; si este aún

@@ -156,6 +156,14 @@ def consultar_kardex_valorizado(
 
     if producto_id:
         estado_de(producto_id)
+    elif inicio is not None:
+        # B10-07: sin filtro de producto, los productos con saldo anterior al inicio y sin
+        # movimientos en la ventana también forman parte del saldo de la empresa (o almacén).
+        previos = Movimiento.objects.filter(empresa_id=empresa_id, fecha_movimiento__lt=inicio)
+        if almacen_id:
+            previos = previos.filter(almacen_id=almacen_id)
+        for prod_id in previos.order_by('producto_id').values_list('producto_id', flat=True).distinct():
+            estado_de(prod_id)
 
     for mov in ventana:
         estado = estado_de(mov.producto_id)

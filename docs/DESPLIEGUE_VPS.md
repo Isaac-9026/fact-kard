@@ -112,6 +112,11 @@ redis-cli ping   # PONG
 Redis solo guarda los contadores del límite de intentos de login: no necesita persistencia
 ni contraseña mientras escuche únicamente en 127.0.0.1.
 
+Si Redis se cae: `/api/health/` responde 503, los **nuevos** inicios de sesión responden 503
+("no disponible temporalmente") y las sesiones ya abiertas siguen funcionando. Sin
+`CACHE_URL` cada worker de Gunicorn cuenta los intentos por separado (el límite real se
+multiplica por el número de workers): en producción `CACHE_URL` es obligatorio.
+
 ### 10. Nginx
 ```bash
 sudo apt install -y nginx
@@ -152,8 +157,29 @@ sudo -u fact-kard /srv/fact-kard/venv/bin/python manage.py migrate
 sudo -u fact-kard /srv/fact-kard/venv/bin/python manage.py check --deploy
 ```
 `check --deploy` debe mostrar a lo sumo `security.W021` (HSTS *preload*: requiere el dominio
-raíz `asescon.net`, que sigue en cPanel; es correcto no activarlo). Crear el primer usuario
-administrador con el procedimiento habitual del proyecto.
+raíz `asescon.net`, que sigue en cPanel; es correcto no activarlo).
+
+**Catálogos SUNAT (obligatorio en una base nueva).** Las migraciones crean las tablas vacías;
+sin catálogos no se pueden registrar monedas, comprobantes ni operaciones. El comando es
+idempotente (se puede volver a ejecutar):
+```bash
+sudo -u fact-kard /srv/fact-kard/venv/bin/python manage.py seed_catalogos_sunat
+```
+
+**Primer usuario administrador.** FACT-KARD usa su propio modelo `Usuario` (no
+`createsuperuser`). Pide la contraseña sin mostrarla y aplica los validadores de Django:
+```bash
+sudo -u fact-kard /srv/fact-kard/venv/bin/python manage.py shell -c "
+from getpass import getpass
+from django.contrib.auth.password_validation import validate_password
+from apps.usuarios.models import Usuario
+u = Usuario(username=input('Usuario: ').strip(), email=input('Correo: ').strip(), es_admin_global=True)
+c = getpass('Contraseña: ')
+assert c == getpass('Repetir contraseña: '), 'Las contraseñas no coinciden'
+validate_password(c)
+u.set_password(c); u.save(); print('Administrador creado:', u.username)"
+```
+Luego, desde la aplicación: crear la empresa, su establecimiento, períodos y asignar usuarios.
 
 ### 15. Archivos estáticos
 ```bash
@@ -195,6 +221,10 @@ Comandos del servicio:
 | Recargar código sin cortar (HUP) | `sudo systemctl reload fact-kard` |
 | Estado | `sudo systemctl status fact-kard` |
 | Logs en vivo | `sudo journalctl -u fact-kard -f` |
+
+`reload` (HUP) renueva los workers con el código nuevo, pero **no vuelve a leer
+`backend/.env`**: tras cambiar cualquier variable (`CACHE_URL`, `AUTH_COOKIE_ENABLED`, …) usar
+`restart` (comprobado en el ensayo del Bloque 10).
 
 El servicio arranca con el VPS (`enable`), se reinicia solo si falla (`Restart=on-failure`)
 y lee los secretos de `backend/.env` (600), no de la unidad. Gunicorn **nunca** se reemplaza
@@ -394,8 +424,12 @@ Nada de esto se automatiza: cada paso lo decide una persona.
      sin borrar la actual).
 3. **Dependencias** (si cambiaron): `pip install -r backend/requirements-prod.txt` y `npm ci`.
 4. **Reconstruir el frontend**: `npm run build` en `frontend/`.
-5. **Reiniciar**: `sudo systemctl restart fact-kard` (y `sudo systemctl reload nginx` si cambió su configuración).
-6. **Verificar**: health check + smoke test.
+5. **Cookie HttpOnly**: si se vuelve a una versión **anterior al Bloque 9** (p. ej. `fcb21ac`)
+   y `AUTH_COOKIE_ENABLED=True`, ese frontend no sabe usar la cookie y **nadie puede iniciar
+   sesión**. Antes de reiniciar, poner `AUTH_COOKIE_ENABLED=False` en `backend/.env`
+   (probado en el ensayo del Bloque 10).
+6. **Reiniciar**: `sudo systemctl restart fact-kard` (y `sudo systemctl reload nginx` si cambió su configuración).
+7. **Verificar**: health check + smoke test.
 
 ---
 

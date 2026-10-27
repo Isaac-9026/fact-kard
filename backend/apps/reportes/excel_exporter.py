@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError
 from apps.empresas.models import Empresa, Establecimiento, Periodo
 from apps.inventario.models import Producto, Almacen
 from apps.kardex.models import Incidencia
+from apps.reportes.excel_seguro import neutralizar_formulas
 from apps.reportes.saldos_corte import resumen_saldos_al_corte
 from apps.reportes.services import consultar_kardex_valorizado
 
@@ -591,7 +592,7 @@ def generar_libro_excel_kardex(
 
 def generar_bytes_excel_kardex(**kwargs) -> io.BytesIO:
     """Helper que invoca generar_libro_excel_kardex y entrega un stream de bytes en memoria."""
-    wb = generar_libro_excel_kardex(**kwargs)
+    wb = neutralizar_formulas(generar_libro_excel_kardex(**kwargs))
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)

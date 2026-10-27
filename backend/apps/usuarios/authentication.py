@@ -142,6 +142,12 @@ def borrar_cookie_sesion(response):
     )
 
 
+class CacheLoginNoDisponible(exceptions.APIException):
+    status_code = 503
+    default_detail = 'El inicio de sesión no está disponible temporalmente. Intente nuevamente en unos minutos.'
+    default_code = 'login_no_disponible'
+
+
 class LoginRateThrottle(SimpleRateThrottle):
     """
     Bloque 6: limita los intentos de login por IP (settings.LOGIN_THROTTLE_RATE, p. ej.
@@ -162,4 +168,12 @@ class LoginRateThrottle(SimpleRateThrottle):
 
     def allow_request(self, request, view):
         self.ident_actual = self.get_ident(request)
-        return super().allow_request(request, view)
+        try:
+            return super().allow_request(request, view)
+        except Exception as exc:  # noqa: BLE001 — cualquier fallo del backend de caché (Redis caído)
+            # Bloque 10: sin caché no se puede contar intentos → se rechaza el login (fail-closed)
+            # con un 503 controlado en lugar de un 500 con traza. Las sesiones abiertas siguen.
+            logging.getLogger('fact_kard.auth').error(
+                'Login rechazado: caché del límite de intentos no disponible (%s)', exc.__class__.__name__,
+            )
+            raise CacheLoginNoDisponible() from None
