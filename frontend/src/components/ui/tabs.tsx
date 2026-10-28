@@ -44,8 +44,8 @@ export function TabsList({ className, ...props }: TabsListProps) {
   return (
     <div
       className={cn(
-        // En pantallas angostas las pestañas se desplazan horizontalmente dentro de la barra.
-        'inline-flex h-9 max-w-full items-center justify-start overflow-x-auto rounded-lg bg-slate-100 p-1 text-slate-500 border border-slate-200/60',
+        // En pantallas angostas las pestañas se desplazan horizontalmente dentro de la barra; jamás verticalmente.
+        'inline-flex h-9 max-w-full items-center justify-start overflow-x-auto overflow-y-hidden rounded-lg bg-slate-100 p-1 text-slate-500 border border-slate-200/60',
         className
       )}
       {...props}
