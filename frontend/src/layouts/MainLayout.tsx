@@ -111,6 +111,8 @@ const NavSectionGroup: React.FC<NavSectionGroupProps> = ({
 
   React.useEffect(() => {
     if (tieneActivo) {
+      // Abre la sección de la ruta activa al navegar (sin cambios de comportamiento).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpen(true)
     }
   }, [tieneActivo, currentPath])
@@ -330,17 +332,18 @@ export const MainLayout: React.FC = () => {
             <div className="hidden sm:block h-4 w-px bg-slate-200" />
 
             <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
-              <span className="hidden lg:inline font-medium text-slate-400">{activeInfo.section}</span>
-              <ChevronRight className="hidden lg:inline h-3 w-3 text-slate-300" />
+              {/* QA-006: la sección solo desde xl; en 1024 px no hay espacio junto al selector. */}
+              <span className="hidden xl:inline shrink-0 whitespace-nowrap font-medium text-slate-400">{activeInfo.section}</span>
+              <ChevronRight className="hidden xl:inline h-3 w-3 shrink-0 text-slate-300" />
               <div className="flex min-w-0 items-center gap-1.5 font-semibold text-slate-800">
                 <activeInfo.Icon className="h-3.5 w-3.5 shrink-0 text-indigo-600" strokeWidth={1.75} />
-                <span className="truncate">{activeInfo.item}</span>
+                <span className="truncate" title={`${activeInfo.section} › ${activeInfo.item}`}>{activeInfo.item}</span>
               </div>
             </div>
           </div>
 
           {/* Right: Empresa Activa Selector, User Badge & Logout */}
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 xl:gap-3">
             {/* Selector de Empresa */}
             {empresasDisponibles && empresasDisponibles.length > 0 && (
               <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-1 shadow-2xs">
@@ -349,7 +352,7 @@ export const MainLayout: React.FC = () => {
                   aria-label="Seleccionar empresa activa"
                   value={empresaActiva?.id || ''}
                   onChange={(e) => seleccionarEmpresa(Number(e.target.value))}
-                  className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer max-w-[96px] sm:max-w-[150px] lg:max-w-[220px] truncate"
+                  className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer max-w-[96px] sm:max-w-[150px] lg:max-w-[180px] xl:max-w-[220px] truncate"
                 >
                   {empresasDisponibles.map((emp) => (
                     <option key={emp.id} value={emp.id}>
@@ -364,7 +367,7 @@ export const MainLayout: React.FC = () => {
             <Badge
               variant={esAdmin ? 'info' : 'neutral'}
               size="sm"
-              className="gap-1.5 font-semibold py-1 px-2.5 hidden lg:inline-flex items-center select-none"
+              className="gap-1.5 font-semibold py-1 px-2.5 hidden xl:inline-flex items-center select-none"
             >
               <Shield
                 className={`h-3.5 w-3.5 shrink-0 ${esAdmin ? 'text-indigo-600' : 'text-slate-500'}`}
@@ -374,7 +377,7 @@ export const MainLayout: React.FC = () => {
             </Badge>
 
             {/* Usuario Avatar & Name */}
-            <div className="hidden lg:flex items-center gap-2 pl-1 border-l border-slate-200">
+            <div className="hidden xl:flex items-center gap-2 pl-1 border-l border-slate-200">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-700 font-semibold text-xs border border-slate-300/60 shadow-2xs">
                 <UserIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
               </div>

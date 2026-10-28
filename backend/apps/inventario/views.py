@@ -517,27 +517,14 @@ class ProductoEquivalenciaSugerirView(EmpresaActivaMixin, generics.GenericAPIVie
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        qs = ProductoEquivalencia.objects.filter(
-            empresa_id=request.empresa_id,
-            tercero_id=tercero_id,
-            activa=True,
-            confirmado_por__isnull=False,
-        ).select_related(
-            'tercero',
-            'unidad_externa_codigo',
-            'producto_unidad__producto',
-            'producto_unidad__unidad_codigo',
-            'confirmado_por',
+        # QA2-001: la regla canónica (apps.inventario.homologacion) y ninguna otra: empresa +
+        # proveedor + código (descripción solo si no hay código) + unidad.
+        from apps.inventario.homologacion import buscar_equivalencia
+        tercero = Tercero.objects.filter(pk=tercero_id, empresa_id=request.empresa_id).first()
+        equivalencia, _ = buscar_equivalencia(
+            empresa_id=request.empresa_id, tercero=tercero, codigo=codigo_externo, descripcion=descripcion,
+            unidad=(request.query_params.get('unidad') or '').strip(),
         )
-
-        equivalencia = None
-        if codigo_externo:
-            equivalencia = qs.filter(codigo_externo__iexact=codigo_externo).first()
-
-        if not equivalencia and descripcion:
-            equivalencia = qs.filter(descripcion_externa__iexact=descripcion).first()
-            if not equivalencia:
-                equivalencia = qs.filter(descripcion_externa__icontains=descripcion).first()
 
         if equivalencia:
             serializer = ProductoEquivalenciaSerializer(equivalencia, context={'empresa_id': request.empresa_id})

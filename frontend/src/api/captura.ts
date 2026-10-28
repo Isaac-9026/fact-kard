@@ -25,14 +25,43 @@ export interface DocumentoCaptura {
   creado_en: string;
   total_campos?: number;
   campos?: CapturaCampo[];
+  /** QA2-001: homologación de cada línea con la misma regla que el borrador. */
+  homologacion?: HomologacionCaptura;
   fue_creado_nuevo?: boolean;
   mensaje?: string;
+}
+
+export interface LineaHomologacion {
+  linea: number;
+  codigo_externo: string;
+  codigo_normalizado: string;
+  descripcion: string;
+  unidad: string;
+  unidad_normalizada: string;
+  criterio: 'codigo' | 'descripcion' | null;
+  estado: 'HOMOLOGADA' | 'PENDIENTE';
+  motivo: string;
+  equivalencia_id: number | null;
+  producto_id: number | null;
+  producto_codigo: string | null;
+  producto_unidad_id: number | null;
+  factor_conversion: string;
+}
+
+export interface HomologacionCaptura {
+  clase: 'COMPRA' | 'VENTA' | null;
+  proveedor: { documento: string; nombre: string; tercero_id: number | null; razon_social: string | null } | null;
+  lineas: LineaHomologacion[];
+  pendientes_homologacion: number | null;
+  error?: string;
 }
 
 export interface ProductoEquivalencia {
   id: number;
   empresa: number;
-  tercero: number;
+  tercero: number | null;
+  /** QA2-001: captura de origen; el backend usa su proveedor (y lo registra si aún no existe). */
+  captura?: number | null;
   tercero_info?: {
     id: number;
     numero_documento: string;

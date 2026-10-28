@@ -88,7 +88,8 @@ class DocumentoListCreateView(generics.ListCreateAPIView):
                 Q(serie_normalizada__icontains=search) |
                 Q(numero_normalizado__icontains=search) |
                 Q(ruc_emisor__icontains=search) |
-                Q(tercero__razon_social__icontains=search)
+                Q(tercero__razon_social__icontains=search) |
+                Q(tercero__numero_documento__icontains=search)  # QA-004: RUC/DNI del cliente o proveedor
             )
             # Bloque 7: el buscador del frontend admite "SERIE-NUMERO" (antes se filtraba
             # en el navegador sobre "F001-123"); ahora la búsqueda se hace aquí.

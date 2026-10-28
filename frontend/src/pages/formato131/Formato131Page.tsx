@@ -39,6 +39,7 @@ import { Select } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
 import { filaSaldoFinal, filaSaldoInicial } from '../../utils/formato131Saldos';
+import { mensajeErrorExportacion, nombreArchivoFormato131 } from '../../utils/descargaArchivo';
 
 const apiError = (error: unknown) => {
   const data = (error as { response?: { data?: Record<string, string | string[]> | string } }).response?.data;
@@ -76,6 +77,8 @@ export const Formato131Page: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+  // Bloque 13: el aviso dice si falló la consulta o la exportación.
+  const [errorTitulo, setErrorTitulo] = useState('Error al consultar');
 
   useEffect(() => {
     let active = true;
@@ -95,6 +98,7 @@ export const Formato131Page: React.FC = () => {
   }, [empresaActiva?.id]);
 
   const consultar = async () => {
+    setErrorTitulo('Error al consultar');
     if (!periodo) return setError('Selecciona un período contable para generar el reporte.');
     setBusy(true);
     setError('');
@@ -114,17 +118,24 @@ export const Formato131Page: React.FC = () => {
   };
 
   const descargarExcel = async () => {
+    setErrorTitulo('Error al exportar');
     if (!periodo) return setError('Selecciona un período contable.');
     setExporting(true);
     setError('');
+    const p = periodos.find((x) => String(x.id) === String(periodo));
+    const nombre = nombreArchivoFormato131({
+      periodo: p ? `${p.anio}-${String(p.mes).padStart(2, '0')}` : `periodo_${periodo}`,
+      ruc: empresaActiva?.ruc,
+    });
     try {
       await descargarFormato131({
         periodo_id: periodo,
         establecimiento_id: establecimiento || undefined,
         producto_id: producto || undefined,
-      });
+      }, nombre);
     } catch (e) {
-      setError(apiError(e));
+      // Antes: el cuerpo del error es un Blob y apiError() devolvía '' → no se mostraba nada.
+      setError(await mensajeErrorExportacion(e));
     } finally {
       setExporting(false);
     }
@@ -217,7 +228,7 @@ export const Formato131Page: React.FC = () => {
           <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-800 flex items-start gap-2.5">
             <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">Error al consultar</p>
+              <p className="font-semibold">{errorTitulo}</p>
               <p className="mt-0.5">{error}</p>
             </div>
           </div>

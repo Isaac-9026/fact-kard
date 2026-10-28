@@ -129,6 +129,8 @@ export const SidebarMenuItem = React.forwardRef<HTMLLIElement, React.HTMLAttribu
 )
 SidebarMenuItem.displayName = 'SidebarMenuItem'
 
+// Variantes de estilo exportadas junto al componente (patrón shadcn).
+// eslint-disable-next-line react-refresh/only-export-components
 export const sidebarMenuButtonVariants = cva(
   'peer/menu-button flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors select-none outline-none focus-visible:ring-2 focus-visible:ring-slate-900 cursor-pointer',
   {

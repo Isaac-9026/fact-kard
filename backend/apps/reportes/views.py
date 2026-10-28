@@ -8,7 +8,8 @@ from apps.usuarios.permissions import TieneEmpresaActiva
 from apps.reportes.services import consultar_kardex_valorizado
 from apps.reportes.serializers import KardexReporteResponseSerializer
 from apps.reportes.excel_exporter import generar_bytes_excel_kardex
-from apps.reportes.formato131_excel import generar_excel_formato_131
+from apps.empresas.models import Periodo
+from apps.reportes.formato131_excel import generar_excel_formato_131, nombre_archivo_formato_131
 from apps.reportes.formato131_service import generar_formato_131
 from apps.reportes.piloto_service import comparar_piloto, obtener_valores_factkard
 from apps.reportes.serializers import PilotoComparacionSerializer
@@ -119,8 +120,13 @@ class Formato131ExcelView(APIView):
             establecimiento_id=entero_param(params, 'establecimiento_id'),
             producto_id=entero_param(params, 'producto_id'),
         )
+        # Bloque 13: nombre descriptivo (período y RUC). El período ya se validó contra la empresa activa.
+        periodo = Periodo.objects.select_related('empresa').get(pk=periodo_id, empresa_id=request.empresa_id)
+        nombre = nombre_archivo_formato_131(periodo, periodo.empresa.ruc)
         response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response['Content-Disposition'] = f'attachment; filename="formato_13_1_periodo_{periodo_id}.xlsx"'
+        response['Content-Disposition'] = f'attachment; filename="{nombre}"'
+        response['Content-Length'] = str(buffer.getbuffer().nbytes)
+        buffer.close()
         return response
 
 

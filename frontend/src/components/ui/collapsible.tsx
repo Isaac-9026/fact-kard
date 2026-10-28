@@ -8,6 +8,8 @@ interface CollapsibleContextValue {
 
 const CollapsibleContext = React.createContext<CollapsibleContextValue | null>(null)
 
+// Hook del mismo componente (patrón shadcn); no afecta al fast refresh en la práctica.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCollapsible() {
   const context = React.useContext(CollapsibleContext)
   if (!context) {
@@ -80,7 +82,7 @@ export const CollapsibleTrigger = React.forwardRef<HTMLButtonElement, Collapsibl
 )
 CollapsibleTrigger.displayName = 'CollapsibleTrigger'
 
-export interface CollapsibleContentProps extends React.HTMLAttributes<HTMLDivElement> {}
+export type CollapsibleContentProps = React.HTMLAttributes<HTMLDivElement>
 
 export const CollapsibleContent = React.forwardRef<HTMLDivElement, CollapsibleContentProps>(
   ({ className, children, ...props }, ref) => {

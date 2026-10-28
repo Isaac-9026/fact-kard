@@ -10,7 +10,7 @@ export interface ModalProps {
   icon?: React.ReactNode
   children: React.ReactNode
   footer?: React.ReactNode
-  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl'
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '7xl'
   className?: string
 }
 
@@ -23,6 +23,8 @@ const maxWidthMap = {
   '3xl': 'max-w-3xl',
   '4xl': 'max-w-4xl',
   '5xl': 'max-w-5xl',
+  // Bloque 10: formularios maestro-detalle anchos (comprobantes); en móvil sigue siendo w-full.
+  '7xl': 'max-w-7xl',
 }
 
 export function Modal({
@@ -97,7 +99,7 @@ export function Modal({
         )}
 
         {/* Body */}
-        <div className="p-5 overflow-y-auto flex-1 text-sm text-slate-700">{children}</div>
+        <div className="p-4 sm:p-5 overflow-y-auto flex-1 min-w-0 text-sm text-slate-700">{children}</div>
 
         {/* Footer */}
         {footer && (

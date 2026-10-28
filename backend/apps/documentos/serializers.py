@@ -14,6 +14,24 @@ class DocumentoDetalleSerializer(serializers.ModelSerializer):
     almacen_nombre = serializers.ReadOnlyField(source='almacen.nombre')
     tipo_operacion_codigo = serializers.ReadOnlyField(source='tipo_operacion.codigo_interno')
     tipo_operacion_descripcion = serializers.ReadOnlyField(source='tipo_operacion.descripcion')
+    tipo_operacion_naturaleza = serializers.ReadOnlyField(source='tipo_operacion.naturaleza')
+    # QA-001: para elegir la línea de origen de una NC/ND de devolución: cuánto se devolvió ya
+    # (notas confirmadas con movimiento físico) y cuánto queda, en cantidad base.
+    cantidad_devuelta = serializers.SerializerMethodField()
+    cantidad_disponible_devolucion = serializers.SerializerMethodField()
+
+    def _devuelta(self, obj):
+        if not hasattr(obj, '_cantidad_devuelta_cache'):
+            from apps.documentos.reglas import cantidad_ya_devuelta
+            obj._cantidad_devuelta_cache = cantidad_ya_devuelta(obj.id)
+        return obj._cantidad_devuelta_cache
+
+    def get_cantidad_devuelta(self, obj):
+        return f'{self._devuelta(obj):.8f}'
+
+    def get_cantidad_disponible_devolucion(self, obj):
+        disponible = (obj.cantidad_base or Decimal('0')) - self._devuelta(obj)
+        return f'{max(disponible, Decimal("0")):.8f}'
 
     class Meta:
         model = DocumentoDetalle
@@ -45,6 +63,9 @@ class DocumentoDetalleSerializer(serializers.ModelSerializer):
             'costo_unitario_pen',
             'es_bonificacion',
             'detalle_origen',
+            'tipo_operacion_naturaleza',
+            'cantidad_devuelta',
+            'cantidad_disponible_devolucion',
         ]
         read_only_fields = [
             'id',
@@ -61,6 +82,10 @@ class DocumentoListSerializer(serializers.ModelSerializer):
     tipo_comprobante_descripcion = serializers.ReadOnlyField(source='tipo_comprobante.descripcion')
     es_nota = serializers.ReadOnlyField(source='tipo_comprobante.es_nota')
     tercero_razon_social = serializers.ReadOnlyField(source='tercero.razon_social')
+    # QA-004: documento del tercero (proveedor en compras, cliente en ventas). `ruc_emisor` es
+    # el emisor del comprobante: en una venta es la propia empresa, no el cliente.
+    tercero_tipo_documento = serializers.ReadOnlyField(source='tercero.tipo_documento')
+    tercero_numero_documento = serializers.ReadOnlyField(source='tercero.numero_documento')
     periodo_orden = serializers.ReadOnlyField(source='periodo.orden')
     revisado_por_username = serializers.ReadOnlyField(source='revisado_por.username')
     detalles_count = serializers.SerializerMethodField()
@@ -80,6 +105,8 @@ class DocumentoListSerializer(serializers.ModelSerializer):
             'periodo_orden',
             'tercero',
             'tercero_razon_social',
+            'tercero_tipo_documento',
+            'tercero_numero_documento',
             'ruc_emisor',
             'tipo_comprobante',
             'tipo_comprobante_codigo',
@@ -115,6 +142,10 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
     tipo_comprobante_descripcion = serializers.ReadOnlyField(source='tipo_comprobante.descripcion')
     es_nota = serializers.ReadOnlyField(source='tipo_comprobante.es_nota')
     tercero_razon_social = serializers.ReadOnlyField(source='tercero.razon_social')
+    # QA-004: documento del tercero (proveedor en compras, cliente en ventas). `ruc_emisor` es
+    # el emisor del comprobante: en una venta es la propia empresa, no el cliente.
+    tercero_tipo_documento = serializers.ReadOnlyField(source='tercero.tipo_documento')
+    tercero_numero_documento = serializers.ReadOnlyField(source='tercero.numero_documento')
     periodo_orden = serializers.ReadOnlyField(source='periodo.orden')
     revisado_por_username = serializers.ReadOnlyField(source='revisado_por.username')
     confirmado_por_username = serializers.ReadOnlyField(source='confirmado_por.username')
@@ -131,6 +162,8 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
             'periodo_orden',
             'tercero',
             'tercero_razon_social',
+            'tercero_tipo_documento',
+            'tercero_numero_documento',
             'ruc_emisor',
             'tipo_comprobante',
             'tipo_comprobante_codigo',
@@ -319,6 +352,10 @@ class DocumentoCapturaDetailSerializer(serializers.ModelSerializer):
     subido_por_username = serializers.ReadOnlyField(source='subido_por.username')
     campos = CapturaCampoSerializer(many=True, read_only=True)
     documento_serie_numero = serializers.SerializerMethodField()
+    # QA2-001: estado de homologación de cada línea con la misma regla que el borrador
+    # (apps.inventario.homologacion), en cuanto el XML se sube: proveedor, equivalencia aplicada
+    # y líneas pendientes.
+    homologacion = serializers.SerializerMethodField()
 
     class Meta:
         model = DocumentoCaptura
@@ -334,8 +371,13 @@ class DocumentoCapturaDetailSerializer(serializers.ModelSerializer):
             'subido_por_username',
             'creado_en',
             'campos',
+            'homologacion',
         ]
         read_only_fields = fields
+
+    def get_homologacion(self, obj):
+        from apps.inventario.homologacion import homologacion_de_captura
+        return homologacion_de_captura(obj)
 
     def get_documento_serie_numero(self, obj):
         if obj.documento:

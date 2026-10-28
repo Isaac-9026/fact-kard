@@ -1,11 +1,14 @@
 /**
- * Compras, Ventas, Comprobantes y Notas de Crédito/Débito son la MISMA pantalla
- * (DocumentosPage) con un modo distinto. Aquí está toda la diferencia entre modos, como
- * funciones puras: qué filtros fijos se envían a la API y con qué clase se abre el
- * formulario de nuevo comprobante. La lógica de documentos no se duplica.
+ * Comprobantes y Notas de Crédito/Débito son la MISMA pantalla (DocumentosPage) con un modo
+ * distinto. Aquí está toda la diferencia entre modos, como funciones puras: qué filtros fijos
+ * se envían a la API, qué tipos de comprobante ofrece el formulario y con qué clase se abre.
+ *
+ * Bloque 13: Compras y Ventas dejaron de ser pantallas propias. Son las pestañas
+ * `Todos | Compras | Ventas` de Comprobantes, guardadas en la URL (`/comprobantes?clase=COMPRA`);
+ * las rutas antiguas `/compras` y `/ventas` redirigen ahí (navegacion.ts, RUTAS_ANTERIORES).
  */
 export type ClaseVista = 'COMPRA' | 'VENTA';
-export type VistaDocumentos = 'TODOS' | 'COMPRA' | 'VENTA' | 'NOTAS';
+export type VistaDocumentos = 'COMPROBANTES' | 'NOTAS';
 
 export interface FiltrosUsuarioDocumentos {
   clase?: ClaseVista;
@@ -22,32 +25,17 @@ export interface FiltrosApiDocumentos extends FiltrosUsuarioDocumentos {
 export interface ConfigVistaDocumentos {
   titulo: string;
   descripcion: string;
-  /** Clase fija de la vista (el selector de clase se oculta). */
-  claseFija?: ClaseVista;
-  /** true = solo notas; false = sin notas; undefined = todas. */
-  esNota?: boolean;
+  /** true = solo notas; false = sin notas. */
+  esNota: boolean;
   botonNuevo: string;
 }
 
 export const CONFIG_VISTAS: Record<VistaDocumentos, ConfigVistaDocumentos> = {
-  TODOS: {
-    titulo: 'Documentos Comerciales',
-    descripcion: 'Mesa de control de comprobantes (Compras, Ventas, NC, ND), revisión contable y confirmación con impacto en Kardex.',
+  COMPROBANTES: {
+    titulo: 'Comprobantes',
+    descripcion: 'Gestión de comprobantes comerciales de compra y venta.',
+    esNota: false,
     botonNuevo: 'Nuevo Comprobante',
-  },
-  COMPRA: {
-    titulo: 'Compras',
-    descripcion: 'Comprobantes de compra (facturas y boletas de proveedores). Las notas de crédito/débito están en su propia opción.',
-    claseFija: 'COMPRA',
-    esNota: false,
-    botonNuevo: 'Nueva Compra',
-  },
-  VENTA: {
-    titulo: 'Ventas',
-    descripcion: 'Comprobantes de venta emitidos por la empresa. Las notas de crédito/débito están en su propia opción.',
-    claseFija: 'VENTA',
-    esNota: false,
-    botonNuevo: 'Nueva Venta',
   },
   NOTAS: {
     titulo: 'Notas de Crédito / Débito',
@@ -57,25 +45,45 @@ export const CONFIG_VISTAS: Record<VistaDocumentos, ConfigVistaDocumentos> = {
   },
 };
 
-/** Filtros que se envían a la API: los del usuario más los fijos de la vista. */
+/** Filtros que se envían a la API: los del usuario (incluida la clase de la pestaña) más los fijos de la vista. */
 export const filtrosApiDocumentos = <F extends FiltrosUsuarioDocumentos>(
   vista: VistaDocumentos,
   usuario: F,
-): F & { es_nota?: boolean } => {
-  const config = CONFIG_VISTAS[vista];
-  const filtros: F & { es_nota?: boolean } = { ...usuario };
-  if (config.claseFija) filtros.clase = config.claseFija;
-  if (config.esNota !== undefined) filtros.es_nota = config.esNota;
-  return filtros;
-};
-
-/** Clase con la que se abre el formulario de nuevo comprobante. */
-export const claseInicialNuevo = (vista: VistaDocumentos, actual: ClaseVista): ClaseVista =>
-  CONFIG_VISTAS[vista].claseFija ?? actual;
+): F & { es_nota?: boolean } => ({ ...usuario, es_nota: CONFIG_VISTAS[vista].esNota });
 
 /** Tipos de comprobante que ofrece el formulario según la vista (notas o no notas). */
-export const tiposComprobanteDeVista = <T extends { es_nota?: boolean }>(vista: VistaDocumentos, tipos: T[]): T[] => {
-  const esNota = CONFIG_VISTAS[vista].esNota;
-  if (esNota === undefined) return tipos;
-  return tipos.filter((t) => Boolean(t.es_nota) === esNota);
+export const tiposComprobanteDeVista = <T extends { es_nota?: boolean }>(vista: VistaDocumentos, tipos: T[]): T[] =>
+  tipos.filter((t) => Boolean(t.es_nota) === CONFIG_VISTAS[vista].esNota);
+
+// ---- Pestañas de Comprobantes -------------------------------------------------------------
+
+export type TabComprobantes = 'TODOS' | ClaseVista;
+
+export const TABS_COMPROBANTES: { valor: TabComprobantes; etiqueta: string }[] = [
+  { valor: 'TODOS', etiqueta: 'Todos' },
+  { valor: 'COMPRA', etiqueta: 'Compras' },
+  { valor: 'VENTA', etiqueta: 'Ventas' },
+];
+
+/** `?clase=COMPRA` → Compras, `?clase=VENTA` → Ventas; sin parámetro (o inválido) → Todos. */
+export const tabDesdeQuery = (clase: string | null | undefined): TabComprobantes => {
+  const valor = (clase ?? '').trim().toUpperCase();
+  return valor === 'COMPRA' || valor === 'VENTA' ? valor : 'TODOS';
 };
+
+/** Clase que se filtra en la API para la pestaña (Todos = sin filtro de clase). */
+export const claseDeTab = (tab: TabComprobantes): ClaseVista | undefined => (tab === 'TODOS' ? undefined : tab);
+
+/** Query de la URL al cambiar de pestaña: conserva los demás parámetros y solo cambia `clase`. */
+export const queryConTab = (actual: string | URLSearchParams, tab: TabComprobantes): URLSearchParams => {
+  const params = new URLSearchParams(actual);
+  if (tab === 'TODOS') params.delete('clase');
+  else params.set('clase', tab);
+  return params;
+};
+
+/**
+ * Clase con la que se abre "Nuevo Comprobante": la de la pestaña activa (Compras/Ventas) o la
+ * última usada si se está en Todos. En el modal la clase se puede cambiar igual.
+ */
+export const claseInicialNuevo = (tab: TabComprobantes, actual: ClaseVista): ClaseVista => claseDeTab(tab) ?? actual;

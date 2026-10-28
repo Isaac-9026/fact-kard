@@ -7,6 +7,7 @@ from django.utils import timezone
 from apps.catalogos.models import TipoExistencia, TipoOperacion, UnidadMedida
 from apps.empresas.models import Establecimiento, Periodo
 from apps.auditoria.services import registrar_auditoria
+from apps.inventario.homologacion import equivalencia_activa_repetida, limpiar_texto, normalizar_texto
 from apps.inventario.models import (
     Almacen,
     NotaInterna,
@@ -653,6 +654,9 @@ class ProductoEquivalenciaSerializer(serializers.ModelSerializer):
     producto_info = serializers.SerializerMethodField(read_only=True)
     unidad_externa_nombre = serializers.CharField(source='unidad_externa_codigo.descripcion', read_only=True)
     confirmado_por_username = serializers.CharField(source='confirmado_por.username', read_only=True)
+    # QA2-001: al homologar desde una captura, el proveedor es el emisor del comprobante. Si aún
+    # no existe (la captura se subió pero no se generó el borrador), se registra al guardar.
+    captura = serializers.IntegerField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = ProductoEquivalencia
@@ -662,9 +666,32 @@ class ProductoEquivalenciaSerializer(serializers.ModelSerializer):
             'unidad_externa_codigo', 'unidad_externa_nombre',
             'producto_unidad', 'producto_info',
             'factor_conversion', 'confirmado_por', 'confirmado_por_username',
-            'confirmado_en', 'activa',
+            'confirmado_en', 'activa', 'captura',
         )
         read_only_fields = ('id', 'empresa', 'confirmado_por', 'confirmado_en')
+        extra_kwargs = {'tercero': {'required': False, 'allow_null': True}}
+
+    def _proveedor_de_captura(self, captura_id, *, crear):
+        from apps.documentos.models import DocumentoCaptura
+        from apps.inventario.homologacion import proveedor_de_captura
+        captura = DocumentoCaptura.objects.filter(pk=captura_id, empresa_id=self.context.get('empresa_id')).first()
+        if captura is None:
+            raise serializers.ValidationError({'captura': 'Captura no encontrada para esta empresa.'})
+        try:
+            return captura, proveedor_de_captura(captura, crear=crear)
+        except Exception as exc:  # comprobante que no es de la empresa, sin RUC, etc.
+            detalle = getattr(exc, 'detail', None) or getattr(exc, 'message_dict', None) or str(exc)
+            raise serializers.ValidationError({'captura': detalle})
+
+    def create(self, validated_data):
+        captura_id = validated_data.pop('captura', None)
+        if validated_data.get('tercero') is None and captura_id:
+            _, validated_data['tercero'] = self._proveedor_de_captura(captura_id, crear=True)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('captura', None)
+        return super().update(instance, validated_data)
 
     def get_tercero_info(self, obj):
         if obj.tercero:
@@ -702,3 +729,57 @@ class ProductoEquivalenciaSerializer(serializers.ModelSerializer):
         if value is None or value <= Decimal('0'):
             raise serializers.ValidationError('El factor de conversión debe ser mayor a 0.')
         return value.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+
+    def validate_codigo_externo(self, valor):
+        # QA-002: sin espacios repetidos ni el marcador '—' que mostraba la pantalla sin código.
+        return limpiar_texto(valor)
+
+    def validate_descripcion_externa(self, valor):
+        return limpiar_texto(valor)
+
+    def validate(self, attrs):
+        """
+        Bloque 14 / QA-002: una sola equivalencia ACTIVA por proveedor, código externo (o
+        descripción si no hay código) y unidad, comparados como los compara la captura
+        (sin distinguir mayúsculas ni espacios). Con dos activas la captura tomaba cualquiera.
+        """
+        attrs = super().validate(attrs)
+        actual = self.instance
+        captura_id = attrs.get('captura')
+        if actual is None and captura_id:
+            captura, proveedor = self._proveedor_de_captura(captura_id, crear=False)
+            from apps.inventario.homologacion import solo_digitos, valores_captura
+            ruc = solo_digitos(valores_captura(captura)[0].get('ruc_emisor'))
+            elegido = attrs.get('tercero')
+            if elegido is not None and solo_digitos(elegido.numero_documento) != ruc:
+                raise serializers.ValidationError({'tercero': (
+                    f'El proveedor elegido ({elegido.numero_documento}) no es el emisor del comprobante (RUC {ruc}): '
+                    'la equivalencia no se aplicaría a sus XML.'
+                )})
+            if elegido is None and proveedor is not None:
+                attrs['tercero'] = proveedor
+        elif actual is None and attrs.get('tercero') is None:
+            raise serializers.ValidationError({'tercero': 'Seleccione el proveedor.'})
+        activa = attrs.get('activa', actual.activa if actual else True)
+        if not activa:
+            return attrs
+        empresa_id = self.context.get('empresa_id') or (actual.empresa_id if actual else None)
+        tercero = attrs.get('tercero', actual.tercero if actual else None)
+        codigo = attrs.get('codigo_externo', actual.codigo_externo if actual else None) or ''
+        descripcion = attrs.get('descripcion_externa', actual.descripcion_externa if actual else None) or ''
+        unidad = attrs.get('unidad_externa_codigo', actual.unidad_externa_codigo if actual else None)
+        if not empresa_id or not tercero or not (normalizar_texto(codigo) or normalizar_texto(descripcion)):
+            return attrs
+        otra = equivalencia_activa_repetida(
+            empresa_id=empresa_id, tercero=tercero, codigo=codigo, descripcion=descripcion,
+            unidad=getattr(unidad, 'codigo', unidad) or '', excluir_id=actual.pk if actual else None,
+        )
+        if otra is not None:
+            campo, clave = (('codigo_externo', f"el código '{normalizar_texto(codigo)}'") if normalizar_texto(codigo)
+                            else ('descripcion_externa', f"la descripción '{normalizar_texto(descripcion)}'"))
+            destino = otra.producto_unidad.producto.codigo_interno if otra.producto_unidad_id else '—'
+            raise serializers.ValidationError({campo: (
+                f'Ya existe una equivalencia activa para este proveedor y {clave} (→ {destino}). '
+                'Edítela o desactívela antes de registrar otra.'
+            )})
+        return attrs

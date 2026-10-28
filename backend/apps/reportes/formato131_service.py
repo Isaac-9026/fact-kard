@@ -250,6 +250,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
         cpp_global = cpp_inicial
         # Bloque 5: valor del establecimiento tras cada movimiento = su parte del saldo real.
         reparto = cache.reparto(prod_id, periodo.fecha_fin) if movimientos_grupo else {}
+        # QA-003: valor del establecimiento tras la fila anterior (para las filas sin reparto).
+        valor_establecimiento = costo_total_inicial
         filas = []
         for movimiento in movimientos_grupo:
             valorizacion = getattr(movimiento, 'valorizacion', None)
@@ -262,6 +264,22 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 else movimiento.valor_ajuste_pen
             )
             cpp_global = q8(valorizacion.cpp_empresa if valorizacion else costo_unitario)
+            cpp_fila = cpp_global
+            if movimiento.id in reparto:
+                valor_fila = reparto[movimiento.id].get(estab_id, ZERO)
+            elif (movimiento.tipo_operacion.codigo_interno == 'TRANSFERENCIA_ENTRADA' and not movimiento.es_extorno
+                    and q8(saldo_fisico + movimiento.cantidad_base) != ZERO):
+                # QA-003: entre la entrada (prioridad 2 del día) y la salida (prioridad 4) de una
+                # transferencia las cantidades por establecimiento no suman las de la empresa y ese
+                # instante no se reparte. Antes el saldo del destino se armaba con el CPP de la
+                # empresa en ese instante, que puede ser anterior a un ajuste o a una compra del
+                # mismo día (NC de descuento, prioridad 3): entrada 10 × 12.25 = 122.50 pero saldo
+                # 10 × 12.50 = 125.00. El saldo del destino es su valor anterior + lo que entra,
+                # al costo de la transferencia. No cambia el CPP global, el Kardex ni el saldo final.
+                valor_fila = q8(valor_establecimiento + valor_movimiento)
+                cpp_fila = q8(valor_fila / q8(saldo_fisico + movimiento.cantidad_base))
+            else:
+                valor_fila = None  # cantidad × CPP de la fila, cuando se conozca la cantidad
             entrada = salida = None
             if movimiento.naturaleza == 'ENTRADA':
                 saldo_fisico = q8(saldo_fisico + movimiento.cantidad_base)
@@ -282,6 +300,7 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 entrada = bloque if valor_movimiento >= ZERO else None
                 salida = bloque if valor_movimiento < ZERO else None
 
+            valor_establecimiento = q8(valor_fila if valor_fila is not None else saldo_fisico * cpp_fila)
             filas.append({
                 'movimiento_id': movimiento.id,
                 'fecha_emision': movimiento.fecha_movimiento.isoformat(),
@@ -298,11 +317,8 @@ def generar_formato_131(*, empresa_id, periodo_id, establecimiento_id=None, prod
                 'salida': salida,
                 'saldo_final': {
                     'cantidad': texto_decimal(saldo_fisico),
-                    'costo_unitario': texto_decimal(cpp_global),
-                    'costo_total': texto_decimal(
-                        reparto[movimiento.id].get(estab_id, ZERO) if movimiento.id in reparto
-                        else saldo_fisico * cpp_global
-                    ),
+                    'costo_unitario': texto_decimal(cpp_fila),
+                    'costo_total': texto_decimal(valor_fila if valor_fila is not None else saldo_fisico * cpp_fila),
                 },
                 'orden': {
                     'prioridad_dia': movimiento.prioridad_dia,

@@ -17,6 +17,43 @@ BORDER = Border(*(Side(style='thin', color='A6A6A6'),) * 4)
 FORMATO_NUMERO = '#,##0.00000000'
 
 
+def nombre_archivo_formato_131(periodo, ruc):
+    """Bloque 13: `Formato_13_1_2026-01_20123456789.xlsx` (solo dígitos, letras, '-', '_' y '.')."""
+    ruc_seguro = ''.join(c for c in str(ruc or '') if c.isalnum())[:20]
+    partes = ['Formato_13_1', f'{periodo.anio}-{periodo.mes:02d}'] + ([ruc_seguro] if ruc_seguro else [])
+    return '_'.join(partes) + '.xlsx'
+
+
+def _pie_conciliacion(hoja, fila, reporte, fuente_cierre):
+    """
+    Bloque 13: lo mismo que la pantalla muestra debajo de cada tabla — de dónde sale el saldo
+    final (cierre vigente con versión y hash, o calculado) y la microdiferencia de cierre. Solo
+    presentación: los valores vienen de generar_formato_131 sin recalcular nada.
+    """
+    if reporte.get('fuente_saldo_final') == 'CIERRE' and fuente_cierre:
+        fuente = f"CIERRE v{fuente_cierre['version']} (hash {fuente_cierre['hash'][:12]}…)"
+    else:
+        fuente = 'CALCULADO (sin cierre vigente)'
+    hoja.cell(fila, 1, 'FUENTE DEL SALDO FINAL').font = Font(bold=True)
+    hoja.merge_cells(start_row=fila, start_column=2, end_row=fila, end_column=14)
+    hoja.cell(fila, 2, fuente)
+    micro = Decimal(reporte.get('microdiferencia_cierre') or '0')
+    if micro == 0:
+        return fila
+    fila += 1
+    etiqueta = (
+        'AJUSTE DE REDONDEO DEL REPARTO POR ESTABLECIMIENTO (no es una diferencia contable)'
+        if reporte.get('fuente_saldo_final') == 'CALCULADO'
+        else 'MICRODIFERENCIA OFICIAL ASIGNADA AL ESTABLECIMIENTO PRINCIPAL (absorbida por redondeo contable)'
+    )
+    hoja.cell(fila, 1, etiqueta).font = Font(bold=True, color='9C5700')
+    hoja.merge_cells(start_row=fila, start_column=1, end_row=fila, end_column=13)
+    celda = hoja.cell(fila, 14, micro)
+    celda.number_format = FORMATO_NUMERO
+    celda.font = Font(bold=True, color='9C5700')
+    return fila
+
+
 def generar_excel_formato_131(**filtros):
     data = generar_formato_131(**filtros)
     libro = Workbook()
@@ -96,8 +133,9 @@ def generar_excel_formato_131(**filtros):
                 celda.alignment = Alignment(horizontal='right' if celda.column >= 6 else 'center')
         for columna, ancho in enumerate((12, 9, 12, 14, 18, 14, 16, 16, 14, 16, 16, 14, 16, 16), start=1):
             hoja.column_dimensions[get_column_letter(columna)].width = ancho
+        ultima = _pie_conciliacion(hoja, 15 + len(reporte['movimientos']), reporte, data.get('fuente_cierre'))
         hoja.print_title_rows = '11:12'
-        hoja.print_area = f'A1:N{13 + len(reporte["movimientos"])}'
+        hoja.print_area = f'A1:N{ultima}'
     if not data['reportes']:
         hoja = libro.create_sheet('Formato 13.1')
         hoja['A1'] = 'No existen movimientos para los filtros seleccionados.'

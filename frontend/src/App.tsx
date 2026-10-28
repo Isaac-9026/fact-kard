@@ -1,12 +1,12 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { MainLayout } from './layouts/MainLayout';
 import { RutaProtegida } from './components/auth/RutaProtegida';
 import { LoginPage } from './pages/auth/LoginPage';
 import { EmpresasPage } from './pages/empresas/EmpresasPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
-import { RUTA_INICIAL, RUTAS_ANTERIORES } from './navegacion';
+import { RUTA_INICIAL, RUTAS_ANTERIORES, destinoRedireccion } from './navegacion';
 
 // Bloque 6: code splitting. Login, Dashboard y Empresas (pantallas de entrada) van en el
 // bundle principal; el resto de módulos se descarga al visitarlos por primera vez.
@@ -34,9 +34,10 @@ const diferido = (Componente: React.ComponentType) => (
   </Suspense>
 );
 
-// Compras, Ventas y Notas reutilizan DocumentosPage; Productos, Almacenes y Terceros
-// reutilizan MaestrosInventarioPage. La `key` fuerza un estado limpio al cambiar de opción.
-const vistaDocumentos = (vista: 'TODOS' | 'COMPRA' | 'VENTA' | 'NOTAS') => (
+// Comprobantes (con pestañas Todos | Compras | Ventas) y Notas reutilizan DocumentosPage;
+// Productos, Almacenes y Terceros reutilizan MaestrosInventarioPage. La `key` fuerza un
+// estado limpio al cambiar de opción.
+const vistaDocumentos = (vista: 'COMPROBANTES' | 'NOTAS') => (
   <Suspense fallback={<CargandoModulo />}>
     <DocumentosPage key={vista} vista={vista} />
   </Suspense>
@@ -46,6 +47,12 @@ const vistaMaestro = (vista: 'productos' | 'almacenes' | 'terceros') => (
     <MaestrosInventarioPage key={vista} vista={vista} />
   </Suspense>
 );
+
+// Rutas antiguas: redirigen conservando los parámetros (/compras?nuevo=1 sigue abriendo el formulario).
+const RedireccionAnterior: React.FC<{ hacia: string }> = ({ hacia }) => {
+  const { search } = useLocation();
+  return <Navigate to={destinoRedireccion(hacia, search)} replace />;
+};
 
 export const App: React.FC = () => {
   return (
@@ -73,9 +80,7 @@ export const App: React.FC = () => {
               <Route path="saldo-inicial" element={diferido(OperacionesInternasPage)} />
               <Route path="inventario" element={diferido(StockActualPage)} />
               {/* OPERACIONES */}
-              <Route path="compras" element={vistaDocumentos('COMPRA')} />
-              <Route path="ventas" element={vistaDocumentos('VENTA')} />
-              <Route path="documentos" element={vistaDocumentos('TODOS')} />
+              <Route path="comprobantes" element={vistaDocumentos('COMPROBANTES')} />
               <Route path="notas" element={vistaDocumentos('NOTAS')} />
               <Route path="transferencias" element={diferido(TransferenciasPage)} />
               <Route path="captura-homologacion" element={diferido(CapturaHomologacionPage)} />
@@ -89,7 +94,7 @@ export const App: React.FC = () => {
               <Route path="auditoria" element={diferido(AuditoriaPage)} />
               {/* Rutas anteriores (enlaces guardados) */}
               {Object.entries(RUTAS_ANTERIORES).map(([desde, hacia]) => (
-                <Route key={desde} path={desde.slice(1)} element={<Navigate to={hacia} replace />} />
+                <Route key={desde} path={desde.slice(1)} element={<RedireccionAnterior hacia={hacia} />} />
               ))}
             </Route>
           </Route>

@@ -1,4 +1,5 @@
 import apiClient from './http';
+import { exportarExcelFormato131, paramsFormato131 } from '../utils/descargaArchivo';
 
 export interface Formato131Filtros { periodo_id: number | string; establecimiento_id?: number | string; producto_id?: number | string }
 export interface BloqueValor { cantidad: string; costo_unitario: string; costo_total: string }
@@ -9,12 +10,10 @@ export interface PilotoReal { periodo_id: number; producto_id: number; producto_
 export interface PilotoPayload { periodo_id: number | string; producto_id: number | string; cantidad_esperada: string; cpp_esperado: string; valor_esperado: string; tiempo_manual_segundos: string; tiempo_factkard_segundos: string }
 export interface PilotoResultado extends PilotoReal { esperado: { cantidad: string; cpp: string; valor: string }; diferencias: { cantidad: string; cpp: string; valor: string }; cuadra_100: boolean; reduccion_porcentaje: string }
 
-const limpiarFiltros = (f: Formato131Filtros) => ({ periodo_id: f.periodo_id, ...(f.establecimiento_id ? { establecimiento_id: f.establecimiento_id } : {}), ...(f.producto_id ? { producto_id: f.producto_id } : {}) });
+const limpiarFiltros = paramsFormato131;
 export const obtenerFormato131 = async (f: Formato131Filtros): Promise<Formato131Response> => (await apiClient.get<Formato131Response>('/reportes/formato-13-1/', { params: limpiarFiltros(f) })).data;
-export const descargarFormato131 = async (f: Formato131Filtros): Promise<void> => {
-  const response = await apiClient.get('/reportes/formato-13-1/excel/', { params: limpiarFiltros(f), responseType: 'blob' });
-  const url = URL.createObjectURL(new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  const link = document.createElement('a'); link.href = url; link.download = `formato_13_1_${f.periodo_id}.xlsx`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
-};
+/** Bloque 13: binario + verificación + descarga en utils/descargaArchivo (probado sin navegador). */
+export const descargarFormato131 = (f: Formato131Filtros, nombre: string): Promise<void> =>
+  exportarExcelFormato131((url, config) => apiClient.get<Blob>(url, config), f, nombre);
 export const obtenerPiloto = async (periodoId: number | string, productoId: number | string): Promise<PilotoReal> => (await apiClient.get<PilotoReal>('/reportes/piloto-comparador/', { params: { periodo_id: periodoId, producto_id: productoId } })).data;
 export const compararPiloto = async (payload: PilotoPayload): Promise<PilotoResultado> => (await apiClient.post<PilotoResultado>('/reportes/piloto-comparador/', payload)).data;

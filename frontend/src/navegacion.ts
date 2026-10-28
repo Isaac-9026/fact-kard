@@ -61,9 +61,8 @@ export const NAV_SECCIONES: SeccionNav[] = [
   {
     title: 'OPERACIONES',
     items: [
-      { path: '/compras', label: 'Compras', icono: 'compras' },
-      { path: '/ventas', label: 'Ventas', icono: 'ventas' },
-      { path: '/documentos', label: 'Comprobantes', icono: 'comprobantes' },
+      // Bloque 13: Compras y Ventas son pestañas de Comprobantes (ya no opciones del menú).
+      { path: '/comprobantes', label: 'Comprobantes', icono: 'comprobantes' },
       { path: '/notas', label: 'Notas de Crédito / Débito', icono: 'notas' },
       { path: '/transferencias', label: 'Transferencias', icono: 'transferencias' },
       { path: '/captura-homologacion', label: 'Captura XML / OCR', icono: 'captura' },
@@ -95,6 +94,23 @@ export const NAV_SECCIONES: SeccionNav[] = [
  */
 export const RUTAS_ANTERIORES: Record<string, string> = {
   '/operaciones-internas': '/saldo-inicial',
+  // Bloque 13: Compras, Ventas y Comprobantes (/documentos) son una sola pantalla.
+  '/compras': '/comprobantes?clase=COMPRA',
+  '/ventas': '/comprobantes?clase=VENTA',
+  '/documentos': '/comprobantes',
+};
+
+/**
+ * URL final de una redirección: la ruta nueva con sus parámetros, conservando los que traía
+ * el enlace antiguo (p. ej. `/compras?nuevo=1` → `/comprobantes?clase=COMPRA&nuevo=1`). Si
+ * ambos traen el mismo parámetro manda el del destino.
+ */
+export const destinoRedireccion = (hacia: string, searchActual: string): string => {
+  const [ruta, queryDestino = ''] = hacia.split('?');
+  const params = new URLSearchParams(searchActual);
+  new URLSearchParams(queryDestino).forEach((valor, clave) => params.set(clave, valor));
+  const query = params.toString();
+  return query ? `${ruta}?${query}` : ruta;
 };
 
 export interface AccesoRapido {
@@ -104,8 +120,8 @@ export interface AccesoRapido {
 
 /** `?nuevo=1` abre el formulario de nuevo comprobante con la clase ya elegida. */
 export const ACCESOS_RAPIDOS: AccesoRapido[] = [
-  { label: 'Nueva compra', to: '/compras?nuevo=1' },
-  { label: 'Nueva venta', to: '/ventas?nuevo=1' },
+  { label: 'Nueva compra', to: '/comprobantes?clase=COMPRA&nuevo=1' },
+  { label: 'Nueva venta', to: '/comprobantes?clase=VENTA&nuevo=1' },
   { label: 'Ver Kardex', to: '/kardex' },
   { label: 'Ver incidencias', to: '/incidencias' },
 ];

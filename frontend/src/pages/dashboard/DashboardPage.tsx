@@ -58,7 +58,7 @@ const ICONOS_ACCESO = [ShoppingCart, Receipt, BookOpenCheck, AlertTriangle]
 /** Cuenta los comprobantes confirmados de una clase en el período (conteo paginado, sin notas). */
 const contarConfirmados = async (clase: 'COMPRA' | 'VENTA', periodoId: number) => {
   const pagina = await obtenerDocumentosPaginados(
-    filtrosApiDocumentos(clase, { periodo: periodoId, estado: 'CONFIRMADO' as const }),
+    filtrosApiDocumentos('COMPROBANTES', { clase, periodo: periodoId, estado: 'CONFIRMADO' as const }),
     { page: 1, page_size: 1 },
   )
   return pagina.count

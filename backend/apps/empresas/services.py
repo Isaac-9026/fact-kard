@@ -57,15 +57,31 @@ def _validar_cierre(periodo):
     if incidencias:
         raise ValidationError({'detail': 'Existen incidencias bloqueantes pendientes.', 'incidencias': incidencias})
 
-    pendientes = Documento.objects.filter(
+    # QA-005: un comprobante en BORRADOR no movió el Kardex; cerrar con él dejaba el período
+    # cerrado sin esa operación. Se bloquea (antes solo era una advertencia). Solo cuentan los
+    # borradores de ESTE período y empresa.
+    borradores = list(Documento.objects.filter(
         empresa_id=periodo.empresa_id,
         periodo_id=periodo.id,
         estado='BORRADOR',
-    ).exclude(estado_revision='REVISADO').count()
-    advertencias = []
-    if pendientes:
-        advertencias.append(f'{pendientes} documento(s) permanecen en borrador y sin revisión final.')
-    return advertencias
+    ).select_related('tipo_comprobante').order_by('fecha_emision', 'id'))
+    if borradores:
+        listado = [
+            {'id': d.id, 'clase': d.clase, 'tipo': d.tipo_comprobante.codigo_sunat if d.tipo_comprobante_id else '',
+             'comprobante': f'{d.serie_normalizada or d.serie}-{d.numero_normalizado or d.numero}',
+             'fecha_emision': d.fecha_emision.isoformat() if d.fecha_emision else None}
+            for d in borradores
+        ]
+        muestra = ', '.join(f"{x['clase']} {x['comprobante']}" for x in listado[:10])
+        resto = f' y {len(listado) - 10} más' if len(listado) > 10 else ''
+        raise ValidationError({
+            'detail': (
+                f'No se puede cerrar {periodo.anio}-{periodo.mes:02d}: hay {len(listado)} comprobante(s) en BORRADOR '
+                f'en el período ({muestra}{resto}). Confírmelos, anúlelos o elimínelos antes de cerrar.'
+            ),
+            'documentos_borrador': listado,
+        })
+    return []
 
 
 def _construir_snapshot(periodo, fecha_cierre):

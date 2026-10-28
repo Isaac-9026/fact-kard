@@ -16,7 +16,18 @@ import {
   type ProductoEquivalencia,
   type SugerirEquivalenciaResponse,
 } from '../../api/captura';
-import { mensajeDeError } from '../../utils/errores';
+import { mensajeDeError, mensajesDeErrorApi } from '../../utils/errores';
+import {
+  DESCRIPCION_TIPO_CAPTURA,
+  PASOS_CAPTURA,
+  TIPOS_CAPTURA,
+  acceptCaptura,
+  formatosVisibles,
+  pasoActualCaptura,
+  tipoSugerido,
+  validarArchivoCaptura,
+  type TipoCaptura,
+} from '../../utils/capturaArchivos';
 import { diferirCarga } from '../../utils/efectos';
 import {
   getAlmacenes,
@@ -58,6 +69,9 @@ import { Label } from '../../components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
 import { formatearDecimal } from '../../utils/decimal';
 
+/** QA2-001: valor del selector para el proveedor del comprobante que aún no está registrado. */
+const PROVEEDOR_DE_CAPTURA = 'captura';
+
 export const CapturaHomologacionPage: React.FC = () => {
   const { empresaActiva } = useAuth();
 
@@ -84,7 +98,7 @@ export const CapturaHomologacionPage: React.FC = () => {
 
   // Subida de archivos
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTipo, setUploadTipo] = useState<'XML' | 'PDF' | 'IMAGEN' | 'ESCANER'>('XML');
+  const [uploadTipo, setUploadTipo] = useState<TipoCaptura>('XML');
   const [textoOcr, setTextoOcr] = useState<string>('');
   const [selectedAlmacenId, setSelectedAlmacenId] = useState<number | string>('');
 
@@ -108,6 +122,10 @@ export const CapturaHomologacionPage: React.FC = () => {
   const [formCodigoExt, setFormCodigoExt] = useState<string>('');
   const [formDescExt, setFormDescExt] = useState<string>('');
   const [formUnidadExt, setFormUnidadExt] = useState<string>('NIU');
+  // RUC del emisor de la captura desde la que se abrió la homologación (QA-002).
+  const [rucEsperadoEquiv, setRucEsperadoEquiv] = useState<string>('');
+  // QA2-001: captura desde la que se homologa (el backend toma su proveedor y lo registra si falta).
+  const [capturaEquivId, setCapturaEquivId] = useState<number | null>(null);
   const [formProductoId, setFormProductoId] = useState<string>('');
   const [productoUnidades, setProductoUnidades] = useState<ProductoUnidad[]>([]);
   const [formProductoUnidadId, setFormProductoUnidadId] = useState<string>('');
@@ -179,7 +197,16 @@ export const CapturaHomologacionPage: React.FC = () => {
   }, [empresaActiva, filtroTerceroId]);
 
   useEffect(() => {
-    diferirCarga(activeTab === 'capturas' ? cargarCapturas : cargarEquivalencias);
+    // Bloque 14: en la pestaña de captura también se cargan las equivalencias, para que el
+    // contador de la pestaña "Homologación (n)" no muestre 0 hasta abrirla.
+    diferirCarga(
+      activeTab === 'capturas'
+        ? async () => {
+            await cargarCapturas();
+            await cargarEquivalencias();
+          }
+        : cargarEquivalencias,
+    );
   }, [activeTab, cargarCapturas, cargarEquivalencias]);
 
   // Cargar detalle de la captura seleccionada
@@ -204,14 +231,11 @@ export const CapturaHomologacionPage: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
+      const tipo = tipoSugerido(file.name, uploadTipo);
       setUploadFile(file);
-      if (file.name.toLowerCase().endsWith('.xml')) {
-        setUploadTipo('XML');
-      } else if (file.name.toLowerCase().endsWith('.pdf')) {
-        setUploadTipo('PDF');
-      } else if (/\.(jpe?g|png)$/i.test(file.name)) {
-        setUploadTipo('IMAGEN');
-      }
+      setUploadTipo(tipo);
+      setSuccessMsg(null);
+      setErrorMsg(validarArchivoCaptura(file, tipo));
     }
   };
 
@@ -220,6 +244,11 @@ export const CapturaHomologacionPage: React.FC = () => {
     e.preventDefault();
     if (!uploadFile) {
       setErrorMsg('Seleccione un archivo XML o documento para procesar.');
+      return;
+    }
+    const invalido = validarArchivoCaptura(uploadFile, uploadTipo);
+    if (invalido) {
+      setErrorMsg(invalido);
       return;
     }
     setErrorMsg(null);
@@ -233,7 +262,7 @@ export const CapturaHomologacionPage: React.FC = () => {
       await cargarCapturas();
       setSelectedCapturaId(res.id);
     } catch (err) {
-      setErrorMsg(mensajeDeError(err, ['archivo', 'detail'], 'Error al subir y procesar captura.'));
+      setErrorMsg(mensajesDeErrorApi(err, 'Error al subir y procesar captura.').join(' '));
     } finally {
       setLoading(false);
     }
@@ -253,7 +282,7 @@ export const CapturaHomologacionPage: React.FC = () => {
       setEditingCampoId(null);
       setSuccessMsg(`Campo ${updated.nombre_campo} corregido con éxito.`);
     } catch (err) {
-      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al corregir campo.'));
+      setErrorMsg(mensajesDeErrorApi(err, 'Error al corregir campo.').join(' '));
     }
   };
 
@@ -266,13 +295,15 @@ export const CapturaHomologacionPage: React.FC = () => {
       setLoading(true);
       const almId = selectedAlmacenId ? Number(selectedAlmacenId) : undefined;
       const res = await generarBorradorDesdeCaptura(selectedCapturaId, almId);
+      // El borrador puede haber creado el proveedor del XML (QA-002).
+      await recargarTerceros();
       setBorradorResultado(res);
       setSuccessMsg(res.mensaje);
       await cargarCapturas();
       const detalleActualizado = await obtenerCapturaDetalle(selectedCapturaId);
       setCapturaDetalle(detalleActualizado);
     } catch (err) {
-      setErrorMsg(mensajeDeError(err, ['detail', 'periodo'], 'Error al generar borrador.'));
+      setErrorMsg(mensajesDeErrorApi(err, 'Error al generar borrador.').join(' '));
     } finally {
       setLoading(false);
     }
@@ -312,7 +343,9 @@ export const CapturaHomologacionPage: React.FC = () => {
     try {
       setLoading(true);
       await crearEquivalencia({
-        tercero: Number(formTerceroId),
+        // QA2-001: 'captura' = proveedor del comprobante aún no registrado (se crea al guardar).
+        tercero: formTerceroId === PROVEEDOR_DE_CAPTURA ? null : Number(formTerceroId),
+        captura: capturaEquivId,
         codigo_externo: formCodigoExt.trim() || null,
         descripcion_externa: formDescExt.trim() || null,
         unidad_externa_codigo: formUnidadExt || null,
@@ -326,8 +359,15 @@ export const CapturaHomologacionPage: React.FC = () => {
       setFormDescExt('');
       setFormFactor('1.00000000');
       await cargarEquivalencias();
+      await recargarTerceros();
+      if (capturaEquivId) {
+        // Volver a la captura: sus líneas se recalculan con la nueva equivalencia.
+        if (capturaEquivId === selectedCapturaId) setCapturaDetalle(await obtenerCapturaDetalle(capturaEquivId));
+        setActiveTab('capturas');
+        setCapturaEquivId(null);
+      }
     } catch (err) {
-      setErrorMsg(mensajeDeError(err, ['detail', 'factor_conversion'], 'Error al registrar equivalencia.'));
+      setErrorMsg(mensajesDeErrorApi(err, 'Error al registrar equivalencia.').join(' '));
     } finally {
       setLoading(false);
     }
@@ -339,7 +379,7 @@ export const CapturaHomologacionPage: React.FC = () => {
       await actualizarEquivalencia(equiv.id, { activa: !equiv.activa });
       await cargarEquivalencias();
     } catch (err) {
-      setErrorMsg(mensajeDeError(err, ['detail'], 'Error al actualizar equivalencia.'));
+      setErrorMsg(mensajesDeErrorApi(err, 'Error al actualizar equivalencia.').join(' '));
     }
   };
 
@@ -366,6 +406,44 @@ export const CapturaHomologacionPage: React.FC = () => {
     if (!capturaDetalle?.campos) return [];
     return capturaDetalle.campos.filter((c) => c.seccion === 'CABECERA');
   }, [capturaDetalle]);
+
+  // Proveedor (emisor) de la captura, para precargar la homologación de una línea.
+  const rucEmisorCaptura = useMemo(() => {
+    const campo = camposCabecera.find((c) => c.nombre_campo === 'ruc_emisor');
+    return (campo?.valor_corregido || campo?.valor_extraido || '').replace(/\D/g, '');
+  }, [camposCabecera]);
+
+  /**
+   * QA-002: la lista de proveedores se cargaba una sola vez al abrir la pantalla. El proveedor
+   * que se crea al generar el borrador del primer XML no aparecía, y la equivalencia se
+   * registraba con otro proveedor: el segundo XML no la reutilizaba. Ahora se recarga y se
+   * preselecciona el proveedor por el RUC del comprobante.
+   */
+  const recargarTerceros = useCallback(async () => {
+    try {
+      const lista = await getTerceros({ tipo: 'proveedor' });
+      setTerceros(lista);
+      return lista;
+    } catch {
+      return terceros;
+    }
+  }, [terceros]);
+
+  const proveedorDeCaptura = async (): Promise<string> => {
+    const proveedor = capturaDetalle?.homologacion?.proveedor;
+    if (proveedor?.tercero_id) {
+      if (!terceros.some((t) => t.id === proveedor.tercero_id)) await recargarTerceros();
+      return String(proveedor.tercero_id);
+    }
+    // Proveedor nuevo (aún no registrado): se registra al guardar la equivalencia.
+    if (proveedor?.documento) return PROVEEDOR_DE_CAPTURA;
+    if (!rucEmisorCaptura) return '';
+    let lista = terceros;
+    if (!lista.some((t) => t.numero_documento === rucEmisorCaptura)) lista = await recargarTerceros();
+    const t = lista.find((x) => x.numero_documento === rucEmisorCaptura);
+    return t ? String(t.id) : '';
+  };
+
 
   const camposDetalle = useMemo(() => {
     if (!capturaDetalle?.campos) return [];
@@ -425,7 +503,8 @@ export const CapturaHomologacionPage: React.FC = () => {
         badge={
           <div className="flex items-center gap-1.5 flex-wrap">
             <Badge variant="info">Fase 11 & 12 · Bloque 6</Badge>
-            <Badge variant="neutral" className="font-mono text-xs">UBL 2.1 SUNAT</Badge>
+            <Badge variant="neutral" className="font-mono text-xs">UBL 2.1</Badge>
+            <Badge variant="neutral" className="text-xs">Sin envío a SUNAT</Badge>
           </div>
         }
       />
@@ -453,14 +532,14 @@ export const CapturaHomologacionPage: React.FC = () => {
 
       {/* 3. Selector de Pestañas */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'capturas' | 'homologaciones')}>
-        <TabsList className="grid grid-cols-2 max-w-md">
-          <TabsTrigger value="capturas" className="gap-2">
-            <Upload className="h-4 w-4" />
-            Bandeja de Captura XML / OCR
+        <TabsList className="h-auto w-full lg:w-auto">
+          <TabsTrigger value="capturas" className="gap-2 flex-1 lg:flex-none" title="Bandeja de Captura XML / OCR" icon={<Upload className="h-4 w-4" />}>
+            <span className="lg:hidden">Captura</span>
+            <span className="hidden lg:inline">Bandeja de Captura XML / OCR</span>
           </TabsTrigger>
-          <TabsTrigger value="homologaciones" className="gap-2">
-            <RotateCcw className="h-4 w-4" />
-            Catálogo de Homologación ({equivalencias.length})
+          <TabsTrigger value="homologaciones" className="gap-2 flex-1 lg:flex-none" title="Catálogo de Homologación" icon={<RotateCcw className="h-4 w-4" />}>
+            <span className="lg:hidden">Homologación ({equivalencias.length})</span>
+            <span className="hidden lg:inline">Catálogo de Homologación ({equivalencias.length})</span>
           </TabsTrigger>
         </TabsList>
 
@@ -476,46 +555,81 @@ export const CapturaHomologacionPage: React.FC = () => {
                 Subir Comprobante para Captura Automática
               </CardTitle>
               <CardDescription className="text-xs">
-                Cargue una factura electrónica en formato XML (UBL 2.1) o un documento digital (PDF, Imagen, Escáner) para extracción de datos.
+                Cargue un comprobante en XML UBL 2.1, PDF, imagen o escaneado. Los datos extraídos se muestran para revisarlos y corregirlos:
+                nada se registra hasta que usted genere el borrador y lo confirme en Comprobantes.
               </CardDescription>
+              <ol aria-label="Pasos de la captura" className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px]">
+                {PASOS_CAPTURA.map((paso, i) => {
+                  const actual = pasoActualCaptura(capturaDetalle);
+                  return (
+                    <li key={paso} className="flex items-center gap-1.5">
+                      <span
+                        aria-current={i === actual ? 'step' : undefined}
+                        className={`rounded-full px-2 py-0.5 font-medium ${
+                          i === actual
+                            ? 'bg-indigo-600 text-white'
+                            : i < actual
+                              ? 'bg-indigo-50 text-indigo-700'
+                              : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {i + 1}. {paso}
+                      </span>
+                      {i < PASOS_CAPTURA.length - 1 && <span className="text-slate-300" aria-hidden="true">→</span>}
+                    </li>
+                  );
+                })}
+              </ol>
             </CardHeader>
             <CardContent className="pt-4">
               <form onSubmit={handleSubirCaptura} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                  <div className="sm:col-span-2 space-y-1.5">
-                    <Label htmlFor="captura-file-input">Archivo del Comprobante (XML, PDF o Imagen)</Label>
+                <div className="space-y-1.5">
+                  <Label>Tipo de Captura</Label>
+                  <div role="radiogroup" aria-label="Tipo de captura" className="grid grid-cols-2 sm:grid-cols-4 rounded-md border border-slate-200 p-0.5 bg-slate-50 gap-1 max-w-xl">
+                    {TIPOS_CAPTURA.map((t) => (
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={uploadTipo === t}
+                        key={t}
+                        onClick={() => {
+                          setUploadTipo(t);
+                          setErrorMsg(uploadFile ? validarArchivoCaptura(uploadFile, t) : null);
+                        }}
+                        className={`py-1.5 text-[11px] font-semibold rounded transition-colors ${
+                          uploadTipo === t
+                            ? 'bg-white text-indigo-600 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {DESCRIPCION_TIPO_CAPTURA[t].titulo}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-600" data-testid="captura-ayuda-tipo">
+                    {DESCRIPCION_TIPO_CAPTURA[uploadTipo].texto}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                  <div className="sm:col-span-2 space-y-1.5 min-w-0">
+                    <Label htmlFor="captura-file-input">Archivo del Comprobante</Label>
                     <Input
                       id="captura-file-input"
                       type="file"
-                      accept=".xml,.pdf,.png,.jpg,.jpeg"
+                      accept={acceptCaptura(uploadTipo)}
                       onChange={handleFileChange}
+                      aria-describedby="captura-formatos"
                       className="cursor-pointer"
                     />
+                    <span id="captura-formatos" className="text-[11px] text-slate-500 block">
+                      Formatos permitidos: {formatosVisibles(uploadTipo)}
+                    </span>
                     {uploadFile && (
-                      <span className="text-[11px] text-indigo-600 font-medium block">
+                      <span className="text-[11px] text-indigo-600 font-medium block break-all">
                         Seleccionado: <strong>{uploadFile.name}</strong> ({(uploadFile.size / 1024).toFixed(1)} KB)
                       </span>
                     )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label>Tipo de Captura</Label>
-                    <div className="flex rounded-md border border-slate-200 p-0.5 bg-slate-50 gap-1">
-                      {(['XML', 'PDF', 'IMAGEN', 'ESCANER'] as const).map((t) => (
-                        <button
-                          type="button"
-                          key={t}
-                          onClick={() => setUploadTipo(t)}
-                          className={`flex-1 py-1.5 text-[11px] font-semibold rounded transition-colors ${
-                            uploadTipo === t
-                              ? 'bg-white text-indigo-600 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
                   <div>
@@ -538,14 +652,19 @@ export const CapturaHomologacionPage: React.FC = () => {
                 {uploadTipo !== 'XML' && (
                   <div className="space-y-1.5 pt-2 border-t border-slate-100">
                     <Label htmlFor="texto-ocr-input">
-                      Texto OCR o Contenido Escaneado (Opcional si se requiere sobreescritura manual)
+                      Texto del comprobante (OCR)
                     </Label>
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      El sistema no reconoce texto en imágenes por sí solo: solo lee el texto que ya trae el PDF.
+                      Si el archivo es una foto o un escaneo, pegue aquí el texto obtenido con un programa de OCR.
+                      Revise y corrija cada campo extraído antes de generar el borrador.
+                    </p>
                     <textarea
                       id="texto-ocr-input"
-                      rows={2}
+                      rows={3}
                       value={textoOcr}
                       onChange={(e) => setTextoOcr(e.target.value)}
-                      placeholder="Pegue aquí texto reconocido por OCR si el PDF no contiene capas de texto..."
+                      placeholder="Ej.: FACTURA ELECTRÓNICA F001-123 · RUC 20555000111 · Fecha 18/02/2026 · Total 156.35"
                       className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 resize-y"
                     />
                   </div>
@@ -702,6 +821,9 @@ export const CapturaHomologacionPage: React.FC = () => {
                         <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
                         <div>
                           <strong>{borradorResultado.mensaje}</strong> (Doc #{borradorResultado.documento_id} · {borradorResultado.serie_numero})
+                          <p className="mt-0.5">
+                            Quedó en BORRADOR: revíselo y confírmelo en <strong>Comprobantes</strong>. Hasta entonces no mueve el Kardex.
+                          </p>
                         </div>
                       </div>
                       {borradorResultado.lineas_sin_homologar > 0 && (
@@ -804,6 +926,17 @@ export const CapturaHomologacionPage: React.FC = () => {
                       <CardTitle className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                         Líneas de Detalle del Comprobante ({lineasAgrupadas.length})
                       </CardTitle>
+                      {typeof capturaDetalle.homologacion?.pendientes_homologacion === 'number' && (
+                        <Badge
+                          variant={capturaDetalle.homologacion.pendientes_homologacion > 0 ? 'warning' : 'success'}
+                          size="xs"
+                          data-testid="pendientes-homologacion"
+                        >
+                          {capturaDetalle.homologacion.pendientes_homologacion > 0
+                            ? `${capturaDetalle.homologacion.pendientes_homologacion} línea(s) pendiente(s) de homologación`
+                            : 'Todas las líneas homologadas'}
+                        </Badge>
+                      )}
                     </CardHeader>
                     <CardContent className="p-0">
                       <div className="overflow-x-auto">
@@ -823,6 +956,7 @@ export const CapturaHomologacionPage: React.FC = () => {
                           </thead>
                           <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
                             {lineasAgrupadas.map(([numLinea, camposMap]) => {
+                              const homLinea = capturaDetalle.homologacion?.lineas.find((l) => l.linea === Number(numLinea));
                               const codCampo = camposMap['codigo_externo'];
                               const descCampo = camposMap['descripcion'];
                               const undCampo = camposMap['unidad_medida'];
@@ -862,19 +996,41 @@ export const CapturaHomologacionPage: React.FC = () => {
                                     {renderConfianzaBadge(codCampo?.confianza || '100.0000')}
                                   </td>
                                   <td className="py-2 px-3 text-center">
+                                    {homLinea?.estado === 'HOMOLOGADA' ? (
+                                      <Badge
+                                        variant="success"
+                                        size="xs"
+                                        dot
+                                        data-testid="linea-homologada"
+                                        title={homLinea.equivalencia_id ? `Equivalencia #${homLinea.equivalencia_id} (por ${homLinea.criterio === 'codigo' ? 'código' : 'descripción'})` : homLinea.motivo}
+                                      >
+                                        Homologada → {homLinea.producto_codigo}
+                                      </Badge>
+                                    ) : (
+                                    <>
                                     <Button
                                       type="button"
                                       variant="outline"
                                       size="xs"
-                                      onClick={() => {
+                                      onClick={async () => {
+                                        const proveedorId = await proveedorDeCaptura();
                                         setActiveTab('homologaciones');
-                                        setFormCodigoExt(codVal);
-                                        setFormDescExt(descVal);
+                                        setCapturaEquivId(capturaDetalle.id);
+                                        setRucEsperadoEquiv(capturaDetalle.homologacion?.proveedor?.documento || rucEmisorCaptura);
+                                        setFormCodigoExt(codVal === '—' ? '' : codVal);
+                                        setFormDescExt(descVal === '—' ? '' : descVal);
+                                        setFormTerceroId(proveedorId);
+                                        if (unidadesMedida.some((u) => u.codigo === undVal)) setFormUnidadExt(undVal);
                                         setShowEquivModal(true);
                                       }}
                                     >
                                       Homologar
                                     </Button>
+                                    {homLinea?.motivo?.startsWith('existe') && (
+                                      <span className="block mt-1 font-sans text-[10px] text-amber-700">{homLinea.motivo}</span>
+                                    )}
+                                    </>
+                                    )}
                                   </td>
                                 </tr>
                               );
@@ -921,7 +1077,11 @@ export const CapturaHomologacionPage: React.FC = () => {
                     type="button"
                     variant="primary"
                     size="sm"
-                    onClick={() => setShowEquivModal(true)}
+                    onClick={() => {
+                      setRucEsperadoEquiv('');
+                      setCapturaEquivId(null);
+                      setShowEquivModal(true);
+                    }}
                   >
                     <Plus className="h-3.5 w-3.5 mr-1" />
                     Nueva Equivalencia
@@ -1102,12 +1262,28 @@ export const CapturaHomologacionPage: React.FC = () => {
                       required
                     >
                       <option value="">Seleccione un proveedor...</option>
+                      {capturaEquivId && !capturaDetalle?.homologacion?.proveedor?.tercero_id && capturaDetalle?.homologacion?.proveedor?.documento && (
+                        <option value={PROVEEDOR_DE_CAPTURA}>
+                          {capturaDetalle.homologacion.proveedor.documento} - {capturaDetalle.homologacion.proveedor.nombre || 'Proveedor del comprobante'} (nuevo: se registra al guardar)
+                        </option>
+                      )}
                       {terceros.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.numero_documento} - {t.razon_social}
                         </option>
                       ))}
                     </Select>
+                    {rucEsperadoEquiv && (
+                      <p className="text-[11px] text-slate-500">
+                        RUC emisor del comprobante: <span className="font-mono">{rucEsperadoEquiv}</span>
+                      </p>
+                    )}
+                    {rucEsperadoEquiv && formTerceroId && formTerceroId !== PROVEEDOR_DE_CAPTURA &&
+                      terceros.find((t) => String(t.id) === String(formTerceroId))?.numero_documento !== rucEsperadoEquiv && (
+                      <p role="alert" data-testid="aviso-proveedor-distinto" className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        El proveedor elegido no es el emisor del comprobante: la equivalencia no se usará con sus XML.
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

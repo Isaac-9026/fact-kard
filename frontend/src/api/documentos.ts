@@ -33,6 +33,10 @@ export interface DocumentoDetalle {
   costo_unitario_pen: string | null;
   es_bonificacion: boolean;
   detalle_origen: number | null;
+  tipo_operacion_naturaleza?: string | null;
+  /** QA-001: cantidad base ya devuelta por notas confirmadas y la que queda por devolver. */
+  cantidad_devuelta?: string;
+  cantidad_disponible_devolucion?: string;
 }
 
 export interface Documento {
@@ -43,6 +47,8 @@ export interface Documento {
   periodo_orden?: number;
   tercero: number | null;
   tercero_razon_social?: string;
+  tercero_tipo_documento?: string | null;
+  tercero_numero_documento?: string | null;
   ruc_emisor: string;
   tipo_comprobante: number;
   tipo_comprobante_codigo?: string;

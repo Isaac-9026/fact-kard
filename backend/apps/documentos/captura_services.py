@@ -18,7 +18,8 @@ from apps.documentos.clasificacion_captura import clasificar_comprobante
 from apps.documentos.models import Documento, DocumentoCaptura, DocumentoDetalle, CapturaCampo
 from apps.empresas.models import Empresa
 from apps.empresas.periodos import parsear_fecha_calendario, periodo_abierto_para_fecha
-from apps.inventario.models import Almacen, Producto, ProductoEquivalencia, Tercero
+from apps.inventario.homologacion import homologar_linea, tercero_por_documento, valores_captura
+from apps.inventario.models import Almacen
 from apps.kardex.models import Incidencia
 
 DECIMAL_CERO = Decimal('0.00000000')
@@ -176,8 +177,11 @@ def parsear_xml_ubl(content: bytes) -> Dict[str, Any]:
         codigo_externo = ''
         descripcion = ''
         if item is not None:
-            sellers_id = _find_text(item, 'ID')
-            codigo_externo = sellers_id or ''
+            # QA-002: el código del proveedor es SellersItemIdentification/ID; antes se tomaba el
+            # primer <ID> del ítem (podía ser BuyersItemIdentification o StandardItemIdentification).
+            sellers = item.find('.//SellersItemIdentification')
+            sellers_id = _find_text(sellers, 'ID') if sellers is not None else None
+            codigo_externo = sellers_id or _find_text(item, 'ID') or ''
             descripcion = _find_text(item, 'Description') or ''
 
         # Precio unitario
@@ -606,19 +610,9 @@ def generar_borrador_desde_captura(
     if not campos.exists():
         raise ValidationError({'captura': 'La captura no contiene campos extraídos para generar un comprobante.'})
 
-    # Extraer valores efectivos (valor_corregido si existe, sino valor_extraido)
-    cabecera: Dict[str, str] = {}
-    detalles: Dict[int, Dict[str, str]] = {}
-
-    for c in campos:
-        val = c.valor_corregido if (c.valor_corregido is not None and c.valor_corregido != '') else (c.valor_extraido or '')
-        if c.seccion == 'CABECERA':
-            cabecera[c.nombre_campo] = val
-        elif c.seccion == 'DETALLE':
-            linea_num = c.numero_linea or 1
-            if linea_num not in detalles:
-                detalles[linea_num] = {}
-            detalles[linea_num][c.nombre_campo] = val
+    # Valores efectivos (valor_corregido si existe, sino valor_extraido): misma lectura que la
+    # vista previa de homologación (QA2-001).
+    cabecera, detalles = valores_captura(captura)
 
     # 1. Clasificación (Bloque 3): COMPRA/VENTA y tipo de operación según RUC
     #    emisor/receptor, tipo de comprobante y motivo de la nota. Sin adivinar.
@@ -643,17 +637,11 @@ def generar_borrador_desde_captura(
 
     # 2. Tercero: proveedor (compra) o cliente (venta).
     doc_tercero = clasificacion['contraparte_documento']
-    tercero = None
-    if len(doc_tercero) in (8, 11):
-        tercero = Tercero.objects.filter(empresa_id=empresa_id, numero_documento=doc_tercero).order_by('id').first()
-        if tercero is None:
-            tercero = Tercero.objects.create(
-                empresa_id=empresa_id, numero_documento=doc_tercero,
-                tipo_documento='6' if len(doc_tercero) == 11 else '1',
-                razon_social=clasificacion['contraparte_nombre'] or f'{"PROVEEDOR" if clase == "COMPRA" else "CLIENTE"} {doc_tercero}',
-                es_proveedor=clase == 'COMPRA', es_cliente=clase == 'VENTA',
-            )
-    elif clase == 'COMPRA':
+    tercero = tercero_por_documento(
+        empresa_id=empresa_id, documento=doc_tercero, crear=True,
+        nombre=clasificacion['contraparte_nombre'] or '', clase=clase,
+    )
+    if tercero is None and clase == 'COMPRA':
         raise ValidationError({'ruc_emisor': 'El RUC del proveedor no es válido.'})
 
     # 3. Serie y Número normalizados con función centralizada de documentos (A-06)
@@ -832,50 +820,17 @@ def generar_borrador_desde_captura(
         precio = parse_dec(line_fields.get('precio_unitario', '0.0'), default=DECIMAL_CERO)
         val_linea = parse_dec(line_fields.get('valor_total', str(cant * precio)), default=cant * precio)
 
-        # Buscar homologación. Compra: equivalencias confirmadas del proveedor.
-        # Venta: el comprobante lo emitió la empresa, con su propio código interno.
-        equiv = None
-        prod_venta = None
-        if clase == 'VENTA' and cod_ext:
-            prod_venta = Producto.objects.filter(
-                empresa_id=empresa_id, codigo_interno__iexact=cod_ext,
-            ).prefetch_related('unidades').first()
-        if clase == 'COMPRA' and cod_ext:
-            equiv = ProductoEquivalencia.objects.filter(
-                empresa_id=empresa_id,
-                tercero=tercero,
-                codigo_externo__iexact=cod_ext,
-                activa=True,
-                confirmado_por__isnull=False,
-            ).select_related('producto_unidad__producto', 'producto_unidad__unidad_codigo').first()
-
-        if clase == 'COMPRA' and not equiv and desc_ext:
-            equiv = ProductoEquivalencia.objects.filter(
-                empresa_id=empresa_id,
-                tercero=tercero,
-                descripcion_externa__iexact=desc_ext,
-                activa=True,
-                confirmado_por__isnull=False,
-            ).select_related('producto_unidad__producto', 'producto_unidad__unidad_codigo').first()
-
-        if equiv is not None:
-            prod = equiv.producto_unidad.producto
-            prod_und = equiv.producto_unidad
-            factor = equiv.factor_conversion
-            cant_base = (cant * factor).quantize(Q8, rounding=ROUND_HALF_UP)
-            tiene_homologacion = True
-        elif prod_venta is not None and next((u for u in prod_venta.unidades.all() if u.es_base), None):
-            prod = prod_venta
-            prod_und = next(u for u in prod_venta.unidades.all() if u.es_base)
-            factor = DECIMAL_UNO
-            cant_base = cant
-            tiene_homologacion = True
-        else:
-            prod = None
-            prod_und = None
-            factor = DECIMAL_UNO
-            cant_base = cant
-            tiene_homologacion = False
+        # Homologación con la regla canónica (apps.inventario.homologacion): la misma que la
+        # vista previa de la captura. Compra: equivalencia del proveedor; venta: código interno.
+        resultado = homologar_linea(
+            empresa_id=empresa_id, clase=clase, tercero=tercero, codigo=cod_ext, descripcion=desc_ext, unidad=und_ext,
+        )
+        motivo_homologacion = resultado['motivo']
+        tiene_homologacion = resultado['estado'] == 'HOMOLOGADA'
+        prod = resultado['producto']
+        prod_und = resultado['producto_unidad']
+        factor = resultado['factor'] if tiene_homologacion else DECIMAL_UNO
+        cant_base = (cant * factor).quantize(Q8, rounding=ROUND_HALF_UP) if tiene_homologacion else cant
 
         # Bloque 3: afectación e IGV de la línea. XML: los del comprobante, validados igual
         # que en el registro manual. OCR (sin esos datos): gravado al 18 %, como antes.
@@ -945,7 +900,7 @@ def generar_borrador_desde_captura(
             almacen=almacen,
             tipo_operacion=tipo_op,
             afecta_kardex_aplicado=tipo_op.afecta_kardex,
-            equivalencia=equiv,
+            equivalencia=resultado["equivalencia"],
             descripcion_original=desc_ext or (prod.descripcion if prod else f'Ítem {index}'),
             cantidad_original=cant,
             factor_conversion=factor,
@@ -990,7 +945,8 @@ def generar_borrador_desde_captura(
                 descripcion=(
                     f"Línea #{det.linea} ({cod_ext or desc_ext}) "
                     f"{'del proveedor ' + tercero.razon_social + ' ' if clase == 'COMPRA' and tercero else ''}"
-                    f"no cuenta con equivalencia confirmada en ProductoEquivalencia."
+                    f"no cuenta con equivalencia confirmada en ProductoEquivalencia"
+                    f"{' (' + motivo_homologacion + ')' if motivo_homologacion.startswith('existe') else ''}."
                 ),
                 detalle={
                     'documento_id': documento.id,

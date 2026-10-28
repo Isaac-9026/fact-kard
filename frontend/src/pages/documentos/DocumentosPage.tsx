@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  CONFIG_VISTAS, claseInicialNuevo, filtrosApiDocumentos, tiposComprobanteDeVista, type VistaDocumentos,
+  CONFIG_VISTAS, TABS_COMPROBANTES, claseDeTab, claseInicialNuevo, filtrosApiDocumentos, queryConTab, tabDesdeQuery,
+  tiposComprobanteDeVista, type TabComprobantes, type VistaDocumentos,
 } from '../../utils/vistaDocumentos'
+import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import {
   FileSpreadsheet,
   Plus,
@@ -70,6 +72,13 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { Label } from '../../components/ui/label'
 import { Modal } from '../../components/ui/modal'
+import { AlertaFormulario } from '../../components/ui/alerta-formulario'
+import { mensajesDeErrorApi } from '../../utils/errores'
+import { contraparteDocumento } from '../../utils/contraparteDocumento'
+import {
+  disponibleEnUnidad, errorLineasNota, esDevolucionFisica, etiquetaLineaOrigen, lineasOrigenElegibles, type LineaOrigen,
+} from '../../utils/devolucionNota'
+import { errorDeOperaciones, operacionesPermitidas, operacionPorDefecto, reconciliarOperaciones } from '../../utils/operacionesComerciales'
 import { Paginacion } from '../../components/ui/paginacion'
 import { diferirCarga } from '../../utils/efectos'
 import { useValorDiferido } from '../../utils/useValorDiferido'
@@ -103,7 +112,25 @@ export interface DocumentosPageProps {
   vista?: VistaDocumentos
 }
 
-export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' }) => {
+// Bloque 10: inputs numéricos del detalle — texto completo a la derecha, sin las flechas del
+// navegador (le quitaban ~16 px), y step="any" para aceptar los decimales que el backend admite.
+const CLASE_INPUT_NUMERICO =
+  'w-full h-8 rounded border border-slate-200 bg-white px-2.5 text-right font-mono tabular-nums text-xs ' +
+  'focus:ring-1 focus:ring-slate-900 disabled:bg-slate-50 disabled:text-slate-400 ' +
+  '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+
+// Bloque 10: los errores de un formulario en modal se muestran DENTRO de ese modal (antes
+// iban a `errorGlobal`, que se pinta en la página de atrás, tapada por el modal).
+type ModalConError = 'nuevo' | 'revision' | 'anulacion'
+interface ErrorModal {
+  modal: ModalConError
+  titulo: string
+  mensajes: string[]
+  /** Valores del formulario cuando ocurrió: si el usuario los corrige, el aviso se oculta. */
+  firma: string
+}
+
+export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROBANTES' }) => {
   const { empresaActiva } = useAuth()
   const configVista = CONFIG_VISTAS[vista]
   const [searchParams, setSearchParams] = useSearchParams()
@@ -121,7 +148,12 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   const [tasasIgv, setTasasIgv] = useState<TasaIgvVigencia[]>([])
 
   // Filters
-  const [filtroClase, setFiltroClase] = useState<ClaseDocumento | ''>('')
+  // Bloque 13: en Comprobantes la clase es la pestaña (Todos | Compras | Ventas), guardada en
+  // la URL (?clase=COMPRA); en Notas sigue siendo el selector de la barra de filtros.
+  const tabComprobantes: TabComprobantes | null = vista === 'COMPROBANTES' ? tabDesdeQuery(searchParams.get('clase')) : null
+  const [filtroClaseNotas, setFiltroClaseNotas] = useState<ClaseDocumento | ''>('')
+  const filtroClase: ClaseDocumento | '' = tabComprobantes ? (claseDeTab(tabComprobantes) ?? '') : filtroClaseNotas
+  const cambiarTab = (tab: string) => setSearchParams(queryConTab(searchParams, tab as TabComprobantes))
   const [filtroPeriodo, setFiltroPeriodo] = useState<number | ''>('')
   const [filtroEstado, setFiltroEstado] = useState<EstadoDocumental | ''>('')
   const [filtroRevision, setFiltroRevision] = useState<EstadoRevision | ''>('')
@@ -143,6 +175,8 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   const [catalogosCargados, setCatalogosCargados] = useState(false)
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null)
   const [exitoGlobal, setExitoGlobal] = useState<string | null>(null)
+  const [errorModal, setErrorModal] = useState<ErrorModal | null>(null)
+  const alertaModalRef = useRef<HTMLDivElement>(null)
 
   // Modals
   const [modalNuevoAbierto, setModalNuevoAbierto] = useState(false)
@@ -160,6 +194,8 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   const [formFechaEmision, setFormFechaEmision] = useState(fechaCalendarioLocal)
   const [formMoneda, setFormMoneda] = useState<'PEN' | 'USD'>('PEN')
   const [formDocOrigen, setFormDocOrigen] = useState<number | ''>('')
+  // QA-001: líneas del comprobante de origen de la nota (para elegir `detalle_origen`).
+  const [origenDetalles, setOrigenDetalles] = useState<LineaOrigen[]>([])
   const [tcResuelto, setTcResuelto] = useState<TipoCambioResolverResult | null>(null)
   const [cargandoTc, setCargandoTc] = useState(false)
   const [guardandoDoc, setGuardandoDoc] = useState(false)
@@ -171,6 +207,25 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   const [revEstadoSeleccionado, setRevEstadoSeleccionado] = useState<EstadoRevision>('REVISADO')
   const [revMotivo, setRevMotivo] = useState('')
   const [anulacionMotivo, setAnulacionMotivo] = useState('')
+
+  // Firma de cada formulario: el aviso solo se muestra mientras los datos sigan iguales a los
+  // que produjeron el error (al corregir un campo desaparece; al reenviar se recalcula).
+  const firmaNuevo = JSON.stringify([
+    formClase, formPeriodo, formTipoComprobante, formTercero, formSerie, formNumero, formFechaEmision, formMoneda, formDocOrigen,
+    lineas.map((l) => [l.productoId, l.productoUnidadId, l.almacenId, l.tipoOperacionId, l.cantidadOriginal, l.precioUnitario, l.igv, l.afectacionIgv, l.esBonificacion, l.detalleOrigenId]),
+  ])
+  const firmaRevision = JSON.stringify([modalRevisionDoc?.id, revEstadoSeleccionado, revMotivo])
+  const firmaAnulacion = JSON.stringify([modalAnulacionDoc?.id, anulacionMotivo])
+  const firmas: Record<ModalConError, string> = { nuevo: firmaNuevo, revision: firmaRevision, anulacion: firmaAnulacion }
+  const alertaDe = (modal: ModalConError) =>
+    errorModal && errorModal.modal === modal && errorModal.firma === firmas[modal] ? errorModal : null
+  const mostrarErrorModal = (modal: ModalConError, titulo: string, mensajes: string[]) =>
+    setErrorModal({ modal, titulo, mensajes, firma: firmas[modal] })
+
+  // El aviso queda arriba del cuerpo del modal: si el usuario estaba abajo (líneas), se lleva a la vista.
+  useEffect(() => {
+    if (errorModal) alertaModalRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [errorModal])
 
   // Página actual de documentos con los filtros vigentes.
   const cargarDocumentos = useCallback(async () => {
@@ -282,12 +337,15 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     return t ? t.numero_documento : 'Pendiente de selección'
   }, [formClase, formTercero, empresaActiva?.ruc, terceros])
 
-  const lineaVacia = useCallback((): LineaFormulario => ({
+  // Bloque 12: la operación por defecto sale de la clase y el comprobante (COMPRA → COMPRA,
+  // VENTA → VENTA), buscada por código: el catálogo viene en orden alfabético y su primer
+  // elemento (AJUSTE_INGRESO) quedaba antes en todas las líneas.
+  const lineaVacia = useCallback((clase: ClaseDocumento = formClase): LineaFormulario => ({
     tempId: Math.random().toString(36).substring(2, 9),
     productoId: '',
     productoUnidadId: '',
     almacenId: almacenes[0]?.id || '',
-    tipoOperacionId: tiposOperacion[0]?.id || '',
+    tipoOperacionId: operacionPorDefecto(tiposOperacion, clase, tipoCompSeleccionado),
     cantidadOriginal: '1.00000000',
     precioUnitario: '0.00000000',
     igv: '0.00000000',
@@ -296,7 +354,13 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     descripcionOriginal: '',
     unidadesDisponibles: [],
     factorConversion: '1',
-  }), [almacenes, tiposOperacion])
+  }), [almacenes, tiposOperacion, formClase, tipoCompSeleccionado])
+
+  // Operaciones que ofrece el selector de cada línea (sin internas, de motor ni incompatibles).
+  const operacionesLinea = useMemo(
+    () => operacionesPermitidas(tiposOperacion, formClase, tipoCompSeleccionado),
+    [tiposOperacion, formClase, tipoCompSeleccionado],
+  )
 
   const agregarLinea = () => {
     setLineas((prev) => [...prev, lineaVacia()])
@@ -322,6 +386,36 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
       const sugerido = sugerirIgvLinea(l, tasa)
       return sugerido === null ? l : { ...l, igv: sugerido }
     }))
+  }
+
+  // Bloque 12: al cambiar la clase o el comprobante, las líneas con una operación incompatible
+  // pasan a la operación por defecto (COMPRA ↔ VENTA) y su IGV sugerido se recalcula.
+  const ajustarOperacionesLineas = (clase: ClaseDocumento, comprobante: TipoComprobante | undefined) => {
+    const tasa = tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual)
+    setLineas((prev) => reconciliarOperaciones(prev, tiposOperacion, clase, comprobante).map((l, i) => {
+      if (l === prev[i] || l.esBonificacion) return l
+      const sugerido = sugerirIgvLinea(l, tasa)
+      return sugerido === null ? l : { ...l, igv: sugerido }
+    }))
+  }
+
+  const cambiarClase = (clase: ClaseDocumento) => {
+    if (clase === formClase) return
+    setFormClase(clase)
+    ajustarOperacionesLineas(clase, tipoCompSeleccionado)
+    // Un proveedor que no es cliente (o al revés) no se arrastra a la otra clase.
+    const tercero = terceros.find((t) => t.id === formTercero)
+    if (tercero && !(clase === 'COMPRA' ? tercero.es_proveedor : tercero.es_cliente)) setFormTercero('')
+    // El documento de origen de una nota es de la misma clase (el backend lo exige).
+    if (formDocOrigen) {
+      setFormDocOrigen('')
+      setLineas((prev) => prev.map((l) => (l.detalleOrigenId ? { ...l, detalleOrigenId: '' } : l)))
+    }
+  }
+
+  const cambiarTipoComprobante = (id: number | '') => {
+    setFormTipoComprobante(id)
+    ajustarOperacionesLineas(formClase, tiposComprobante.find((c) => c.id === id))
   }
 
   const actualizarLinea = async (tempId: string, campo: string, valor: unknown) => {
@@ -398,52 +492,71 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     e.preventDefault()
     setErrorGlobal(null)
     setExitoGlobal(null)
+    setErrorModal(null)
+    const falta = (mensaje: string) => mostrarErrorModal('nuevo', 'No se pudo registrar el comprobante', [mensaje])
 
     if (!formPeriodo) {
-      setErrorGlobal('Debe seleccionar un período contable.')
+      falta('Debe seleccionar un período contable.')
       return
     }
     if (!formTipoComprobante) {
-      setErrorGlobal('Debe seleccionar el tipo de comprobante.')
+      falta('Debe seleccionar el tipo de comprobante.')
       return
     }
     if (!formSerie.trim()) {
-      setErrorGlobal('Debe ingresar la serie del comprobante.')
+      falta('Debe ingresar la serie del comprobante.')
       return
     }
     if (!formNumero.trim()) {
-      setErrorGlobal('Debe ingresar el número del comprobante.')
+      falta('Debe ingresar el número del comprobante.')
       return
     }
     if (formClase === 'COMPRA' && !formTercero) {
-      setErrorGlobal('Debe seleccionar el proveedor del comprobante.')
+      falta('Debe seleccionar el proveedor del comprobante.')
       return
     }
     if (esNota && !formDocOrigen) {
-      setErrorGlobal('Las Notas de Crédito / Débito requieren seleccionar un documento de origen.')
+      falta('Las Notas de Crédito / Débito requieren seleccionar un documento de origen.')
       return
     }
     if (lineas.length === 0) {
-      setErrorGlobal('Debe agregar al menos una línea de detalle.')
+      falta('Debe agregar al menos una línea de detalle.')
       return
     }
 
     for (let i = 0; i < lineas.length; i++) {
       const l = lineas[i]
       if (!l.productoId) {
-        setErrorGlobal(`Línea ${i + 1}: Debe seleccionar un producto.`)
+        falta(`Línea ${i + 1}: Debe seleccionar un producto.`)
         return
       }
       if (!l.almacenId) {
-        setErrorGlobal(`Línea ${i + 1}: Debe seleccionar un almacén.`)
+        falta(`Línea ${i + 1}: Debe seleccionar un almacén.`)
         return
       }
       if (!l.tipoOperacionId) {
-        setErrorGlobal(`Línea ${i + 1}: Debe seleccionar un tipo de operación.`)
+        falta(`Línea ${i + 1}: Debe seleccionar un tipo de operación.`)
         return
       }
       if (!esMayorQueCero(l.cantidadOriginal)) {
-        setErrorGlobal(`Línea ${i + 1}: La cantidad debe ser mayor a 0.`)
+        falta(`Línea ${i + 1}: La cantidad debe ser mayor a 0.`)
+        return
+      }
+    }
+    // Bloque 12: operación compatible con la clase y el comprobante (el backend vuelve a validar).
+    const errorOperacion = errorDeOperaciones(lineas, tiposOperacion, formClase, tipoCompSeleccionado)
+    if (errorOperacion) {
+      falta(errorOperacion)
+      return
+    }
+    // QA-001: devoluciones de una nota con su línea de origen y sin exceder lo disponible.
+    if (esNota) {
+      const errorNota = errorLineasNota(lineas.map((l) => {
+        const op = tiposOperacion.find((t) => t.id === l.tipoOperacionId)
+        return { ...l, naturaleza: op?.naturaleza, afectaKardex: op?.afecta_kardex ?? true }
+      }), origenDetalles)
+      if (errorNota) {
+        falta(errorNota)
         return
       }
     }
@@ -484,15 +597,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
       setLineas([])
       await cargarDocumentos()
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: Record<string, unknown> } }
-      const msgs = axiosErr.response?.data
-      if (msgs && typeof msgs === 'object' && !('detail' in msgs)) {
-        const key = Object.keys(msgs)[0]
-        const val = msgs[key]
-        setErrorGlobal(`${key}: ${Array.isArray(val) ? val[0] : String(val)}`)
-      } else {
-        setErrorGlobal((msgs as { detail?: string } | undefined)?.detail || 'Error al guardar el comprobante.')
-      }
+      mostrarErrorModal('nuevo', 'No se pudo registrar el comprobante', mensajesDeErrorApi(err, 'Error al guardar el comprobante.'))
     } finally {
       setGuardandoDoc(false)
     }
@@ -501,6 +606,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
   const handleEjecutarRevision = async () => {
     if (!modalRevisionDoc) return
     setErrorGlobal(null)
+    setErrorModal(null)
     try {
       await revisarDocumento(modalRevisionDoc.id, revEstadoSeleccionado, revMotivo)
       setExitoGlobal(`Estado de revisión actualizado a ${revEstadoSeleccionado}.`)
@@ -508,8 +614,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
       setRevMotivo('')
       await cargarDocumentos()
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setErrorGlobal(axiosErr.response?.data?.detail || 'Error al cambiar estado de revisión.')
+      mostrarErrorModal('revision', 'No se pudo cambiar el estado de revisión', mensajesDeErrorApi(err, 'Error al cambiar estado de revisión.'))
     }
   }
 
@@ -534,10 +639,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
 
   const handleEjecutarAnulacion = async () => {
     if (!modalAnulacionDoc || !anulacionMotivo.trim()) {
-      setErrorGlobal('Debe especificar un motivo de anulación.')
+      mostrarErrorModal('anulacion', 'No se pudo anular el comprobante', ['Debe especificar un motivo de anulación.'])
       return
     }
     setErrorGlobal(null)
+    setErrorModal(null)
     try {
       await anularDocumento(modalAnulacionDoc.id, anulacionMotivo.trim())
       setExitoGlobal(`Documento ${modalAnulacionDoc.serie_normalizada}-${modalAnulacionDoc.numero_normalizado} anulado con extorno.`)
@@ -545,15 +651,14 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
       setAnulacionMotivo('')
       await cargarDocumentos()
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setErrorGlobal(axiosErr.response?.data?.detail || 'Error al anular el documento.')
+      mostrarErrorModal('anulacion', 'No se pudo anular el comprobante', mensajesDeErrorApi(err, 'Error al anular el documento.'))
     }
   }
 
 
   const documentosOrigenElegibles = useMemo(() => {
-    return documentosOrigen.filter((d) => !d.es_nota)
-  }, [documentosOrigen])
+    return documentosOrigen.filter((d) => !d.es_nota && d.clase === formClase)
+  }, [documentosOrigen, formClase])
 
   // La nota necesita elegir su comprobante de origen entre todos (no solo la página visible).
   const necesitaOrigen = modalNuevoAbierto && esNota
@@ -572,27 +677,109 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
     }
   }, [necesitaOrigen, empresaId])
 
-  // Abre el formulario de nuevo comprobante con la clase de la vista (Compras/Ventas).
-  const abrirNuevo = () => {
-    setFormClase((actual) => claseInicialNuevo(vista, actual))
-    setModalNuevoAbierto(true)
-    if (lineas.length === 0) agregarLinea()
+  // QA-001: al elegir el comprobante de origen de una nota se cargan sus líneas (con lo que
+  // queda por devolver de cada una) para elegir la línea de origen de cada línea de la nota.
+  useEffect(() => {
+    if (!necesitaOrigen || !formDocOrigen) {
+      diferirCarga(() => setOrigenDetalles([]))
+      return
+    }
+    let ignorar = false
+    obtenerDocumento(Number(formDocOrigen))
+      .then((doc) => {
+        if (ignorar) return
+        setOrigenDetalles((doc.detalles ?? [])
+          .filter((d) => d.producto !== null)
+          .map((d) => ({ ...d, producto: d.producto as number })))
+      })
+      .catch(() => {
+        if (!ignorar) setOrigenDetalles([])
+      })
+    return () => {
+      ignorar = true
+    }
+  }, [necesitaOrigen, formDocOrigen])
+
+  const cambiarDocOrigen = (id: number | '') => {
+    setFormDocOrigen(id)
+    // Las líneas de origen elegidas eran del comprobante anterior.
+    setLineas((prev) => prev.map((l) => (l.detalleOrigenId ? { ...l, detalleOrigenId: '' } : l)))
   }
 
-  // Acceso rápido del Dashboard: /compras?nuevo=1 abre el formulario directamente.
+  /** QA-001: precarga la línea de la nota con la línea de origen elegida. */
+  const elegirLineaOrigen = async (tempId: string, valor: string) => {
+    const origen = origenDetalles.find((d) => String(d.id) === valor)
+    if (!origen) {
+      setLineas((prev) => prev.map((l) => (l.tempId === tempId ? { ...l, detalleOrigenId: '' } : l)))
+      return
+    }
+    let unidades: ProductoUnidad[] = []
+    try {
+      unidades = await getProductoUnidades(origen.producto)
+    } catch {
+      unidades = []
+    }
+    setLineas((prev) => prev.map((l) => {
+      if (l.tempId !== tempId) return l
+      const op = tiposOperacion.find((t) => t.id === l.tipoOperacionId)
+      const fisica = esDevolucionFisica(op?.naturaleza, op?.afecta_kardex ?? true)
+      const actualizada: LineaFormulario = {
+        ...l,
+        detalleOrigenId: origen.id,
+        productoId: origen.producto,
+        almacenId: origen.almacen,
+        unidadesDisponibles: unidades.length ? unidades : l.unidadesDisponibles,
+        productoUnidadId: origen.producto_unidad ?? l.productoUnidadId,
+        factorConversion: origen.factor_conversion,
+        ...(fisica ? {
+          // Devolución: por defecto todo lo que queda, al precio de la línea de origen.
+          cantidadOriginal: disponibleEnUnidad(origen),
+          precioUnitario: origen.precio_unitario,
+          afectacionIgv: (origen.afectacion_igv as AfectacionIgv) || l.afectacionIgv,
+        } : {}),
+      }
+      if (!actualizada.esBonificacion) {
+        const sugerido = sugerirIgvLinea(actualizada, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
+        if (sugerido !== null) actualizada.igv = sugerido
+      }
+      return actualizada
+    }))
+  }
+
+  // Abre el formulario de nuevo comprobante con la clase de la vista (Compras/Ventas).
+  const abrirNuevo = () => {
+    const clase = claseInicialNuevo(tabComprobantes ?? 'TODOS', formClase)
+    cambiarClase(clase)
+    setErrorModal(null)
+    setModalNuevoAbierto(true)
+    if (lineas.length === 0) setLineas([lineaVacia(clase)])
+  }
+
+  // Acceso rápido del Dashboard: /comprobantes?clase=COMPRA&nuevo=1 abre el formulario directamente
+  // (y /compras?nuevo=1, que redirige ahí conservando el parámetro).
   // Espera a los catálogos para que la primera línea tenga almacén y tipo de operación.
   const pedirNuevo = searchParams.get('nuevo') === '1'
   useEffect(() => {
     if (!pedirNuevo || !catalogosCargados) return
     diferirCarga(() => {
-      setFormClase((actual) => claseInicialNuevo(vista, actual))
+      const clase = claseInicialNuevo(tabComprobantes ?? 'TODOS', formClase)
+      setFormClase(clase)
+      setErrorModal(null)
       setModalNuevoAbierto(true)
-      setLineas((actuales) => (actuales.length === 0 ? [lineaVacia()] : actuales))
-      setSearchParams({}, { replace: true })
+      setLineas((actuales) => (actuales.length === 0
+        ? [lineaVacia(clase)]
+        : reconciliarOperaciones(actuales, tiposOperacion, clase, tipoCompSeleccionado)))
+      // Se quita solo `nuevo`: la pestaña (?clase=) se conserva.
+      const resto = new URLSearchParams(searchParams)
+      resto.delete('nuevo')
+      setSearchParams(resto, { replace: true })
     })
-  }, [pedirNuevo, catalogosCargados, vista, setSearchParams, lineaVacia])
+  }, [pedirNuevo, catalogosCargados, tabComprobantes, searchParams, setSearchParams, lineaVacia, formClase, tiposOperacion, tipoCompSeleccionado])
 
   const tiposComprobanteFormulario = tiposComprobanteDeVista(vista, tiposComprobante)
+  const alertaNuevo = alertaDe('nuevo')
+  const alertaRevision = alertaDe('revision')
+  const alertaAnulacion = alertaDe('anulacion')
 
   return (
     <div className="space-y-6">
@@ -627,16 +814,29 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
         </div>
       )}
 
+      {/* Bloque 13: una sola pantalla para compras y ventas (misma tabla, mismos filtros). */}
+      {tabComprobantes && (
+        <Tabs value={tabComprobantes} onValueChange={cambiarTab}>
+          <TabsList aria-label="Clase de comprobante">
+            {TABS_COMPROBANTES.map((t) => (
+              <TabsTrigger key={t.valor} value={t.valor} role="tab" aria-selected={tabComprobantes === t.valor}>
+                {t.etiqueta}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+
       {/* Barra de Filtros */}
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {!configVista.claseFija && (
+            {vista === 'NOTAS' && (
               <div className="space-y-1">
                 <Label>Clase</Label>
                 <Select
-                  value={filtroClase}
-                  onChange={(e) => setFiltroClase(e.target.value as ClaseDocumento | '')}
+                  value={filtroClaseNotas}
+                  onChange={(e) => setFiltroClaseNotas(e.target.value as ClaseDocumento | '')}
                 >
                   <option value="">Todas las clases</option>
                   <option value="COMPRA">Compras</option>
@@ -716,7 +916,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                 <TableHead className="w-20">Clase</TableHead>
                 <TableHead className="w-40">Comprobante</TableHead>
                 <TableHead className="w-24">Emisión</TableHead>
-                <TableHead>Emisor / Tercero</TableHead>
+                <TableHead>Proveedor / Cliente</TableHead>
                 <TableHead className="w-28">Moneda / TC</TableHead>
                 <TableHead numeric className="w-28">Subtotal</TableHead>
                 <TableHead numeric className="w-24">IGV</TableHead>
@@ -773,9 +973,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="font-semibold text-slate-900 text-xs truncate max-w-xs">
-                            {doc.tercero_razon_social || (doc.clase === 'VENTA' ? 'CLIENTES VARIOS' : doc.ruc_emisor)}
+                            {contraparteDocumento(doc).nombre}
                           </span>
-                          <span className="font-mono text-[10px] text-slate-400">RUC: {doc.ruc_emisor}</span>
+                          <span className="font-mono text-[10px] text-slate-400" data-testid="contraparte-documento">
+                            {contraparteDocumento(doc).etiquetaDocumento}: {contraparteDocumento(doc).documento}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -831,6 +1033,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                               variant="ghost"
                               title="Mesa de Revisión Contable"
                               onClick={() => {
+                                setErrorModal(null)
                                 setModalRevisionDoc(doc)
                                 setRevEstadoSeleccionado(
                                   doc.estado_revision === 'PENDIENTE' ? 'REVISADO' : doc.estado_revision
@@ -861,7 +1064,10 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                               size="icon-sm"
                               variant="ghost"
                               title="Anular con Extorno"
-                              onClick={() => setModalAnulacionDoc(doc)}
+                              onClick={() => {
+                                setErrorModal(null)
+                                setModalAnulacionDoc(doc)
+                              }}
                             >
                               <Ban className="h-3.5 w-3.5 text-rose-600" />
                             </Button>
@@ -893,17 +1099,26 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
         <Modal
           isOpen={modalNuevoAbierto}
           onClose={() => setModalNuevoAbierto(false)}
-          maxWidth="5xl"
+          maxWidth="7xl"
           icon={<Receipt className="h-5 w-5" />}
           title="Registrar Comprobante Comercial"
           description="Captura manual de facturas, boletas y notas de crédito/débito con validación estricta."
           footer={
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono tabular-nums">
-                <span>Subtotal: <strong className="text-slate-900">{simboloMoneda} {totalesCalculados.subtotal}</strong></span>
-                <span>IGV: <strong className="text-slate-900">{simboloMoneda} {totalesCalculados.igv}</strong></span>
-                <span className="text-sm">Total: <strong className="text-indigo-600 font-bold">{simboloMoneda} {totalesCalculados.total}</strong></span>
-              </div>
+              <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5 font-mono tabular-nums">
+                <div className="flex items-baseline gap-1.5 text-xs">
+                  <dt className="text-slate-500">Subtotal:</dt>
+                  <dd className="font-semibold text-slate-800">{simboloMoneda} {totalesCalculados.subtotal}</dd>
+                </div>
+                <div className="flex items-baseline gap-1.5 text-xs">
+                  <dt className="text-slate-500">IGV:</dt>
+                  <dd className="font-semibold text-slate-800">{simboloMoneda} {totalesCalculados.igv}</dd>
+                </div>
+                <div className="flex items-baseline gap-2 rounded-md border border-indigo-100 bg-indigo-50/70 px-3 py-1.5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Total:</dt>
+                  <dd className="text-base font-bold text-indigo-700">{simboloMoneda} {totalesCalculados.total}</dd>
+                </div>
+              </dl>
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={() => setModalNuevoAbierto(false)}>
                   Cancelar
@@ -916,6 +1131,8 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           }
         >
           <form onSubmit={handleGuardarDocumento} className="space-y-6">
+            {alertaNuevo && <AlertaFormulario ref={alertaModalRef} titulo={alertaNuevo.titulo} mensajes={alertaNuevo.mensajes} />}
+
             {/* Cabecera */}
             <div className="space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-1">
@@ -926,8 +1143,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                   <Label required>Clase de Operación</Label>
                   <Select
                     value={formClase}
-                    onChange={(e) => setFormClase(e.target.value as ClaseDocumento)}
-                    disabled={Boolean(configVista.claseFija)}
+                    onChange={(e) => cambiarClase(e.target.value as ClaseDocumento)}
                   >
                     <option value="COMPRA">COMPRA (Entrada)</option>
                     <option value="VENTA">VENTA (Salida)</option>
@@ -954,7 +1170,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                   <Label required>Tipo de Comprobante</Label>
                   <Select
                     value={formTipoComprobante}
-                    onChange={(e) => setFormTipoComprobante(Number(e.target.value))}
+                    onChange={(e) => cambiarTipoComprobante(e.target.value ? Number(e.target.value) : '')}
                     required
                   >
                     <option value="">Seleccione Tipo...</option>
@@ -1055,7 +1271,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                     <Label required>Documento de Origen Referenciado (Obligatorio para NC/ND)</Label>
                     <Select
                       value={formDocOrigen}
-                      onChange={(e) => setFormDocOrigen(e.target.value ? Number(e.target.value) : '')}
+                      onChange={(e) => cambiarDocOrigen(e.target.value ? Number(e.target.value) : '')}
                       required
                     >
                       <option value="">Seleccione Factura / Boleta de Origen...</option>
@@ -1081,22 +1297,31 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                 </Button>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase text-slate-500">
+              {/* Bloque 10: la tabla conserva anchos legibles y se desplaza SOLO dentro de esta
+                  sección (min-w-0 evita que estire el modal o la página). */}
+              <div className="min-w-0 overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[1420px] text-xs text-left border-collapse">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="p-2 w-8 text-center">#</th>
-                      <th className="p-2 min-w-[180px]">Producto *</th>
-                      <th className="p-2 min-w-[140px]">Unidad Presentación *</th>
+                      {esNota && <th className="p-2 min-w-[240px]">Línea de origen</th>}
+                      <th className="p-2 min-w-[210px]">Producto *</th>
+                      <th className="p-2 min-w-[140px]">Unidad presentación *</th>
                       <th className="p-2 min-w-[140px]">Almacén *</th>
-                      <th className="p-2 min-w-[140px]">Operación *</th>
-                      <th className="p-2 w-24 text-right">Cantidad</th>
-                      <th className="p-2 w-24 text-right">Precio Unit.</th>
-                      <th className="p-2 min-w-[110px]">Afectación IGV</th>
-                      <th className="p-2 w-20 text-right">IGV</th>
-                      <th className="p-2 w-16 text-center">Bonif?</th>
-                      <th className="p-2 w-20 text-right">Cant. Base</th>
-                      <th className="p-2 w-8"></th>
+                      <th className="p-2 min-w-[150px]">Operación *</th>
+                      <th className="p-2 min-w-[140px] text-right">Cantidad</th>
+                      <th className="p-2 min-w-[148px] text-right whitespace-nowrap">
+                        <span className="hidden sm:inline">Precio unitario</span>
+                        <span className="sm:hidden">Precio unit.</span>
+                      </th>
+                      <th className="p-2 min-w-[124px]">Afectación IGV</th>
+                      <th className="p-2 min-w-[140px] text-right">IGV</th>
+                      <th className="p-2 min-w-[64px] text-center">Bonif.</th>
+                      <th className="p-2 min-w-[128px] text-right whitespace-nowrap">
+                        <span className="hidden sm:inline">Cantidad base</span>
+                        <span className="sm:hidden">Cant. base</span>
+                      </th>
+                      <th className="p-2 w-8"><span className="sr-only">Eliminar</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1106,6 +1331,26 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                       return (
                         <tr key={linea.tempId} className="hover:bg-slate-50/50">
                           <td className="p-2 text-center font-mono text-slate-400">{idx + 1}</td>
+                          {esNota && (
+                            <td className="p-2">
+                              <select
+                                aria-label={`Línea de origen de la línea ${idx + 1}`}
+                                className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                                value={linea.detalleOrigenId ?? ''}
+                                onChange={(e) => elegirLineaOrigen(linea.tempId, e.target.value)}
+                                disabled={!formDocOrigen}
+                              >
+                                <option value="">
+                                  {!formDocOrigen ? 'Elija el comprobante de origen' : 'Sin línea (solo descuento / ajuste)'}
+                                </option>
+                                {origenDetalles
+                                  .filter((d) => lineasOrigenElegibles([d]).length > 0 || d.id === Number(linea.detalleOrigenId))
+                                  .map((d) => (
+                                    <option key={d.id} value={d.id}>{etiquetaLineaOrigen(d)}</option>
+                                  ))}
+                              </select>
+                            </td>
+                          )}
                           <td className="p-2">
                             <select
                               className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
@@ -1154,10 +1399,10 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                             <select
                               className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
                               value={linea.tipoOperacionId}
-                              onChange={(e) => actualizarLinea(linea.tempId, 'tipoOperacionId', e.target.value)}
+                              onChange={(e) => actualizarLinea(linea.tempId, 'tipoOperacionId', e.target.value ? Number(e.target.value) : '')}
                               required
                             >
-                              {tiposOperacion.map((op) => (
+                              {operacionesLinea.map((op) => (
                                 <option key={op.id} value={op.id}>
                                   {op.codigo_interno} - {op.descripcion}
                                 </option>
@@ -1167,9 +1412,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                           <td className="p-2">
                             <input
                               type="number"
-                              step="0.0001"
-                              min="0.0001"
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-right font-mono tabular-nums text-xs"
+                              inputMode="decimal"
+                              step="any"
+                              min="0"
+                              placeholder="0.000000"
+                              className={CLASE_INPUT_NUMERICO}
                               value={linea.cantidadOriginal}
                               onChange={(e) => actualizarLinea(linea.tempId, 'cantidadOriginal', e.target.value)}
                               required
@@ -1178,10 +1425,12 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                           <td className="p-2">
                             <input
                               type="number"
-                              step="0.0001"
+                              inputMode="decimal"
+                              step="any"
                               min="0"
+                              placeholder="0.000000"
                               disabled={linea.esBonificacion}
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-right font-mono tabular-nums text-xs"
+                              className={CLASE_INPUT_NUMERICO}
                               value={linea.precioUnitario}
                               onChange={(e) => actualizarLinea(linea.tempId, 'precioUnitario', e.target.value)}
                               required
@@ -1202,10 +1451,12 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                           <td className="p-2">
                             <input
                               type="number"
-                              step="0.01"
+                              inputMode="decimal"
+                              step="any"
                               min="0"
+                              placeholder="0.00"
                               disabled={linea.esBonificacion || !igvEditable(linea.afectacionIgv)}
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-right font-mono tabular-nums text-xs"
+                              className={CLASE_INPUT_NUMERICO}
                               value={linea.igv}
                               onChange={(e) => actualizarLinea(linea.tempId, 'igv', e.target.value)}
                             />
@@ -1218,7 +1469,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
                               className="rounded text-indigo-600 cursor-pointer"
                             />
                           </td>
-                          <td className="p-2 text-right font-mono tabular-nums text-slate-500 font-semibold">
+                          <td className="p-2 text-right font-mono tabular-nums text-slate-500 font-semibold whitespace-nowrap">
                             {cantBase}
                           </td>
                           <td className="p-2 text-center">
@@ -1260,12 +1511,16 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-200">
               <div>
-                <span className="text-slate-400 block">RUC Emisor:</span>
-                <strong className="font-mono text-slate-800">{modalDetalleDocumento.ruc_emisor}</strong>
+                <span className="text-slate-400 block">
+                  {contraparteDocumento(modalDetalleDocumento).rol} ({contraparteDocumento(modalDetalleDocumento).etiquetaDocumento}):
+                </span>
+                <strong className="font-mono text-slate-800" data-testid="detalle-contraparte-documento">
+                  {contraparteDocumento(modalDetalleDocumento).documento}
+                </strong>
               </div>
               <div>
-                <span className="text-slate-400 block">Tercero / Razón Social:</span>
-                <strong className="text-slate-800">{modalDetalleDocumento.tercero_razon_social || '—'}</strong>
+                <span className="text-slate-400 block">{contraparteDocumento(modalDetalleDocumento).rol} / Razón Social:</span>
+                <strong className="text-slate-800">{contraparteDocumento(modalDetalleDocumento).nombre}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block">Fecha Emisión:</span>
@@ -1343,6 +1598,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           }
         >
           <div className="space-y-4">
+            {alertaRevision && <AlertaFormulario ref={alertaModalRef} titulo={alertaRevision.titulo} mensajes={alertaRevision.mensajes} />}
             <div className="space-y-1.5">
               <Label required>Nuevo Estado de Revisión</Label>
               <Select
@@ -1389,6 +1645,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'TODOS' 
           }
         >
           <div className="space-y-4">
+            {alertaAnulacion && <AlertaFormulario ref={alertaModalRef} titulo={alertaAnulacion.titulo} mensajes={alertaAnulacion.mensajes} />}
             <div className="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
               <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
               <div>
