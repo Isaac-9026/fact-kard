@@ -24,6 +24,31 @@ def nombre_archivo_formato_131(periodo, ruc):
     return '_'.join(partes) + '.xlsx'
 
 
+ETIQUETA_SALDO_FINAL = 'SALDO FINAL DEL PERÍODO'
+
+
+def _fila_saldo_final(hoja, fila, reporte):
+    """
+    F131-001: fila de saldo final del período, la misma que muestra la pantalla
+    (`reporte['saldo_final']`: cierre vigente o calculado al cierre del período, con el CPP
+    global a la fecha fin). No se toma el saldo de la última fila de movimientos: en un
+    establecimiento anexo esa fila conserva el CPP del momento de su último movimiento, y otros
+    establecimientos pueden haber movido el CPP después (11 × 10.27263155 frente al oficial
+    11 × 10.221167). Solo presentación: no se recalcula nada.
+    """
+    final = reporte.get('saldo_final') or {}
+    hoja.cell(fila, 1, ETIQUETA_SALDO_FINAL).font = Font(bold=True)
+    hoja.merge_cells(start_row=fila, start_column=1, end_row=fila, end_column=11)
+    for desplazamiento, clave in enumerate(('cantidad', 'costo_unitario', 'costo_total')):
+        celda = hoja.cell(fila, 12 + desplazamiento, Decimal(final[clave]) if final.get(clave) not in (None, '') else None)
+        celda.number_format = FORMATO_NUMERO
+        celda.font = Font(bold=True)
+        celda.fill = PatternFill('solid', fgColor=AZUL_CLARO)
+    for celda in hoja[fila]:
+        celda.border = BORDER
+    return fila
+
+
 def _pie_conciliacion(hoja, fila, reporte, fuente_cierre):
     """
     Bloque 13: lo mismo que la pantalla muestra debajo de cada tabla — de dónde sale el saldo
@@ -133,7 +158,8 @@ def generar_excel_formato_131(**filtros):
                 celda.alignment = Alignment(horizontal='right' if celda.column >= 6 else 'center')
         for columna, ancho in enumerate((12, 9, 12, 14, 18, 14, 16, 16, 14, 16, 16, 14, 16, 16), start=1):
             hoja.column_dimensions[get_column_letter(columna)].width = ancho
-        ultima = _pie_conciliacion(hoja, 15 + len(reporte['movimientos']), reporte, data.get('fuente_cierre'))
+        fila_final = _fila_saldo_final(hoja, 14 + len(reporte['movimientos']), reporte)
+        ultima = _pie_conciliacion(hoja, fila_final + 2, reporte, data.get('fuente_cierre'))
         hoja.print_title_rows = '11:12'
         hoja.print_area = f'A1:N{ultima}'
     if not data['reportes']:

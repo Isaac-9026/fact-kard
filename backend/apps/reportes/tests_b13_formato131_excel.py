@@ -100,7 +100,9 @@ class ExportacionFormato131Tests(Formato131ExcelBase, TestCase):
                     self.assertEqual(d(valor) if valor is not None else None, esperado, (i, col + k))
         ultima = 13 + len(reporte['movimientos'])
         final = reporte['saldo_final']
-        self.assertEqual([d(hoja.cell(ultima, c).value) for c in (12, 13, 14)],
+        # F131-001: después de los movimientos, la fila explícita de saldo final del período.
+        self.assertEqual(hoja.cell(ultima + 1, 1).value, 'SALDO FINAL DEL PERÍODO')
+        self.assertEqual([d(hoja.cell(ultima + 1, c).value) for c in (12, 13, 14)],
                          [d(final['cantidad']), d(final['costo_unitario']), d(final['costo_total'])])
         # Cierre / snapshot: el mismo saldo.
         cierre = CierrePeriodo.objects.get(periodo=self.enero, vigente=True)
@@ -108,11 +110,11 @@ class ExportacionFormato131Tests(Formato131ExcelBase, TestCase):
         self.assertEqual((d(detalle.saldo_cantidad), d(detalle.saldo_valor_pen)), (d(final['cantidad']), d(final['costo_total'])))
         self.assertEqual((d(final['cantidad']), d(final['costo_total'])), (Decimal('130'), Decimal('1300.00004')))
         # Pie: fuente del saldo y microdiferencia absorbida, igual que el aviso de la pantalla.
-        self.assertEqual(hoja.cell(ultima + 2, 1).value, 'FUENTE DEL SALDO FINAL')
-        self.assertTrue(hoja.cell(ultima + 2, 2).value.startswith(f'CIERRE v1 (hash {cierre.hash_resultado[:12]}'))
-        self.assertIn('MICRODIFERENCIA OFICIAL', hoja.cell(ultima + 3, 1).value)
-        self.assertEqual(d(hoja.cell(ultima + 3, 14).value), Decimal('0.00004000'))
-        self.assertEqual(hoja.print_area, f"'13.1 01'!$A$1:$N${ultima + 3}")
+        self.assertEqual(hoja.cell(ultima + 3, 1).value, 'FUENTE DEL SALDO FINAL')
+        self.assertTrue(hoja.cell(ultima + 3, 2).value.startswith(f'CIERRE v1 (hash {cierre.hash_resultado[:12]}'))
+        self.assertIn('MICRODIFERENCIA OFICIAL', hoja.cell(ultima + 4, 1).value)
+        self.assertEqual(d(hoja.cell(ultima + 4, 14).value), Decimal('0.00004000'))
+        self.assertEqual(hoja.print_area, f"'13.1 01'!$A$1:$N${ultima + 4}")
 
     def test_la_precision_no_se_pierde_en_el_archivo(self):
         # Cada número del XML, leído como texto, es exactamente el importe de 8 decimales.
