@@ -15,8 +15,9 @@ export type IconoNav =
   | 'productos' | 'almacenes' | 'terceros'
   | 'saldoInicial' | 'inventario'
   | 'compras' | 'ventas' | 'comprobantes' | 'notas' | 'transferencias' | 'captura'
+  | 'cuentasCobrar' | 'cuentasPagar'
   | 'kardex' | 'incidencias'
-  | 'cierres' | 'formato131'
+  | 'cierres' | 'formato131' | 'registroComercial'
   | 'auditoria';
 
 export interface ItemNav {
@@ -69,6 +70,14 @@ export const NAV_SECCIONES: SeccionNav[] = [
     ],
   },
   {
+    // Bloque 16: flujo financiero (saldos calculados desde comprobantes y pagos).
+    title: 'FINANZAS',
+    items: [
+      { path: '/cuentas-por-cobrar', label: 'Cuentas por cobrar', icono: 'cuentasCobrar' },
+      { path: '/cuentas-por-pagar', label: 'Cuentas por pagar', icono: 'cuentasPagar' },
+    ],
+  },
+  {
     title: 'KARDEX',
     items: [
       { path: '/kardex', label: 'Kardex Valorizado', icono: 'kardex' },
@@ -80,6 +89,7 @@ export const NAV_SECCIONES: SeccionNav[] = [
     items: [
       { path: '/cierres', label: 'Cierres y Snapshots', icono: 'cierres' },
       { path: '/formato-13-1', label: 'Formato 13.1 SUNAT', icono: 'formato131' },
+      { path: '/registro-ventas-compras', label: 'Registro de ventas y compras', icono: 'registroComercial' },
     ],
   },
   {

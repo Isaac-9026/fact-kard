@@ -119,3 +119,21 @@ class UnidadMedida(models.Model):
 
     def __str__(self):
         return f"{self.codigo} - {self.descripcion}"
+
+
+class MetodoPago(models.Model):
+    """
+    Bloque 16: catálogo extensible de métodos de pago/cobro (EFECTIVO, TRANSFERENCIA, ...).
+    Se agregan filas nuevas sin cambiar código; `activo` oculta un método sin borrarlo.
+    """
+    codigo = models.CharField(max_length=20, primary_key=True)
+    descripcion = models.CharField(max_length=100)
+    activo = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'metodo_pago'
+        verbose_name = 'Método de Pago'
+        verbose_name_plural = 'Métodos de Pago'
+
+    def __str__(self):
+        return f"{self.codigo} - {self.descripcion}"

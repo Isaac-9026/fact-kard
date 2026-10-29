@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone
+from apps.documentos.afectacion_igv import AFECTACIONES
 
 
 class Almacen(models.Model):
@@ -65,6 +66,11 @@ class Tercero(models.Model):
                 fields=['empresa', 'tipo_documento', 'numero_documento'],
                 name='uq_tercero_empresa_tipo_num'
             ),
+            # Bloque 16: solo códigos del catálogo 06 (sin alias como 'RUC' o 'DNI').
+            models.CheckConstraint(
+                condition=models.Q(tipo_documento__in=['0', '1', '4', '6', '7', 'A']),
+                name='chk_tercero_tipo_documento'
+            ),
             models.CheckConstraint(
                 condition=models.Q(es_cliente=True) | models.Q(es_proveedor=True),
                 name='chk_tercero_cliente_o_proveedor'
@@ -95,6 +101,10 @@ class Producto(models.Model):
         related_name='productos'
     )
     estado = models.CharField(max_length=20, default='ACTIVO', db_default='ACTIVO')
+    # Bloque 16: datos comerciales. Solo sugieren valores al crear una línea de venta; nunca
+    # intervienen en el costo, el CPP ni el Kardex.
+    precio_venta_sugerido = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    afectacion_igv_defecto = models.CharField(max_length=12, choices=AFECTACIONES, null=True, blank=True)
 
     class Meta:
         db_table = 'producto'
@@ -108,7 +118,11 @@ class Producto(models.Model):
             models.CheckConstraint(
                 condition=models.Q(estado__in=['ACTIVO', 'INACTIVO']),
                 name='chk_producto_estado'
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(precio_venta_sugerido__isnull=True) | models.Q(precio_venta_sugerido__gte=0),
+                name='chk_producto_precio_venta_sugerido'
+            ),
         ]
 
     def __str__(self):

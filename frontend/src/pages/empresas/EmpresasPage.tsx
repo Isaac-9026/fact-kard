@@ -10,7 +10,9 @@ import {
   AlertCircle,
   Save,
   Check,
+  Hash,
 } from 'lucide-react'
+import { SeriesComprobantePanel } from '../../components/finanzas/SeriesComprobantePanel'
 import {
   actualizarConfigEmpresa,
   actualizarEstablecimiento,
@@ -51,7 +53,9 @@ export const EmpresasPage: React.FC = () => {
     registrarEmpresaDisponible,
     refrescarEmpresasDisponibles,
     seleccionarEmpresa,
+    usuario,
   } = useAuth()
+  const esAdminActiva = Boolean(usuario?.es_admin_global || empresaActiva?.rol === 'ADMIN')
   const [monedas, setMonedas] = useState<Moneda[]>([])
   const [establecimientos, setEstablecimientos] = useState<Establecimiento[]>([])
   const [config, setConfig] = useState<ConfigEmpresa | null>(null)
@@ -308,6 +312,9 @@ export const EmpresasPage: React.FC = () => {
           <TabsTrigger value="establecimientos" icon={<MapPin className="h-3.5 w-3.5" />}>
             Establecimientos SUNAT ({establecimientos.length})
           </TabsTrigger>
+          <TabsTrigger value="series" icon={<Hash className="h-3.5 w-3.5" />}>
+            Series de comprobantes
+          </TabsTrigger>
           <TabsTrigger value="configuracion" icon={<Sliders className="h-3.5 w-3.5" />}>
             Parámetros del Motor (ConfigEmpresa)
           </TabsTrigger>
@@ -500,6 +507,17 @@ export const EmpresasPage: React.FC = () => {
                 </CardContent>
               </Card>
             </div>
+          )}
+        </TabsContent>
+
+        {/* Bloque 16: series y correlativos de venta */}
+        <TabsContent value="series" className="space-y-4">
+          {!empresaActiva ? (
+            <div className="p-8 text-center text-sm text-slate-500 rounded-xl border border-slate-200 bg-white">
+              Selecciona una empresa activa para administrar sus series.
+            </div>
+          ) : (
+            <SeriesComprobantePanel key={empresaActiva.id} establecimientos={establecimientos} esAdmin={esAdminActiva} />
           )}
         </TabsContent>
 

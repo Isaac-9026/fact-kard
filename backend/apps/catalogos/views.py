@@ -21,6 +21,7 @@ from apps.catalogos.models import (
     TipoOperacion,
     TipoExistencia,
     UnidadMedida,
+    MetodoPago,
 )
 from apps.catalogos.serializers import (
     MonedaSerializer,
@@ -28,6 +29,7 @@ from apps.catalogos.serializers import (
     TipoOperacionSerializer,
     TipoExistenciaSerializer,
     UnidadMedidaSerializer,
+    MetodoPagoSerializer,
     TipoCambioSerializer,
     TipoCambioResolverSerializer,
 )
@@ -51,6 +53,13 @@ class TipoOperacionListView(generics.ListAPIView):
 class TipoExistenciaListView(generics.ListAPIView):
     serializer_class = TipoExistenciaSerializer
     queryset = TipoExistencia.objects.all().order_by('codigo')
+
+
+class MetodoPagoListView(generics.ListAPIView):
+    """Bloque 16: métodos de pago activos (catálogo global)."""
+    serializer_class = MetodoPagoSerializer
+    queryset = MetodoPago.objects.filter(activo=True).order_by('codigo')
+    pagination_class = None
 
 
 class UnidadMedidaListView(generics.ListAPIView):

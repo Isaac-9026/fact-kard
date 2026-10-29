@@ -540,3 +540,67 @@ class ProductoEquivalenciaSugerirView(EmpresaActivaMixin, generics.GenericAPIVie
             'estado': 'PRODUCTO_SIN_HOMOLOGAR',
             'mensaje': 'Producto pendiente de homologación.',
         })
+
+
+CAMPOS_RESUMEN = ('total_original', 'total_notas_credito', 'total_notas_debito', 'total_ajustado', 'pagado',
+                  'saldo_pendiente')
+
+
+class TerceroHistorialView(EmpresaActivaMixin, generics.GenericAPIView):
+    """
+    Bloque 16: historial comercial del tercero, calculado desde `documento` (sin tabla propia):
+    ventas si es cliente, compras si es proveedor (o `?clase=`).
+
+    B16-QA-001: cada comprobante trae los importes ya conciliados por `finanzas` (los mismos de
+    CxC/CxP): total original, NC y ND confirmadas, total ajustado, pagado y saldo. Así
+    total_ajustado − pagado = saldo en cada fila y en el resumen; el frontend no recalcula.
+    """
+    admin_write_required = False
+
+    def get(self, request, pk):
+        from decimal import Decimal
+        from apps.documentos.finanzas import CERO, anotar_finanzas, texto, valores_financieros_texto
+        from apps.documentos.models import Documento
+        tercero = Tercero.objects.filter(pk=pk, empresa_id=request.empresa_id).first()
+        if tercero is None:
+            raise NotFound('Tercero no encontrado en la empresa activa.')
+        clase = (request.query_params.get('clase') or '').upper()
+        clases = [c for c, ok in (('VENTA', tercero.es_cliente), ('COMPRA', tercero.es_proveedor)) if ok]
+        if clase in ('VENTA', 'COMPRA'):
+            clases = [clase]
+        qs = anotar_finanzas(
+            Documento.objects.filter(empresa_id=request.empresa_id, tercero=tercero, clase__in=clases)
+            .select_related('tipo_comprobante', 'periodo')
+        ).order_by('-fecha_emision', '-id')
+        filas, resumen = [], {}
+        for d in qs[:1000]:
+            es_nota = d.tipo_comprobante.es_nota
+            financiero = d.estado == 'CONFIRMADO' and not es_nota
+            v = valores_financieros_texto(d) if financiero else {}
+            fila = {
+                'id': d.id, 'clase': d.clase, 'fecha_emision': d.fecha_emision,
+                'tipo_comprobante_codigo': d.tipo_comprobante.codigo_sunat, 'es_nota': es_nota,
+                'serie': d.serie_normalizada, 'numero': d.numero, 'moneda_codigo': d.moneda_codigo_id,
+                # Importe del propio comprobante (en una nota: el importe de la nota).
+                'total_original': texto(d.total or CERO),
+                'total_notas_credito': v.get('total_notas_credito'), 'total_notas_debito': v.get('total_notas_debito'),
+                'total_ajustado': v.get('total_ajustado'),
+                'pagado': v.get('pagado'), 'saldo_pendiente': v.get('saldo_pendiente'),
+                'condicion_pago': d.condicion_pago, 'fecha_vencimiento': d.fecha_vencimiento, 'estado': d.estado,
+                'estado_financiero': d.estado_financiero if financiero else None,
+            }
+            filas.append(fila)
+            if financiero:
+                r = resumen.setdefault(f'{d.clase}:{d.moneda_codigo_id}', {
+                    'clase': d.clase, 'moneda_codigo': d.moneda_codigo_id, 'comprobantes': 0,
+                    **{k: CERO for k in CAMPOS_RESUMEN}})
+                r['comprobantes'] += 1
+                for k in CAMPOS_RESUMEN:
+                    r[k] += Decimal(v['total' if k == 'total_original' else k])
+        return Response({
+            'tercero': {'id': tercero.id, 'tipo_documento': tercero.tipo_documento,
+                        'numero_documento': tercero.numero_documento, 'razon_social': tercero.razon_social,
+                        'es_cliente': tercero.es_cliente, 'es_proveedor': tercero.es_proveedor},
+            'clases': clases, 'comprobantes': filas,
+            'resumen': [{**r, **{k: texto(r[k]) for k in CAMPOS_RESUMEN}} for r in resumen.values()],
+        })

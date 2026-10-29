@@ -643,6 +643,9 @@ def generar_borrador_desde_captura(
     )
     if tercero is None and clase == 'COMPRA':
         raise ValidationError({'ruc_emisor': 'El RUC del proveedor no es válido.'})
+    # Bloque 16: mismas reglas comerciales que el registro manual (rol del tercero, factura con RUC).
+    from apps.documentos.services import validar_tercero_comercial
+    validar_tercero_comercial(clase=clase, tipo_comprobante=tipo_comp, tercero=tercero)
 
     # 3. Serie y Número normalizados con función centralizada de documentos (A-06)
     from apps.documentos.services import normalizar_numero, normalizar_serie, validar_duplicado_documento

@@ -7,6 +7,7 @@ from django.utils import timezone
 from apps.catalogos.models import TipoExistencia, TipoOperacion, UnidadMedida
 from apps.empresas.models import Establecimiento, Periodo
 from apps.auditoria.services import registrar_auditoria
+from apps.inventario.documentos_identidad import validar_documento_identidad
 from apps.inventario.homologacion import equivalencia_activa_repetida, limpiar_texto, normalizar_texto
 from apps.inventario.models import (
     Almacen,
@@ -99,6 +100,17 @@ class TerceroSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         empresa_id = _empresa_id(self)
+        # Bloque 16: catálogo 06 + validación de DNI/RUC (dígito verificador). 'RUC'/'DNI' se
+        # convierten al código, así '6' y 'RUC' con el mismo número son la misma identidad.
+        if 'tipo_documento' in attrs or 'numero_documento' in attrs or self.instance is None:
+            tipo, numero, error = validar_documento_identidad(
+                attrs.get('tipo_documento', getattr(self.instance, 'tipo_documento', None)),
+                attrs.get('numero_documento', getattr(self.instance, 'numero_documento', None)),
+            )
+            if error:
+                campo = 'tipo_documento' if 'Tipo de documento' in error else 'numero_documento'
+                raise serializers.ValidationError({campo: error})
+            attrs['tipo_documento'], attrs['numero_documento'] = tipo, numero
         es_cliente = attrs.get('es_cliente', getattr(self.instance, 'es_cliente', False))
         es_proveedor = attrs.get('es_proveedor', getattr(self.instance, 'es_proveedor', False))
         if not es_cliente and not es_proveedor:
@@ -158,6 +170,8 @@ class ProductoSerializer(serializers.ModelSerializer):
             'id', 'empresa', 'codigo_interno', 'descripcion',
             'tipo_existencia_codigo', 'tipo_existencia_descripcion', 'estado',
             'unidad_base_codigo', 'unidad_base',
+            # Bloque 16: datos comerciales (solo sugerencias; no afectan costo, CPP ni Kardex).
+            'precio_venta_sugerido', 'afectacion_igv_defecto',
         )
         read_only_fields = ('id', 'empresa', 'unidad_base')
 
@@ -197,6 +211,11 @@ class ProductoSerializer(serializers.ModelSerializer):
         if value not in ('ACTIVO', 'INACTIVO'):
             raise serializers.ValidationError('El estado debe ser ACTIVO o INACTIVO.')
         return value
+
+    def validate_precio_venta_sugerido(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('El precio de venta sugerido no puede ser negativo.')
+        return value.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP) if value is not None else None
 
     def create(self, validated_data):
         unidad_base = validated_data.pop('unidad_base_codigo')

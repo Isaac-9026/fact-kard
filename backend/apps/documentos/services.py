@@ -9,6 +9,7 @@ from rest_framework.exceptions import ValidationError
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoCambio, TipoComprobante, TipoOperacion, Moneda
 from apps.documentos.models import Documento, DocumentoDetalle
+from apps.documentos import finanzas
 from apps.documentos.reglas import (
     validar_cantidades_devolucion,
     validar_documento_origen,
@@ -136,6 +137,29 @@ def validar_duplicado_documento(
         )
 
 
+def validar_tercero_comercial(*, clase, tipo_comprobante, tercero, origen=None):
+    """
+    Bloque 16: COMPRA → el tercero es proveedor; VENTA → es cliente. Factura de venta (01) y sus
+    notas → cliente identificado con RUC (catálogo 06 = '6', 11 dígitos).
+    """
+    from apps.inventario.documentos_identidad import RUC
+    if tercero is not None:
+        if clase == 'COMPRA' and not tercero.es_proveedor:
+            raise ValidationError({'tercero': f'{tercero.razon_social} no está registrado como proveedor.'})
+        if clase == 'VENTA' and not tercero.es_cliente:
+            raise ValidationError({'tercero': f'{tercero.razon_social} no está registrado como cliente.'})
+    if clase != 'VENTA':
+        return
+    codigo = tipo_comprobante.codigo_sunat
+    if tipo_comprobante.es_nota and origen is not None:
+        origen_obj = origen if isinstance(origen, Documento) else Documento.objects.filter(pk=origen).select_related('tipo_comprobante').first()
+        codigo = origen_obj.tipo_comprobante.codigo_sunat if origen_obj else codigo
+    if codigo == '01':
+        numero = (tercero.numero_documento or '').strip() if tercero else ''
+        if tercero is None or tercero.tipo_documento != RUC or len(numero) != 11 or not numero.isdigit():
+            raise ValidationError({'tercero': 'Una factura de venta requiere un cliente identificado con RUC (11 dígitos).'})
+
+
 @transaction.atomic
 def crear_documento(
     empresa_id: int,
@@ -207,11 +231,37 @@ def crear_documento(
         except TipoComprobante.DoesNotExist:
             raise ValidationError({'tipo_comprobante': 'El tipo de comprobante seleccionado no existe.'})
 
+    # Bloque 16: el tercero debe tener el rol de la operación y la factura de venta exige RUC.
+    validar_tercero_comercial(clase=clase, tipo_comprobante=tipo_comprobante, tercero=tercero,
+                              origen=datos_cabecera.get('documento_origen'))
+
     # 6. Normalización de Serie y Número
-    serie = datos_cabecera.get('serie', '')
-    numero = datos_cabecera.get('numero', '')
+    serie_comprobante = None
+    serie_id = datos_cabecera.get('serie_comprobante')
+    if serie_id:
+        # Bloque 16: correlativo automático (solo ventas). El backend asigna el número con la
+        # serie bloqueada; un número enviado por el frontend se ignora.
+        if clase != 'VENTA':
+            raise ValidationError({'serie_comprobante': 'El correlativo automático solo se usa en ventas.'})
+        if (datos_cabecera.get('origen_captura') or 'MANUAL') != 'MANUAL':
+            raise ValidationError({'serie_comprobante': 'Un comprobante capturado conserva su serie y número.'})
+        almacen_ids = {l.get('almacen') or l.get('almacen_id') for l in (detalles_datos or [])}
+        almacen_ids = {getattr(a, 'id', a) for a in almacen_ids if a}
+        serie_comprobante, numero = finanzas.asignar_correlativo(
+            empresa_id=empresa_id, usuario_id=usuario_id, serie_id=serie_id,
+            tipo_comprobante=tipo_comprobante, almacen_ids=almacen_ids,
+        )
+        serie = serie_comprobante.serie
+    else:
+        serie = datos_cabecera.get('serie', '')
+        numero = datos_cabecera.get('numero', '')
     serie_normalizada = normalizar_serie(serie)
     numero_normalizado = normalizar_numero(numero)
+    if serie_comprobante is None:
+        finanzas.validar_serie_manual(
+            empresa_id=empresa_id, clase=clase, tipo_comprobante=tipo_comprobante,
+            serie_normalizada=serie_normalizada, origen_captura=datos_cabecera.get('origen_captura'),
+        )
 
     if not serie_normalizada:
         raise ValidationError({'serie': 'La serie del comprobante es obligatoria.'})
@@ -331,6 +381,7 @@ def crear_documento(
         igv=Decimal('0.00000000'),
         total=Decimal('0.00000000'),
         documento_origen=documento_origen,
+        serie_comprobante=serie_comprobante,
         origen_captura=datos_cabecera.get('origen_captura', 'MANUAL'),
         estado='BORRADOR',
         estado_revision='PENDIENTE',
@@ -564,6 +615,14 @@ def crear_documento(
     documento.total = total_acum.quantize(ocho, rounding=ROUND_HALF_UP)
     documento.save(update_fields=['subtotal', 'igv', 'total'])
 
+    # Bloque 16: condición de pago (validada contra el total ya calculado).
+    condicion, vencimiento, cuotas = finanzas.normalizar_condicion_pago(
+        condicion=datos_cabecera.get('condicion_pago'), fecha_vencimiento=datos_cabecera.get('fecha_vencimiento'),
+        cuotas=datos_cabecera.get('cuotas'), total=documento.total, fecha_emision=fecha_emision,
+        es_nota=tipo_comprobante.es_nota,
+    )
+    finanzas.guardar_condicion_pago(documento, condicion, vencimiento, cuotas)
+
     registrar_auditoria(
         empresa_id=empresa_id,
         usuario_id=usuario_id,
@@ -575,7 +634,11 @@ def crear_documento(
             'comprobante': f"{documento.serie_normalizada}-{documento.numero_normalizado}",
             'ruc_emisor': documento.ruc_emisor,
             'total': str(documento.total),
-            'moneda': documento.moneda_codigo_id
+            'moneda': documento.moneda_codigo_id,
+            'condicion_pago': condicion,
+            'fecha_vencimiento': str(vencimiento) if vencimiento else None,
+            'cuotas': len(cuotas),
+            'serie_automatica': serie_comprobante is not None,
         },
         motivo="Creación de documento en borrador"
     )
@@ -651,6 +714,8 @@ def anular_documento(
 ) -> Documento:
     """Anula un documento en borrador o confirmado."""
     from apps.kardex.services import anular_documento_motor
+    # Bloque 16: con pagos vigentes no se anula (primero se anulan los pagos).
+    finanzas.validar_anulacion_sin_pagos(documento_id, empresa_id)
     return anular_documento_motor(
         documento_id=documento_id, empresa_id=empresa_id, usuario_id=usuario_id,
         motivo=motivo,

@@ -18,6 +18,7 @@ from apps.inventario.views import (
     SaldoInicialConfirmarView,
     SaldoInicialListCreateView,
     TerceroDetailView,
+    TerceroHistorialView,
     TerceroListCreateView,
     TipoExistenciaListView,
     TransferenciaConfirmarView,
@@ -32,6 +33,7 @@ urlpatterns = [
     path('almacenes/<int:pk>/', AlmacenDetailView.as_view(), name='almacen-detail'),
     path('terceros/', TerceroListCreateView.as_view(), name='tercero-list-create'),
     path('terceros/<int:pk>/', TerceroDetailView.as_view(), name='tercero-detail'),
+    path('terceros/<int:pk>/historial/', TerceroHistorialView.as_view(), name='tercero-historial'),
     path('productos/', ProductoListCreateView.as_view(), name='producto-list-create'),
     path('productos/<int:pk>/', ProductoDetailView.as_view(), name='producto-detail'),
     path(

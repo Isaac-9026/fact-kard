@@ -150,3 +150,26 @@ class PilotoComparadorView(APIView):
             empresa_id=request.empresa_id,
             datos=serializer.validated_data,
         ))
+
+
+class RegistroComercialView(APIView):
+    """Bloque 16: registro de ventas / compras del período (reporte interno, no PLE/SIRE)."""
+    authentication_classes = (UsuarioTokenAuthentication,)
+    permission_classes = (TieneEmpresaActiva,)
+    clase = None
+    excel = False
+
+    def get(self, request):
+        from apps.reportes.registro_comercial import excel_registro, generar_registro, nombre_archivo_registro
+        params = request.query_params
+        datos = generar_registro(
+            empresa_id=request.empresa_id, clase=self.clase,
+            periodo_id=entero_param(params, 'periodo_id', 'periodo', requerido=True),
+            estado=(params.get('estado') or '').upper() or None, tercero_id=entero_param(params, 'tercero'),
+        )
+        if not self.excel:
+            return Response(datos)
+        buffer = excel_registro(datos)
+        response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="{nombre_archivo_registro(datos)}"'
+        return response

@@ -29,6 +29,9 @@ export interface Producto {
   tipo_existencia_descripcion: string;
   estado: EstadoMaestro;
   unidad_base: UnidadBaseResumen | null;
+  /** Bloque 16: sugerencias comerciales (no intervienen en costo, CPP ni Kardex). */
+  precio_venta_sugerido?: string | null;
+  afectacion_igv_defecto?: 'GRAVADO' | 'EXONERADO' | 'INAFECTO' | 'EXPORTACION' | 'GRATUITO' | null;
 }
 
 export interface ProductoPayload {
@@ -37,6 +40,8 @@ export interface ProductoPayload {
   tipo_existencia_codigo: string;
   estado?: EstadoMaestro;
   unidad_base_codigo?: string;
+  precio_venta_sugerido?: string | null;
+  afectacion_igv_defecto?: string | null;
 }
 
 export interface ProductoUnidad {

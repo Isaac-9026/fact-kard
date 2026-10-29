@@ -8,6 +8,7 @@ from apps.catalogos.models import (
     TipoOperacion,
     TipoExistencia,
     UnidadMedida,
+    MetodoPago,
 )
 
 
@@ -36,6 +37,12 @@ class TipoExistenciaSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoExistencia
         fields = ('codigo', 'descripcion')
+
+
+class MetodoPagoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MetodoPago
+        fields = ('codigo', 'descripcion', 'activo')
 
 
 class UnidadMedidaSerializer(serializers.ModelSerializer):

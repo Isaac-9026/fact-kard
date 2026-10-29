@@ -22,6 +22,8 @@ const IncidenciasPage = lazy(() => import('./pages/incidencias/IncidenciasPage')
 const KardexPage = lazy(() => import('./pages/kardex/KardexPage').then((m) => ({ default: m.KardexPage })));
 const CierresPage = lazy(() => import('./pages/cierres/CierresPage').then((m) => ({ default: m.CierresPage })));
 const CapturaHomologacionPage = lazy(() => import('./pages/captura/CapturaHomologacionPage').then((m) => ({ default: m.CapturaHomologacionPage })));
+const CuentasPage = lazy(() => import('./pages/finanzas/CuentasPage').then((m) => ({ default: m.CuentasPage })));
+const RegistroComercialPage = lazy(() => import('./pages/finanzas/RegistroComercialPage').then((m) => ({ default: m.RegistroComercialPage })));
 const Formato131Page = lazy(() => import('./pages/formato131/Formato131Page').then((m) => ({ default: m.Formato131Page })));
 
 const CargandoModulo: React.FC = () => (
@@ -45,6 +47,13 @@ const vistaDocumentos = (vista: 'COMPROBANTES' | 'NOTAS') => (
 const vistaMaestro = (vista: 'productos' | 'almacenes' | 'terceros') => (
   <Suspense fallback={<CargandoModulo />}>
     <MaestrosInventarioPage key={vista} vista={vista} />
+  </Suspense>
+);
+
+// Bloque 16: Cuentas por cobrar y por pagar comparten pantalla.
+const vistaCuentas = (tipo: 'cobrar' | 'pagar') => (
+  <Suspense fallback={<CargandoModulo />}>
+    <CuentasPage key={tipo} tipo={tipo} />
   </Suspense>
 );
 
@@ -85,11 +94,15 @@ export const App: React.FC = () => {
               <Route path="transferencias" element={diferido(TransferenciasPage)} />
               <Route path="captura-homologacion" element={diferido(CapturaHomologacionPage)} />
               {/* KARDEX */}
+              <Route path="cuentas-por-cobrar" element={vistaCuentas('cobrar')} />
+              <Route path="cuentas-por-pagar" element={vistaCuentas('pagar')} />
+
               <Route path="kardex" element={diferido(KardexPage)} />
               <Route path="incidencias" element={diferido(IncidenciasPage)} />
               {/* CIERRE Y REPORTES */}
               <Route path="cierres" element={diferido(CierresPage)} />
               <Route path="formato-13-1" element={diferido(Formato131Page)} />
+              <Route path="registro-ventas-compras" element={diferido(RegistroComercialPage)} />
               {/* SEGURIDAD */}
               <Route path="auditoria" element={diferido(AuditoriaPage)} />
               {/* Rutas anteriores (enlaces guardados) */}

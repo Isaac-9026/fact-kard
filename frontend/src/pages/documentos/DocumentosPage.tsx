@@ -58,6 +58,10 @@ import type {
   Tercero,
 } from '../../api/inventario'
 import { useAuth } from '../../context/useAuth'
+import { obtenerSeries, type SerieComprobante } from '../../api/finanzas'
+import { CondicionPagoCampos } from '../../components/finanzas/CondicionPagoCampos'
+import { PagosDocumento } from '../../components/finanzas/PagosDocumento'
+import { CONDICION_INICIAL, errorCondicionPago, numeroComprobante, type CondicionPagoValor } from '../../utils/finanzas'
 import { fechaCalendarioLocal } from '../../utils/date'
 import { PageHeader } from '../../components/ui/page-header'
 import { Button } from '../../components/ui/button'
@@ -131,7 +135,8 @@ interface ErrorModal {
 }
 
 export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROBANTES' }) => {
-  const { empresaActiva } = useAuth()
+  const { empresaActiva, usuario } = useAuth()
+  const esAdmin = Boolean(usuario?.es_admin_global || empresaActiva?.rol === 'ADMIN')
   const configVista = CONFIG_VISTAS[vista]
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -194,6 +199,10 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   const [formFechaEmision, setFormFechaEmision] = useState(fechaCalendarioLocal)
   const [formMoneda, setFormMoneda] = useState<'PEN' | 'USD'>('PEN')
   const [formDocOrigen, setFormDocOrigen] = useState<number | ''>('')
+  // Bloque 16: condición de pago y serie con correlativo automático (solo ventas).
+  const [formCondicion, setFormCondicion] = useState<CondicionPagoValor>(CONDICION_INICIAL)
+  const [seriesDisponibles, setSeriesDisponibles] = useState<SerieComprobante[]>([])
+  const [formSerieId, setFormSerieId] = useState<number | ''>('')
   // QA-001: líneas del comprobante de origen de la nota (para elegir `detalle_origen`).
   const [origenDetalles, setOrigenDetalles] = useState<LineaOrigen[]>([])
   const [tcResuelto, setTcResuelto] = useState<TipoCambioResolverResult | null>(null)
@@ -212,6 +221,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   // que produjeron el error (al corregir un campo desaparece; al reenviar se recalcula).
   const firmaNuevo = JSON.stringify([
     formClase, formPeriodo, formTipoComprobante, formTercero, formSerie, formNumero, formFechaEmision, formMoneda, formDocOrigen,
+    formSerieId, formCondicion,
     lineas.map((l) => [l.productoId, l.productoUnidadId, l.almacenId, l.tipoOperacionId, l.cantidadOriginal, l.precioUnitario, l.igv, l.afectacionIgv, l.esBonificacion, l.detalleOrigenId]),
   ])
   const firmaRevision = JSON.stringify([modalRevisionDoc?.id, revEstadoSeleccionado, revMotivo])
@@ -329,6 +339,25 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
 
   const esNota = Boolean(tipoCompSeleccionado?.es_nota)
 
+  // Bloque 16: series activas del tipo elegido (solo ventas). El número lo asigna el backend.
+  useEffect(() => {
+    if (!modalNuevoAbierto || formClase !== 'VENTA' || !formTipoComprobante) {
+      diferirCarga(() => { setSeriesDisponibles([]); setFormSerieId('') })
+      return
+    }
+    let vigente = true
+    obtenerSeries({ tipo_comprobante: Number(formTipoComprobante), activo: true })
+      .then((series) => {
+        if (!vigente) return
+        setSeriesDisponibles(series)
+        setFormSerieId(series[0]?.id ?? '')
+      })
+      .catch(() => { if (vigente) { setSeriesDisponibles([]); setFormSerieId('') } })
+    return () => { vigente = false }
+  }, [modalNuevoAbierto, formClase, formTipoComprobante])
+
+  const serieSeleccionada = seriesDisponibles.find((x) => x.id === formSerieId)
+
   const rucEmisorDisplay = useMemo(() => {
     if (formClase === 'VENTA') {
       return empresaActiva?.ruc || 'RUC Empresa Activa'
@@ -424,6 +453,20 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
         if (l.tempId !== tempId) return l
         const actualizada = { ...l, [campo]: valor }
 
+        // Bloque 16: el producto sugiere su afectación de IGV y, en ventas, su precio de venta
+        // (solo si la línea aún no tiene precio). Es una sugerencia editable; no toca el costo.
+        if (campo === 'productoId' && valor && !actualizada.esBonificacion) {
+          const prod = productos.find((p) => p.id === Number(valor))
+          if (prod?.afectacion_igv_defecto && prod.afectacion_igv_defecto !== 'GRATUITO') {
+            actualizada.afectacionIgv = prod.afectacion_igv_defecto
+          }
+          if (formClase === 'VENTA' && prod?.precio_venta_sugerido && !esMayorQueCero(actualizada.precioUnitario)) {
+            actualizada.precioUnitario = prod.precio_venta_sugerido
+          }
+          const sugerido = sugerirIgvLinea(actualizada, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
+          if (sugerido !== null) actualizada.igv = sugerido
+        }
+
         if (campo === 'precioUnitario' || campo === 'cantidadOriginal' || campo === 'afectacionIgv' || campo === 'tipoOperacionId') {
           if (!actualizada.esBonificacion) {
             const sugerido = sugerirIgvLinea(actualizada, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
@@ -503,11 +546,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
       falta('Debe seleccionar el tipo de comprobante.')
       return
     }
-    if (!formSerie.trim()) {
+    if (!serieSeleccionada && !formSerie.trim()) {
       falta('Debe ingresar la serie del comprobante.')
       return
     }
-    if (!formNumero.trim()) {
+    if (!serieSeleccionada && !formNumero.trim()) {
       falta('Debe ingresar el número del comprobante.')
       return
     }
@@ -561,12 +604,26 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
       }
     }
 
+    const condicion = esNota ? CONDICION_INICIAL : formCondicion
+    const errorCondicion = errorCondicionPago({
+      condicion: condicion.condicion, fechaVencimiento: condicion.fechaVencimiento, fechaEmision: formFechaEmision,
+      cuotas: condicion.cuotas, total: totalesCalculados.total,
+    })
+    if (errorCondicion) {
+      falta(errorCondicion)
+      return
+    }
+
     const payload: CrearDocumentoPayload = {
       clase: formClase,
       periodo: Number(formPeriodo),
       tipo_comprobante: Number(formTipoComprobante),
-      serie: formSerie.trim(),
-      numero: formNumero.trim(),
+      ...(serieSeleccionada
+        ? { serie_comprobante: serieSeleccionada.id }
+        : { serie: formSerie.trim(), numero: formNumero.trim() }),
+      condicion_pago: condicion.condicion,
+      fecha_vencimiento: condicion.condicion === 'CREDITO' ? condicion.fechaVencimiento : null,
+      cuotas: condicion.condicion === 'CREDITO' && condicion.cuotas.length > 0 ? condicion.cuotas : undefined,
       fecha_emision: formFechaEmision,
       moneda_codigo: formMoneda,
       tercero: formTercero ? Number(formTercero) : null,
@@ -590,10 +647,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
     setGuardandoDoc(true)
     try {
       const nuevoDoc = await crearDocumento(payload)
-      setExitoGlobal(`Comprobante ${nuevoDoc.serie_normalizada}-${nuevoDoc.numero_normalizado} registrado exitosamente.`)
+      setExitoGlobal(`Comprobante ${numeroComprobante(nuevoDoc)} registrado exitosamente.`)
       setModalNuevoAbierto(false)
       setFormSerie('')
       setFormNumero('')
+      setFormCondicion(CONDICION_INICIAL)
       setLineas([])
       await cargarDocumentos()
     } catch (err: unknown) {
@@ -621,7 +679,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   const handleConfirmar = async (doc: Documento) => {
     if (
       !window.confirm(
-        `¿Confirmar el comprobante ${doc.serie_normalizada}-${doc.numero_normalizado}? Impactará stock en Kardex y no podrá volver a borrador.`
+        `¿Confirmar el comprobante ${numeroComprobante(doc)}? Impactará stock en Kardex y no podrá volver a borrador.`
       )
     ) {
       return
@@ -629,7 +687,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
     setErrorGlobal(null)
     try {
       await confirmarDocumento(doc.id)
-      setExitoGlobal(`Documento ${doc.serie_normalizada}-${doc.numero_normalizado} confirmado exitosamente en Kardex.`)
+      setExitoGlobal(`Documento ${numeroComprobante(doc)} confirmado exitosamente en Kardex.`)
       await cargarDocumentos()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
@@ -646,7 +704,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
     setErrorModal(null)
     try {
       await anularDocumento(modalAnulacionDoc.id, anulacionMotivo.trim())
-      setExitoGlobal(`Documento ${modalAnulacionDoc.serie_normalizada}-${modalAnulacionDoc.numero_normalizado} anulado con extorno.`)
+      setExitoGlobal(`Documento ${numeroComprobante(modalAnulacionDoc)} anulado con extorno.`)
       setModalAnulacionDoc(null)
       setAnulacionMotivo('')
       await cargarDocumentos()
@@ -962,7 +1020,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                       <TableCell>
                         <div className="flex items-center gap-1.5 flex-wrap font-mono tabular-nums">
                           <span className="font-bold text-slate-900">
-                            {doc.tipo_comprobante_codigo || 'DOC'}: {doc.serie_normalizada}-{doc.numero_normalizado}
+                            {doc.tipo_comprobante_codigo || 'DOC'}: {numeroComprobante(doc)}
                           </span>
                           {doc.es_nota && <Badge variant="warning" size="sm">NOTA</Badge>}
                         </div>
@@ -1207,27 +1265,57 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                   <Input disabled value={rucEmisorDisplay} className="bg-slate-50 font-mono" />
                 </div>
 
-                <div className="space-y-1">
-                  <Label required>Serie</Label>
-                  <Input
-                    placeholder="F001"
-                    value={formSerie}
-                    onChange={(e) => setFormSerie(e.target.value)}
-                    required
-                    className="font-mono uppercase"
-                  />
-                </div>
+                {seriesDisponibles.length > 0 && (
+                  <div className="space-y-1">
+                    <Label required htmlFor="serie-comprobante-select">Serie</Label>
+                    <Select
+                      id="serie-comprobante-select"
+                      value={formSerieId}
+                      onChange={(e) => setFormSerieId(e.target.value ? Number(e.target.value) : '')}
+                    >
+                      {seriesDisponibles.map((x) => (
+                        <option key={x.id} value={x.id}>{x.serie} — {x.establecimiento_nombre}</option>
+                      ))}
+                      <option value="">Otra serie (número manual)</option>
+                    </Select>
+                  </div>
+                )}
 
-                <div className="space-y-1">
-                  <Label required>Número</Label>
-                  <Input
-                    placeholder="12345"
-                    value={formNumero}
-                    onChange={(e) => setFormNumero(e.target.value)}
-                    required
-                    className="font-mono tabular-nums"
-                  />
-                </div>
+                {serieSeleccionada ? (
+                  <div className="space-y-1">
+                    <Label>Número</Label>
+                    <Input
+                      disabled
+                      value={`Automático (siguiente ${serieSeleccionada.serie}-${serieSeleccionada.siguiente_numero})`}
+                      className="bg-slate-50 font-mono tabular-nums"
+                      data-testid="numero-automatico"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <Label required>{seriesDisponibles.length > 0 ? 'Serie manual' : 'Serie'}</Label>
+                      <Input
+                        placeholder="F001"
+                        value={formSerie}
+                        onChange={(e) => setFormSerie(e.target.value)}
+                        required
+                        className="font-mono uppercase"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label required>Número</Label>
+                      <Input
+                        placeholder="12345"
+                        value={formNumero}
+                        onChange={(e) => setFormNumero(e.target.value)}
+                        required
+                        className="font-mono tabular-nums"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="space-y-1">
                   <Label required>Fecha de Emisión</Label>
@@ -1277,7 +1365,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                       <option value="">Seleccione Factura / Boleta de Origen...</option>
                       {documentosOrigenElegibles.map((orig) => (
                         <option key={orig.id} value={orig.id}>
-                          {orig.serie_normalizada}-{orig.numero_normalizado} ({orig.fecha_emision}) - {orig.tercero_razon_social} - {orig.moneda_codigo} {orig.total}
+                          {numeroComprobante(orig)} ({orig.fecha_emision}) - {orig.tercero_razon_social} - {orig.moneda_codigo} {orig.total}
                         </option>
                       ))}
                     </Select>
@@ -1489,6 +1577,21 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                 </table>
               </div>
             </div>
+
+            {/* Bloque 16: condición de pago */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-1">
+                3. Condición de Pago
+              </h4>
+              <CondicionPagoCampos
+                valor={formCondicion}
+                onChange={setFormCondicion}
+                fechaEmision={formFechaEmision}
+                total={totalesCalculados.total}
+                simboloMoneda={simboloMoneda}
+                esNota={esNota}
+              />
+            </div>
           </form>
         </Modal>
       )}
@@ -1500,7 +1603,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
           onClose={() => setModalDetalleDocumento(null)}
           maxWidth="4xl"
           icon={<Eye className="h-5 w-5" />}
-          title={`Detalle de Comprobante: ${modalDetalleDocumento.serie_normalizada}-${modalDetalleDocumento.numero_normalizado}`}
+          title={`Detalle de Comprobante: ${numeroComprobante(modalDetalleDocumento)}`}
           description={`Clase: ${modalDetalleDocumento.clase} • Estado: ${modalDetalleDocumento.estado} • Revisión: ${modalDetalleDocumento.estado_revision}`}
           footer={
             <Button variant="secondary" onClick={() => setModalDetalleDocumento(null)}>
@@ -1574,6 +1677,15 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                 </TableBody>
               </Table>
             </div>
+
+            <PagosDocumento
+              documento={modalDetalleDocumento}
+              esAdmin={esAdmin}
+              onActualizado={async () => {
+                setModalDetalleDocumento(await obtenerDocumento(modalDetalleDocumento.id))
+                await cargarDocumentos()
+              }}
+            />
           </div>
         </Modal>
       )}
@@ -1583,7 +1695,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
         <Modal
           isOpen={Boolean(modalRevisionDoc)}
           onClose={() => setModalRevisionDoc(null)}
-          title={`Mesa de Revisión: ${modalRevisionDoc.serie_normalizada}-${modalRevisionDoc.numero_normalizado}`}
+          title={`Mesa de Revisión: ${numeroComprobante(modalRevisionDoc)}`}
           description="Dictamen formal previo a la confirmación de inventario en Kardex."
           icon={<CheckCheck className="h-5 w-5 text-indigo-600" />}
           footer={
@@ -1630,7 +1742,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
         <Modal
           isOpen={Boolean(modalAnulacionDoc)}
           onClose={() => setModalAnulacionDoc(null)}
-          title={`Anular Comprobante: ${modalAnulacionDoc.serie_normalizada}-${modalAnulacionDoc.numero_normalizado}`}
+          title={`Anular Comprobante: ${numeroComprobante(modalAnulacionDoc)}`}
           description="Esta acción anulará el comprobante y generará un movimiento de extorno en Kardex si ya estaba confirmado."
           icon={<Ban className="h-5 w-5 text-rose-600" />}
           footer={

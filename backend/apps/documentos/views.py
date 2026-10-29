@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from django.db.models import Q, Count
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
@@ -153,6 +156,9 @@ class DocumentoDetailView(generics.RetrieveDestroyAPIView):
     def perform_destroy(self, instance):
         if instance.estado != 'BORRADOR':
             raise ValidationError({'detail': 'Solo se pueden eliminar documentos en estado BORRADOR.'})
+        if instance.serie_comprobante_id:
+            # Bloque 16: el número ya se asignó de la serie; eliminarlo dejaría un hueco.
+            raise ValidationError({'detail': 'El comprobante tiene número asignado por la serie: anúlelo en lugar de eliminarlo.'})
         instance.delete()
 
 
@@ -338,3 +344,182 @@ class DocumentoCapturaGenerarBorradorView(APIView):
             almacen_id=serializer.validated_data.get('almacen_id'),
         )
         return Response(res, status=status.HTTP_201_CREATED)
+
+
+# ==== Bloque 16: series, condición de pago, pagos y cuentas por cobrar/pagar =================
+
+from apps.auditoria.services import registrar_auditoria  # noqa: E402
+from apps.documentos import finanzas  # noqa: E402
+from apps.documentos.models import PagoDocumento, SerieComprobante  # noqa: E402
+from apps.documentos.serializers import (  # noqa: E402
+    CondicionPagoSerializer, MotivoSerializer, PagoDocumentoSerializer, PagoEntradaSerializer,
+    SerieComprobanteSerializer,
+)
+
+
+class SoloLecturaOAdmin:
+    """Lectura para cualquier usuario de la empresa; escritura solo ADMIN."""
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [TieneEmpresaActiva()]
+        return [TieneEmpresaActiva(), EsAdminEmpresa()]
+
+
+def _serie_auditoria(serie):
+    return {'serie': serie.serie, 'tipo_comprobante': serie.tipo_comprobante.codigo_sunat,
+            'establecimiento': serie.establecimiento.codigo_sunat, 'ultimo_correlativo': serie.ultimo_correlativo,
+            'activo': serie.activo}
+
+
+class SerieComprobanteListCreateView(SoloLecturaOAdmin, generics.ListCreateAPIView):
+    serializer_class = SerieComprobanteSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = SerieComprobante.objects.filter(empresa_id=self.request.empresa_id).select_related(
+            'establecimiento', 'tipo_comprobante')
+        tipo = entero_param(self.request.query_params, 'tipo_comprobante')
+        if tipo:
+            qs = qs.filter(tipo_comprobante_id=tipo)
+        if self.request.query_params.get('activo') in ('1', 'true', 'True'):
+            qs = qs.filter(activo=True)
+        return qs.order_by('tipo_comprobante__codigo_sunat', 'serie')
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'empresa_id': getattr(self.request, 'empresa_id', None)}
+
+    def perform_create(self, serializer):
+        serie = serializer.save(empresa_id=self.request.empresa_id)
+        registrar_auditoria(empresa_id=self.request.empresa_id, usuario_id=self.request.user.id, accion='CREAR',
+                            entidad='SERIE_COMPROBANTE', registro_id=serie.id, valor_nuevo=_serie_auditoria(serie),
+                            motivo='Creación de serie de comprobantes')
+
+
+class SerieComprobanteDetailView(SoloLecturaOAdmin, generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = SerieComprobanteSerializer
+    http_method_names = ['get', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        return SerieComprobante.objects.filter(empresa_id=self.request.empresa_id).select_related(
+            'establecimiento', 'tipo_comprobante')
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'empresa_id': getattr(self.request, 'empresa_id', None)}
+
+    def perform_update(self, serializer):
+        antes = _serie_auditoria(serializer.instance)
+        serie = serializer.save(actualizado_en=timezone.now())
+        registrar_auditoria(empresa_id=self.request.empresa_id, usuario_id=self.request.user.id, accion='ACTUALIZAR',
+                            entidad='SERIE_COMPROBANTE', registro_id=serie.id, valor_anterior=antes,
+                            valor_nuevo=_serie_auditoria(serie), motivo='Modificación de serie de comprobantes')
+
+    def perform_destroy(self, instance):
+        if instance.documentos.exists() or instance.ultimo_correlativo:
+            raise ValidationError({'detail': 'La serie ya emitió números: desactívela en lugar de eliminarla.'})
+        registrar_auditoria(empresa_id=self.request.empresa_id, usuario_id=self.request.user.id, accion='ELIMINAR',
+                            entidad='SERIE_COMPROBANTE', registro_id=instance.id,
+                            valor_anterior=_serie_auditoria(instance), motivo='Eliminación de serie sin uso')
+        instance.delete()
+
+
+class DocumentoCondicionPagoView(APIView):
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
+
+    def put(self, request, pk):
+        datos = CondicionPagoSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        doc = finanzas.cambiar_condicion_pago(
+            documento_id=pk, empresa_id=request.empresa_id, usuario_id=request.user.id,
+            condicion=v['condicion_pago'], fecha_vencimiento=v.get('fecha_vencimiento'),
+            cuotas=[dict(c) for c in v.get('cuotas') or []], motivo=v.get('motivo'),
+        )
+        return Response(DocumentoDetailSerializer(doc).data)
+
+
+class PagoDocumentoListCreateView(SoloLecturaOAdmin, APIView):
+    def get(self, request):
+        qs = PagoDocumento.objects.filter(empresa_id=request.empresa_id).select_related(
+            'metodo_pago', 'registrado_por', 'anulado_por')
+        documento = entero_param(request.query_params, 'documento')
+        if documento:
+            qs = qs.filter(documento_id=documento)
+        return Response(PagoDocumentoSerializer(qs.order_by('-fecha', '-id')[:500], many=True).data)
+
+    def post(self, request):
+        datos = PagoEntradaSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        pago = finanzas.registrar_pago(
+            empresa_id=request.empresa_id, usuario_id=request.user.id, documento_id=v['documento'],
+            fecha=v['fecha'], monto=v['monto'], metodo_pago=v['metodo_pago'], referencia=v.get('referencia'),
+            moneda=v.get('moneda_codigo') or None,
+        )
+        return Response(PagoDocumentoSerializer(pago).data, status=status.HTTP_201_CREATED)
+
+
+class PagoDocumentoAnularView(APIView):
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
+
+    def post(self, request, pk):
+        datos = MotivoSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        pago = finanzas.anular_pago(empresa_id=request.empresa_id, usuario_id=request.user.id, pago_id=pk,
+                                    motivo=datos.validated_data['motivo'])
+        return Response(PagoDocumentoSerializer(pago).data)
+
+
+ESTADOS_CUENTA = ('PENDIENTE', 'PARCIAL', 'PAGADO', 'VENCIDO', 'ABIERTOS')
+
+
+def fila_cuenta(d):
+    return {
+        'id': d.id, 'clase': d.clase, 'tercero': d.tercero_id,
+        'tercero_razon_social': d.tercero.razon_social if d.tercero else None,
+        'tercero_numero_documento': d.tercero.numero_documento if d.tercero else None,
+        'tipo_comprobante_codigo': d.tipo_comprobante.codigo_sunat,
+        'serie': d.serie_normalizada, 'numero': d.numero, 'numero_normalizado': d.numero_normalizado,
+        'fecha_emision': d.fecha_emision, 'fecha_vencimiento': d.fecha_vencimiento,
+        'condicion_pago': d.condicion_pago, 'moneda_codigo': d.moneda_codigo_id, 'periodo': d.periodo_id,
+        **finanzas.valores_financieros_texto(d), 'estado_financiero': d.estado_financiero,
+        'estado': d.estado,
+    }
+
+
+class CuentasView(APIView):
+    """Cuentas por cobrar (VENTA) o por pagar (COMPRA), calculadas en cada consulta."""
+    permission_classes = [TieneEmpresaActiva]
+    clase = None
+
+    def get(self, request):
+        params = request.query_params
+        estado = (params.get('estado') or '').upper() or None
+        if estado and estado not in ESTADOS_CUENTA:
+            raise ValidationError({'estado': f'Estado no válido. Use {", ".join(ESTADOS_CUENTA)}.'})
+        condicion = (params.get('condicion') or 'CREDITO').upper()
+        if condicion not in ('CREDITO', 'CONTADO', 'TODAS'):
+            raise ValidationError({'condicion': 'Use CREDITO, CONTADO o TODAS.'})
+        tercero = entero_param(params, 'tercero')
+        periodo = entero_param(params, 'periodo')
+        qs = finanzas.cuentas(empresa_id=request.empresa_id, clase=self.clase, tercero_id=tercero, periodo_id=periodo,
+                              estado=estado, condicion=condicion)
+        filas = [fila_cuenta(d) for d in qs[:2000]]
+        totales = {}
+        for f in filas:
+            t = totales.setdefault(f['moneda_codigo'], {'total_ajustado': finanzas.CERO, 'pagado': finanzas.CERO,
+                                                       'saldo_pendiente': finanzas.CERO, 'monto_vencido': finanzas.CERO})
+            for k in t:
+                t[k] += Decimal(f[k])
+        return Response({
+            'clase': self.clase, 'fecha_corte': finanzas.hoy(), 'cantidad': len(filas), 'resultados': filas,
+            'totales': {m: {k: finanzas.texto(v) for k, v in t.items()} for m, t in totales.items()},
+        })
+
+
+class CuentasPorCobrarView(CuentasView):
+    clase = 'VENTA'
+
+
+class CuentasPorPagarView(CuentasView):
+    clase = 'COMPRA'

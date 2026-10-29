@@ -10,6 +10,13 @@ from apps.documentos.views import (
     DocumentoCapturaDetailView,
     CapturaCampoCorregirView,
     DocumentoCapturaGenerarBorradorView,
+    SerieComprobanteListCreateView,
+    SerieComprobanteDetailView,
+    DocumentoCondicionPagoView,
+    PagoDocumentoListCreateView,
+    PagoDocumentoAnularView,
+    CuentasPorCobrarView,
+    CuentasPorPagarView,
 )
 
 urlpatterns = [
@@ -19,6 +26,14 @@ urlpatterns = [
     path('capturas/<int:pk>/', DocumentoCapturaDetailView.as_view(), name='documento-captura-detail'),
     path('capturas/<int:pk>/corregir-campo/', CapturaCampoCorregirView.as_view(), name='captura-campo-corregir'),
     path('capturas/<int:pk>/generar-borrador/', DocumentoCapturaGenerarBorradorView.as_view(), name='documento-captura-generar-borrador'),
+    # Bloque 16
+    path('series/', SerieComprobanteListCreateView.as_view(), name='serie-comprobante-list-create'),
+    path('series/<int:pk>/', SerieComprobanteDetailView.as_view(), name='serie-comprobante-detail'),
+    path('pagos/', PagoDocumentoListCreateView.as_view(), name='pago-documento-list-create'),
+    path('pagos/<int:pk>/anular/', PagoDocumentoAnularView.as_view(), name='pago-documento-anular'),
+    path('cuentas-por-cobrar/', CuentasPorCobrarView.as_view(), name='cuentas-por-cobrar'),
+    path('cuentas-por-pagar/', CuentasPorPagarView.as_view(), name='cuentas-por-pagar'),
+    path('<int:pk>/condicion-pago/', DocumentoCondicionPagoView.as_view(), name='documento-condicion-pago'),
     path('<int:pk>/', DocumentoDetailView.as_view(), name='documento-detail'),
     path('<int:pk>/revisar/', DocumentoRevisarView.as_view(), name='documento-revisar'),
     path('<int:pk>/confirmar/', DocumentoConfirmarView.as_view(), name='documento-confirmar'),

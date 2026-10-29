@@ -59,6 +59,14 @@ CREATE TABLE unidad_medida (
     codigo VARCHAR(10) PRIMARY KEY,
     descripcion VARCHAR(100) NOT NULL
 );
+
+-- Bloque 16: catálogo extensible de métodos de pago/cobro.
+-- Carga inicial: EFECTIVO, TRANSFERENCIA, TARJETA, YAPE, PLIN, OTRO.
+CREATE TABLE metodo_pago (
+    codigo VARCHAR(20) PRIMARY KEY,
+    descripcion VARCHAR(100) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
 ```
 
 ---
@@ -96,6 +104,17 @@ CREATE TABLE usuario_empresa (
     UNIQUE (usuario_id, empresa_id),
     CHECK (rol IN ('ADMIN','USUARIO'))
 );
+
+-- Regularización (Bloque 6, ya existente en el modelo): tokens invalidados por logout.
+CREATE TABLE token_revocado (
+    id BIGSERIAL PRIMARY KEY,
+    jti VARCHAR(64) NOT NULL UNIQUE,
+    usuario_id BIGINT NOT NULL REFERENCES usuario(id),
+    revocado_en TIMESTAMP NOT NULL,
+    expira_en TIMESTAMP NOT NULL
+);
+
+CREATE INDEX ix_token_revocado_expira ON token_revocado (expira_en);
 ```
 
 ---
@@ -129,8 +148,10 @@ CREATE TABLE config_empresa (
     decimales_calculo SMALLINT NOT NULL DEFAULT 6,
     regla_redondeo VARCHAR(30) NOT NULL DEFAULT 'ROUND_HALF_UP',
     metodo_valuacion VARCHAR(20) NOT NULL DEFAULT 'CPP',
+    tasa_igv_pct NUMERIC(5,2) NOT NULL DEFAULT 18.00,  -- regularización (Bloque 4)
     establecimiento_principal_id BIGINT REFERENCES establecimiento(id),
-    CHECK (decimales_calculo BETWEEN 2 AND 8)
+    CHECK (decimales_calculo BETWEEN 2 AND 8),
+    CHECK (tasa_igv_pct > 0 AND tasa_igv_pct <= 100)
 );
 
 CREATE TABLE tercero (
@@ -149,6 +170,9 @@ CREATE TABLE tercero (
     creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (empresa_id, tipo_documento, numero_documento),
+    -- Bloque 16: solo códigos del Catálogo 06 SUNAT (0, 1=DNI, 4=CE, 6=RUC, 7=Pasaporte, A).
+    -- DNI = 8 dígitos; RUC = 11 dígitos con dígito verificador (validado en dominio).
+    CHECK (tipo_documento IN ('0','1','4','6','7','A')),
     CHECK (es_cliente OR es_proveedor),
     CHECK (estado IN ('ACTIVO','INACTIVO'))
 );
@@ -160,8 +184,12 @@ CREATE TABLE producto (
     descripcion VARCHAR(250) NOT NULL,
     tipo_existencia_codigo VARCHAR(10) NOT NULL REFERENCES tipo_existencia(codigo),
     estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVO',
+    -- Bloque 16: datos comerciales (solo sugerencias; no intervienen en costo, CPP ni Kardex).
+    precio_venta_sugerido NUMERIC(20,8),
+    afectacion_igv_defecto VARCHAR(12),  -- GRAVADO / EXONERADO / INAFECTO / EXPORTACION / GRATUITO
     UNIQUE (empresa_id, codigo_interno),
-    CHECK (estado IN ('ACTIVO','INACTIVO'))
+    CHECK (estado IN ('ACTIVO','INACTIVO')),
+    CHECK (precio_venta_sugerido IS NULL OR precio_venta_sugerido >= 0)
 );
 
 CREATE TABLE producto_unidad (
@@ -232,6 +260,17 @@ CREATE TABLE config_igv_periodo (
     CHECK (metodo IN ('TOTAL','NULO','PRORRATA')),
     CHECK (porcentaje_recuperable BETWEEN 0 AND 100)
 );
+
+-- Regularización (Bloque 5, ya existente en el modelo): tasa del IGV vigente desde una fecha.
+CREATE TABLE tasa_igv_vigencia (
+    id BIGSERIAL PRIMARY KEY,
+    empresa_id BIGINT NOT NULL REFERENCES empresa(id),
+    vigente_desde DATE NOT NULL,
+    tasa_pct NUMERIC(5,2) NOT NULL,
+    creado_en TIMESTAMP NOT NULL,
+    UNIQUE (empresa_id, vigente_desde),
+    CHECK (tasa_pct > 0 AND tasa_pct <= 100)
+);
 ```
 
 ---
@@ -239,6 +278,22 @@ CREATE TABLE config_igv_periodo (
 ## 5. Documentos comerciales
 
 ```sql
+-- Bloque 16: series de VENTA con correlativo automático (ver reglas en 5.1).
+CREATE TABLE serie_comprobante (
+    id BIGSERIAL PRIMARY KEY,
+    empresa_id BIGINT NOT NULL REFERENCES empresa(id),
+    establecimiento_id BIGINT NOT NULL REFERENCES establecimiento(id),
+    tipo_comprobante_id BIGINT NOT NULL REFERENCES tipo_comprobante(id),
+    serie VARCHAR(4) NOT NULL,
+    ultimo_correlativo BIGINT NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (empresa_id, tipo_comprobante_id, serie),
+    CHECK (ultimo_correlativo BETWEEN 0 AND 99999999),
+    CHECK (serie ~ '^[A-Z0-9]{4}$')
+);
+
 CREATE TABLE documento (
     id BIGSERIAL PRIMARY KEY,
     empresa_id BIGINT NOT NULL REFERENCES empresa(id),
@@ -267,6 +322,11 @@ CREATE TABLE documento (
 
     documento_origen_id BIGINT REFERENCES documento(id),
 
+    -- Bloque 16: condición de pago y serie con correlativo automático (solo ventas).
+    condicion_pago VARCHAR(10) NOT NULL DEFAULT 'CONTADO',
+    fecha_vencimiento DATE,
+    serie_comprobante_id BIGINT REFERENCES serie_comprobante(id),
+
     origen_captura VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
     estado VARCHAR(20) NOT NULL DEFAULT 'BORRADOR',
     estado_revision VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
@@ -288,7 +348,11 @@ CREATE TABLE documento (
     CHECK (clase IN ('COMPRA','VENTA')),
     CHECK (origen_captura IN ('MANUAL','XML','PDF','IMAGEN','ESCANER')),
     CHECK (estado IN ('BORRADOR','CONFIRMADO','ANULADO')),
-    CHECK (estado_revision IN ('PENDIENTE','EN_REVISION','REVISADO','OBSERVADO'))
+    CHECK (estado_revision IN ('PENDIENTE','EN_REVISION','REVISADO','OBSERVADO')),
+    CHECK (
+        (condicion_pago = 'CONTADO' AND fecha_vencimiento IS NULL)
+        OR (condicion_pago = 'CREDITO' AND fecha_vencimiento IS NOT NULL)
+    )
 );
 
 CREATE TABLE documento_detalle (
@@ -315,6 +379,9 @@ CREATE TABLE documento_detalle (
     costo_unitario_pen NUMERIC(20,8),
 
     es_bonificacion BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Regularización (Bloque 3): afectación del IGV y código del Catálogo 07.
+    afectacion_igv VARCHAR(12),       -- GRAVADO / EXONERADO / INAFECTO / EXPORTACION / GRATUITO
+    codigo_afectacion_igv VARCHAR(2),
     detalle_origen_id BIGINT REFERENCES documento_detalle(id),
 
     UNIQUE (documento_id, linea),
@@ -325,6 +392,58 @@ CREATE TABLE documento_detalle (
         OR porcentaje_credito_fiscal_aplicado BETWEEN 0 AND 100
     )
 );
+```
+
+---
+
+## 5.1 Series, condición de pago y pagos (Bloque 16)
+
+Reglas:
+
+- El correlativo de VENTA lo asigna solo el backend: `serie_comprobante` se bloquea con
+  `SELECT ... FOR UPDATE` en la transacción que crea el comprobante y `ultimo_correlativo`
+  aumenta en 1 (número con 8 dígitos). Las compras conservan la serie y número recibidos.
+- `suma(documento_cuota.monto) = documento.total` (8 decimales, ROUND_HALF_UP).
+- Pagos solo sobre documentos CONFIRMADOS que no son notas, en la moneda del documento y sin
+  superar el saldo. No se borran: se anulan (estado ANULADO + motivo).
+- Saldo pendiente = total + notas de débito − notas de crédito (confirmadas) − pagos VIGENTES.
+  Es un cálculo: no existe tabla de saldos ni de cuentas por cobrar/pagar.
+
+```sql
+-- serie_comprobante: definida al inicio de la sección 5 (documento la referencia).
+
+CREATE TABLE documento_cuota (
+    id BIGSERIAL PRIMARY KEY,
+    empresa_id BIGINT NOT NULL REFERENCES empresa(id),
+    documento_id BIGINT NOT NULL REFERENCES documento(id),
+    numero SMALLINT NOT NULL,
+    fecha_vencimiento DATE NOT NULL,
+    monto NUMERIC(20,8) NOT NULL,
+    UNIQUE (documento_id, numero),
+    CHECK (numero >= 1),
+    CHECK (monto > 0)
+);
+
+CREATE TABLE pago_documento (
+    id BIGSERIAL PRIMARY KEY,
+    empresa_id BIGINT NOT NULL REFERENCES empresa(id),
+    documento_id BIGINT NOT NULL REFERENCES documento(id),
+    fecha DATE NOT NULL,
+    monto NUMERIC(20,8) NOT NULL,
+    moneda_codigo CHAR(3) NOT NULL REFERENCES moneda(codigo),
+    metodo_pago_codigo VARCHAR(20) NOT NULL REFERENCES metodo_pago(codigo),
+    referencia VARCHAR(100),
+    estado VARCHAR(10) NOT NULL DEFAULT 'VIGENTE',
+    motivo_anulacion TEXT,
+    registrado_por BIGINT REFERENCES usuario(id),
+    registrado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    anulado_por BIGINT REFERENCES usuario(id),
+    anulado_en TIMESTAMP,
+    CHECK (monto > 0),
+    CHECK (estado IN ('VIGENTE','ANULADO'))
+);
+
+CREATE INDEX ix_pago_documento_emp_doc ON pago_documento (empresa_id, documento_id);
 ```
 
 ---

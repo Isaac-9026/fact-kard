@@ -2,7 +2,9 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.documentos.afectacion_igv import AFECTACIONES
-from apps.documentos.models import Documento, DocumentoDetalle, DocumentoCaptura, CapturaCampo
+from apps.documentos.models import (
+    CapturaCampo, Documento, DocumentoCaptura, DocumentoCuota, DocumentoDetalle, PagoDocumento, SerieComprobante,
+)
 from apps.documentos.services import crear_documento
 
 
@@ -133,6 +135,9 @@ class DocumentoListSerializer(serializers.ModelSerializer):
             'revisado_en',
             'confirmado_en',
             'detalles_count',
+            'condicion_pago',
+            'fecha_vencimiento',
+            'serie_comprobante',
         ]
 
 
@@ -151,6 +156,21 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
     confirmado_por_username = serializers.ReadOnlyField(source='confirmado_por.username')
     creado_por_username = serializers.ReadOnlyField(source='creado_por.username')
     documento_origen_comprobante = serializers.SerializerMethodField()
+    # Bloque 16: condición de pago, cuotas, pagos y saldo calculado.
+    cuotas = serializers.SerializerMethodField()
+    pagos = serializers.SerializerMethodField()
+    finanzas = serializers.SerializerMethodField()
+
+    def get_cuotas(self, obj):
+        return DocumentoCuotaSerializer(obj.cuotas.all(), many=True).data
+
+    def get_pagos(self, obj):
+        return PagoDocumentoSerializer(obj.pagos.select_related('metodo_pago', 'registrado_por', 'anulado_por'), many=True).data
+
+    def get_finanzas(self, obj):
+        from apps.documentos.finanzas import resumen_financiero, texto
+        datos = resumen_financiero(obj)
+        return {k: (texto(v) if isinstance(v, Decimal) else v) for k, v in datos.items()} if datos else None
 
     class Meta:
         model = Documento
@@ -196,6 +216,12 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
             'confirmado_por_username',
             'confirmado_en',
             'detalles',
+            'condicion_pago',
+            'fecha_vencimiento',
+            'serie_comprobante',
+            'cuotas',
+            'pagos',
+            'finanzas',
         ]
 
     def get_documento_origen_comprobante(self, obj):
@@ -234,10 +260,21 @@ class DocumentoDetalleEntradaSerializer(serializers.Serializer):
     codigo_afectacion_igv = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=2)
 
 
+class CuotaEntradaSerializer(serializers.Serializer):
+    fecha_vencimiento = serializers.DateField()
+    monto = serializers.DecimalField(max_digits=20, decimal_places=8, min_value=Decimal('0.00000001'))
+
+
 class DocumentoCreateSerializer(serializers.ModelSerializer):
     ruc_emisor = serializers.CharField(max_length=11, required=False, allow_blank=True, allow_null=True)
-    serie = serializers.CharField(max_length=30, required=True)
-    numero = serializers.CharField(max_length=50, required=True)
+    # Bloque 16: con `serie_comprobante` (ventas) el número lo asigna el backend; si no, la serie
+    # y el número del comprobante son obligatorios (compras y ventas sin serie configurada).
+    serie = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    numero = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    serie_comprobante = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    condicion_pago = serializers.ChoiceField(choices=['CONTADO', 'CREDITO'], required=False, default='CONTADO')
+    fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
+    cuotas = CuotaEntradaSerializer(many=True, required=False, default=list)
     detalles = DocumentoDetalleEntradaSerializer(many=True, write_only=True, allow_empty=False)
 
     class Meta:
@@ -255,11 +292,20 @@ class DocumentoCreateSerializer(serializers.ModelSerializer):
             'moneda_codigo',
             'documento_origen',
             'origen_captura',
+            'serie_comprobante',
+            'condicion_pago',
+            'fecha_vencimiento',
+            'cuotas',
             'detalles',
         ]
         read_only_fields = ['id']
 
     def validate(self, attrs):
+        if not attrs.get('serie_comprobante'):
+            faltan = {c: 'Este campo es requerido.' for c in ('serie', 'numero') if not (attrs.get(c) or '').strip()}
+            if faltan:
+                raise serializers.ValidationError(faltan)
+        attrs['cuotas'] = [dict(c) for c in attrs.get('cuotas') or []]
         periodo = attrs.get('periodo')
         fecha_emision = attrs.get('fecha_emision')
         if periodo and fecha_emision:
@@ -404,3 +450,93 @@ class CapturaCampoCorregirSerializer(serializers.Serializer):
 
 class GenerarBorradorSerializer(serializers.Serializer):
     almacen_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+
+class DocumentoCuotaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentoCuota
+        fields = ['id', 'numero', 'fecha_vencimiento', 'monto']
+
+
+class PagoDocumentoSerializer(serializers.ModelSerializer):
+    metodo_pago_descripcion = serializers.ReadOnlyField(source='metodo_pago.descripcion')
+    registrado_por_username = serializers.ReadOnlyField(source='registrado_por.username')
+    anulado_por_username = serializers.ReadOnlyField(source='anulado_por.username')
+
+    class Meta:
+        model = PagoDocumento
+        fields = ['id', 'documento', 'fecha', 'monto', 'moneda_codigo', 'metodo_pago', 'metodo_pago_descripcion',
+                  'referencia', 'estado', 'motivo_anulacion', 'registrado_por_username', 'registrado_en',
+                  'anulado_por_username', 'anulado_en']
+        read_only_fields = fields
+
+
+class PagoEntradaSerializer(serializers.Serializer):
+    documento = serializers.IntegerField(min_value=1)
+    fecha = serializers.DateField()
+    monto = serializers.DecimalField(max_digits=20, decimal_places=8, min_value=Decimal('0.00000001'))
+    metodo_pago = serializers.CharField(max_length=20)
+    referencia = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+    moneda_codigo = serializers.CharField(max_length=3, required=False, allow_blank=True, default='')
+
+
+class MotivoSerializer(serializers.Serializer):
+    motivo = serializers.CharField(max_length=500)
+
+
+class CondicionPagoSerializer(serializers.Serializer):
+    condicion_pago = serializers.ChoiceField(choices=['CONTADO', 'CREDITO'])
+    fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
+    cuotas = CuotaEntradaSerializer(many=True, required=False, default=list)
+    motivo = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
+
+
+class SerieComprobanteSerializer(serializers.ModelSerializer):
+    establecimiento_codigo = serializers.ReadOnlyField(source='establecimiento.codigo_sunat')
+    establecimiento_nombre = serializers.ReadOnlyField(source='establecimiento.nombre')
+    tipo_comprobante_codigo = serializers.ReadOnlyField(source='tipo_comprobante.codigo_sunat')
+    tipo_comprobante_descripcion = serializers.ReadOnlyField(source='tipo_comprobante.descripcion')
+    siguiente_numero = serializers.SerializerMethodField()
+    en_uso = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SerieComprobante
+        fields = ['id', 'establecimiento', 'establecimiento_codigo', 'establecimiento_nombre', 'tipo_comprobante',
+                  'tipo_comprobante_codigo', 'tipo_comprobante_descripcion', 'serie', 'ultimo_correlativo',
+                  'siguiente_numero', 'activo', 'en_uso', 'creado_en', 'actualizado_en']
+        read_only_fields = ['id', 'creado_en', 'actualizado_en']
+
+    def get_siguiente_numero(self, obj):
+        from apps.documentos.finanzas import formato_correlativo
+        return formato_correlativo(obj.ultimo_correlativo + 1)
+
+    def get_en_uso(self, obj):
+        return obj.documentos.exists()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.context.get('empresa_id')
+        from apps.empresas.models import Establecimiento
+        self.fields['establecimiento'].queryset = Establecimiento.objects.filter(empresa_id=empresa_id)
+
+    def validate(self, attrs):
+        from apps.documentos.finanzas import MAX_CORRELATIVO, validar_formato_serie
+        actual = self.instance
+        tipo = attrs.get('tipo_comprobante', actual.tipo_comprobante if actual else None)
+        if actual is not None and actual.documentos.exists():
+            # Una serie con comprobantes no cambia de identidad ni retrocede su correlativo.
+            for campo in ('serie', 'tipo_comprobante', 'establecimiento', 'ultimo_correlativo'):
+                if campo in attrs and attrs[campo] != getattr(actual, campo):
+                    raise serializers.ValidationError({campo: 'La serie ya tiene comprobantes: solo puede activarse o desactivarse.'})
+        if 'serie' in attrs or actual is None:
+            attrs['serie'] = validar_formato_serie(attrs.get('serie', actual.serie if actual else ''), tipo)
+        correlativo = attrs.get('ultimo_correlativo', actual.ultimo_correlativo if actual else 0)
+        if correlativo < 0 or correlativo > MAX_CORRELATIVO:
+            raise serializers.ValidationError({'ultimo_correlativo': f'Debe estar entre 0 y {MAX_CORRELATIVO}.'})
+        empresa_id = self.context.get('empresa_id')
+        duplicada = SerieComprobante.objects.filter(empresa_id=empresa_id, tipo_comprobante=tipo, serie=attrs['serie'] if 'serie' in attrs else actual.serie)
+        if actual is not None:
+            duplicada = duplicada.exclude(pk=actual.pk)
+        if duplicada.exists():
+            raise serializers.ValidationError({'serie': 'Ya existe esa serie para ese tipo de comprobante en la empresa.'})
+        return attrs

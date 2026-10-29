@@ -82,6 +82,46 @@ export interface Documento {
   confirmado_en?: string | null;
   detalles_count?: number;
   detalles?: DocumentoDetalle[];
+  /** Bloque 16 */
+  condicion_pago?: CondicionPago;
+  fecha_vencimiento?: string | null;
+  serie_comprobante?: number | null;
+  cuotas?: Cuota[];
+  pagos?: Pago[];
+  finanzas?: ResumenFinanciero | null;
+}
+
+export type CondicionPago = 'CONTADO' | 'CREDITO';
+export type EstadoFinanciero = 'PENDIENTE' | 'PARCIAL' | 'PAGADO' | 'VENCIDO';
+
+export interface Cuota { id?: number; numero?: number; fecha_vencimiento: string; monto: string }
+
+export interface Pago {
+  id: number;
+  documento: number;
+  fecha: string;
+  monto: string;
+  moneda_codigo: string;
+  metodo_pago: string;
+  metodo_pago_descripcion?: string;
+  referencia: string | null;
+  estado: 'VIGENTE' | 'ANULADO';
+  motivo_anulacion: string | null;
+  registrado_por_username?: string | null;
+  registrado_en: string;
+  anulado_por_username?: string | null;
+  anulado_en?: string | null;
+}
+
+export interface ResumenFinanciero {
+  total: string;
+  total_notas_credito: string;
+  total_notas_debito: string;
+  total_ajustado: string;
+  pagado: string;
+  saldo_pendiente: string;
+  monto_vencido: string;
+  estado_financiero: EstadoFinanciero | null;
 }
 
 export interface CrearDocumentoDetallePayload {
@@ -105,8 +145,14 @@ export interface CrearDocumentoPayload {
   tercero?: number | null;
   ruc_emisor?: string;
   tipo_comprobante: number;
-  serie: string;
-  numero: string;
+  /** Sin serie_comprobante: serie y número del comprobante (compras, ventas sin serie configurada). */
+  serie?: string;
+  numero?: string;
+  /** Bloque 16: con serie_comprobante el número lo asigna el backend. */
+  serie_comprobante?: number | null;
+  condicion_pago?: CondicionPago;
+  fecha_vencimiento?: string | null;
+  cuotas?: { fecha_vencimiento: string; monto: string }[];
   fecha_emision: string;
   moneda_codigo: string;
   documento_origen?: number | null;

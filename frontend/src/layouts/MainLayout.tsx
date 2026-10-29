@@ -32,6 +32,10 @@ import {
   X,
   SlidersHorizontal,
   Database,
+  HandCoins,
+  Wallet,
+  BookText,
+  Banknote,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
@@ -76,6 +80,9 @@ const ICONOS: Record<IconoNav, LucideIcon> = {
   incidencias: AlertTriangle,
   cierres: Lock,
   formato131: FileCheck2,
+  registroComercial: BookText,
+  cuentasCobrar: HandCoins,
+  cuentasPagar: Wallet,
   auditoria: ShieldCheck,
 }
 
@@ -85,6 +92,7 @@ const ICONOS_SECCION: Record<string, LucideIcon> = {
   MAESTROS: Database,
   'INVENTARIO INICIAL': Layers,
   OPERACIONES: ArrowLeftRight,
+  FINANZAS: Banknote,
   KARDEX: BookOpenCheck,
   'CIERRE Y REPORTES': FileCheck2,
   SEGURIDAD: ShieldCheck,

@@ -15,7 +15,12 @@ import {
   X,
   Building2,
   Save,
+  History,
 } from 'lucide-react'
+import { HistorialTerceroModal } from '../../components/finanzas/HistorialTerceroModal'
+import { TIPOS_DOCUMENTO_IDENTIDAD, errorDocumentoIdentidad } from '../../utils/finanzas'
+import { AFECTACIONES_IGV } from '../../utils/afectacionIgv'
+import { formatearDecimal } from '../../utils/decimal'
 
 import {
   createAlmacen,
@@ -74,7 +79,19 @@ const PRODUCTO_INICIAL = {
   tipo_existencia_codigo: '',
   unidad_base_codigo: '',
   estado: 'ACTIVO' as EstadoMaestro,
+  // Bloque 16: sugerencias comerciales (no afectan costo, CPP ni Kardex).
+  precio_venta_sugerido: '',
+  afectacion_igv_defecto: '',
 }
+
+/** Campos comerciales del producto para la API ('' se envía como null). */
+const comercialProducto = (f: typeof PRODUCTO_INICIAL) => ({
+  precio_venta_sugerido: f.precio_venta_sugerido.trim() || null,
+  afectacion_igv_defecto: f.afectacion_igv_defecto || null,
+})
+
+const etiquetaTipoDocumento = (codigo: string) =>
+  TIPOS_DOCUMENTO_IDENTIDAD.find((t) => t.codigo === codigo)?.etiqueta ?? `Tipo ${codigo}`
 
 const TERCERO_INICIAL = {
   tipo_documento: '6',
@@ -337,6 +354,8 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
       tipo_existencia_codigo: producto.tipo_existencia_codigo,
       unidad_base_codigo: '',
       estado: producto.estado,
+      precio_venta_sugerido: producto.precio_venta_sugerido ?? '',
+      afectacion_igv_defecto: producto.afectacion_igv_defecto ?? '',
     })
     setProductoFormVisible(true)
   }
@@ -351,9 +370,10 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
             descripcion: productoForm.descripcion,
             tipo_existencia_codigo: productoForm.tipo_existencia_codigo,
             estado: productoForm.estado,
+            ...comercialProducto(productoForm),
           })
         } else {
-          await createProducto(productoForm)
+          await createProducto({ ...productoForm, ...comercialProducto(productoForm) })
         }
       }, productoEditando ? 'Producto actualizado.' : 'Producto creado con su unidad base.')
       if (!guardado) return
@@ -437,9 +457,14 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
   }
 
   const terceroSinRol = !terceroForm.es_cliente && !terceroForm.es_proveedor
+  // Bloque 16: catálogo 06 y RUC con dígito verificador (el backend vuelve a validar).
+  const errorDocTercero = terceroForm.numero_documento
+    ? errorDocumentoIdentidad(terceroForm.tipo_documento, terceroForm.numero_documento)
+    : null
+  const [historialTercero, setHistorialTercero] = useState<Tercero | null>(null)
   const guardarTercero = (event: FormEvent) => {
     event.preventDefault()
-    if (terceroSinRol) return
+    if (terceroSinRol || errorDocTercero) return
     void (async () => {
       const guardado = await ejecutar(async () => {
         if (terceroEditando) await updateTercero(terceroEditando.id, terceroForm)
@@ -596,7 +621,14 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
                         <TableCell numeric className="font-bold text-slate-900">
                           {producto.codigo_interno}
                         </TableCell>
-                        <TableCell className="font-medium text-slate-800">{producto.descripcion}</TableCell>
+                        <TableCell className="font-medium text-slate-800">
+                          {producto.descripcion}
+                          {producto.precio_venta_sugerido && (
+                            <span className="block font-mono text-[10px] font-normal text-slate-400">
+                              P. venta sug. {formatearDecimal(producto.precio_venta_sugerido, { min: 2, max: 8 })}
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex flex-col">
                             <span className="font-mono text-xs font-semibold text-slate-800">
@@ -858,7 +890,7 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
                   {terceros.map((tercero) => (
                     <TableRow key={tercero.id}>
                       <TableCell numeric className="font-bold text-slate-900">
-                        <span className="text-[10px] text-slate-400 block font-normal">Tipo {tercero.tipo_documento}</span>
+                        <span className="text-[10px] text-slate-400 block font-normal">{etiquetaTipoDocumento(tercero.tipo_documento)}</span>
                         {tercero.numero_documento}
                       </TableCell>
                       <TableCell>
@@ -883,16 +915,27 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        {esAdmin && (
+                        <div className="flex items-center justify-end gap-1.5">
                           <Button
                             type="button"
                             size="xs"
-                            variant="outline"
-                            onClick={() => editarTercero(tercero)}
+                            variant="ghost"
+                            title="Historial de comprobantes"
+                            onClick={() => setHistorialTercero(tercero)}
                           >
-                            Editar
+                            <History className="h-3.5 w-3.5" /> Historial
                           </Button>
-                        )}
+                          {esAdmin && (
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              onClick={() => editarTercero(tercero)}
+                            >
+                              Editar
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1039,6 +1082,39 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
               </div>
             )}
 
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="producto-precio-sugerido">Precio de venta sugerido</Label>
+                <Input
+                  id="producto-precio-sugerido"
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min="0"
+                  placeholder="Opcional"
+                  className="font-mono tabular-nums"
+                  value={productoForm.precio_venta_sugerido}
+                  onChange={(e) => setProductoForm({ ...productoForm, precio_venta_sugerido: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="producto-afectacion">Afectación IGV por defecto</Label>
+                <Select
+                  id="producto-afectacion"
+                  value={productoForm.afectacion_igv_defecto}
+                  onChange={(e) => setProductoForm({ ...productoForm, afectacion_igv_defecto: e.target.value })}
+                >
+                  <option value="">Sin preferencia</option>
+                  {AFECTACIONES_IGV.filter((a) => a.valor !== 'GRATUITO').map((a) => (
+                    <option key={a.valor} value={a.valor}>{a.etiqueta}</option>
+                  ))}
+                </Select>
+              </div>
+              <p className="text-[10px] text-slate-400 sm:col-span-2">
+                Solo se sugieren al registrar una venta; no intervienen en el costo, el CPP ni el Kardex.
+              </p>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Estado de la Existencia</Label>
               <Select
@@ -1052,6 +1128,8 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
           </form>
         </Modal>
       )}
+
+      {historialTercero && <HistorialTerceroModal tercero={historialTercero} onClose={() => setHistorialTercero(null)} />}
 
       {/* Modal: Crear / Editar Tercero */}
       {terceroFormVisible && (
@@ -1070,7 +1148,7 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
                 variant="primary"
                 onClick={guardarTercero}
                 isLoading={saving}
-                disabled={terceroSinRol}
+                disabled={terceroSinRol || Boolean(errorDocTercero)}
               >
                 <Save className="h-4 w-4 mr-1.5" />
                 {terceroEditando ? 'Guardar Cambios' : 'Crear Tercero'}
@@ -1081,14 +1159,20 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
           <form onSubmit={guardarTercero} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label required>Tipo Doc. (6=RUC, 1=DNI)</Label>
-                <Input
+                <Label required htmlFor="tercero-tipo-documento">Tipo de documento</Label>
+                <Select
+                  id="tercero-tipo-documento"
                   required
-                  maxLength={20}
                   value={terceroForm.tipo_documento}
                   onChange={(e) => setTerceroForm({ ...terceroForm, tipo_documento: e.target.value })}
-                  className="font-mono"
-                />
+                >
+                  {!TIPOS_DOCUMENTO_IDENTIDAD.some((t) => t.codigo === terceroForm.tipo_documento) && (
+                    <option value={terceroForm.tipo_documento}>{terceroForm.tipo_documento} (no válido)</option>
+                  )}
+                  {TIPOS_DOCUMENTO_IDENTIDAD.map((t) => (
+                    <option key={t.codigo} value={t.codigo}>{t.codigo} — {t.etiqueta}</option>
+                  ))}
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label required>Número de Documento</Label>
@@ -1098,9 +1182,13 @@ export const MaestrosInventarioPage = ({ vista }: MaestrosInventarioPageProps = 
                   value={terceroForm.numero_documento}
                   onChange={(e) => setTerceroForm({ ...terceroForm, numero_documento: e.target.value })}
                   className="font-mono tabular-nums"
+                  aria-invalid={Boolean(errorDocTercero)}
                 />
               </div>
             </div>
+            {errorDocTercero && (
+              <p className="text-xs text-rose-600" role="alert" data-testid="error-documento-tercero">{errorDocTercero}</p>
+            )}
 
             <div className="space-y-1.5">
               <Label required>Razón Social / Nombre Completo</Label>
