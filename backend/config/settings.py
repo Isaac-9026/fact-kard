@@ -10,6 +10,7 @@ from decouple import config, Csv
 
 from config.cache import configurar_caches
 from config.registro import construir_logging
+from config.sunat import leer_configuracion_sunat
 from config.seguridad import (
     permisos_docs_api, resolver_docs_api, resolver_secret_key, validar_allowed_hosts,
     validar_configuracion_produccion,
@@ -246,6 +247,19 @@ X_FRAME_OPTIONS = 'DENY'
 SECURE_REFERRER_POLICY = 'same-origin'
 # Intranet sin certificado: excepción EXPLÍCITA a las reglas de HTTPS (ver config/seguridad.py).
 PRODUCCION_SIN_HTTPS = config('PRODUCCION_SIN_HTTPS', default=False, cast=bool)
+
+# Bloque 17B: configuración SUNAT desde variables de entorno (backend/.env, nunca el repositorio).
+# Todavía NO se usa para conectar (XML, firma y envío empiezan en el Bloque 18). Los secretos son
+# objetos `Secreto`: print/logs/errores muestran [OCULTO]; ver config/sunat.py.
+_SUNAT = leer_configuracion_sunat(config)
+SUNAT_AMBIENTE = _SUNAT['SUNAT_AMBIENTE']
+SUNAT_USUARIO_SOL = _SUNAT['SUNAT_USUARIO_SOL']
+SUNAT_CLAVE_SOL = _SUNAT['SUNAT_CLAVE_SOL']
+SUNAT_CERTIFICADO_PATH = _SUNAT['SUNAT_CERTIFICADO_PATH']
+SUNAT_CERTIFICADO_PASSWORD = _SUNAT['SUNAT_CERTIFICADO_PASSWORD']
+del _SUNAT
+# Las páginas/informes de error ocultan también SUNAT_*, *SOL*, *CLAVE* y *CERTIFICADO*.
+DEFAULT_EXCEPTION_REPORTER_FILTER = 'config.sunat.FiltroReporteExcepciones'
 
 # Bloque 7: con DEBUG=False se rechaza una configuración insegura al arrancar.
 if not EJECUTANDO_TESTS:

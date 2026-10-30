@@ -30,6 +30,9 @@ el backend **no arranca** si la configuración es insegura (`config/seguridad.py
 | `AUTH_COOKIE_*` | `AUTH_COOKIE_ENABLED=False` | Sesión por cookie HttpOnly preparada, apagada (ver `DESPLIEGUE_VPS.md` §Cookie HttpOnly). |
 | `NUM_PROXIES` | `1` (Nginx delante) | **Bloque 8.** IP real para el throttling. `0` (desarrollo) usa la IP de la conexión. Con `SECURE_PROXY_SSL_HEADER_HTTPS=True` y `0` el backend no arranca. |
 | `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `True` | Solo afecta a `*.sistema.asescon.net`. `SECURE_HSTS_PRELOAD` queda en `False` (exige el dominio raíz; aviso `security.W021` esperado). |
+| `SUNAT_AMBIENTE` | `beta` | **Bloque 17B.** `beta` o `produccion`. Aún no hay conexión con SUNAT (empieza en el Bloque 18). |
+| `SUNAT_USUARIO_SOL`, `SUNAT_CLAVE_SOL` | (vacío) | **Bloque 17B.** Solo en `backend/.env` del servidor (chmod 600), nunca en Git. Se leen como `Secreto`: logs y errores muestran `[OCULTO]`. |
+| `SUNAT_CERTIFICADO_PATH`, `SUNAT_CERTIFICADO_PASSWORD` | (vacío) | **Bloque 17B.** Ruta absoluta al `.pfx`/`.p12` FUERA del repositorio. El estado (sin valores) se ve en `GET /api/configuracion/sunat/estado/` (solo ADMIN). |
 | `DB_NAME`, `DB_USER`, `DB_HOST`, `DB_PORT` | `fact_kard`, `fact_kard_user`, `127.0.0.1`, `5432` | PostgreSQL solo local. |
 | `DB_PASSWORD` | larga y aleatoria | **Bloque 8.** Vacía o de ejemplo (`cambiar_esto`…) → no arranca en producción. |
 | `DB_CONN_MAX_AGE` | `60` | Conexiones persistentes (con chequeo de salud). |

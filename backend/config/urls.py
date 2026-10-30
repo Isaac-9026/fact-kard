@@ -4,6 +4,7 @@ from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from config.health import health
+from apps.empresas.views import SunatEstadoView
 
 urlpatterns = [
     path('api/health/', health, name='health'),
@@ -16,6 +17,8 @@ urlpatterns = [
     path('api/kardex/', include('apps.kardex.urls')),
     path('api/auditoria/', include('apps.auditoria.urls')),
     path('api/reportes/', include('apps.reportes.urls')),
+    # Bloque 17B: estado de la preparación SUNAT (solo lectura, solo ADMIN).
+    path('api/configuracion/sunat/estado/', SunatEstadoView.as_view(), name='sunat-estado'),
 ]
 
 # Bloque 8: Swagger/OpenAPI solo con API_DOCS_ENABLED=True (por defecto, solo en desarrollo).

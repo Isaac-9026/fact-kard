@@ -11,8 +11,30 @@ frontend/dist/
 
 # Entornos y secretos
 .env
+.env.*
 *.env.local
+!.env.example
+!**/.env.example
+# Configuración pública del build (VITE_API_URL=/api; sin secretos), ya versionada.
+!frontend/.env.production
 backend/.secret_key.dev
+
+# Bloque 17B: certificados, claves y credenciales (SUNAT y otros). NUNCA en el repositorio.
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.csr
+*.jks
+*.keystore
+certificados/
+certificates/
+secrets/
+private/
+credentials/
 
 # Bloque 8: generados en el servidor (collectstatic / logs)
 backend/staticfiles/
@@ -26,3 +48,7 @@ Thumbs.db
 
 # Backups locales
 *.backup
+
+# Bloque 17B: copias de la base de datos (contienen datos reales)
+backups/
+*.dump

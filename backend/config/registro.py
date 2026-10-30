@@ -9,8 +9,10 @@ Bloque 8 — logging de producción.
   * fact_kard.auth  → login correcto/fallido/bloqueado y logout (sin contraseñas ni tokens).
   * fact_kard.*     → health check y otros fallos importantes.
 - FiltroDatosSensibles enmascara en TODOS los mensajes: tokens Bearer, tokens firmados de
-  FACT-KARD, contraseñas en texto "password=…", claves en URLs (redis://:clave@…) y la
-  SECRET_KEY. Es una red de seguridad: el código no debe registrar esos datos a propósito.
+  FACT-KARD, contraseñas en texto "password=…", claves en URLs (redis://:clave@…), la
+  SECRET_KEY y (Bloque 17B) las credenciales SUNAT: clave/usuario SOL y contraseña del
+  certificado, tanto por nombre ("clave_sol=…") como por valor. Es una red de seguridad: el
+  código no debe registrar esos datos a propósito.
 """
 import logging
 import re
@@ -25,6 +27,11 @@ PATRONES = [
     # password=..., "password": "...", contraseña: ...
     (re.compile(r'(?i)("?(?:password|passwd|contrase(?:ñ|n)a|secret_key|db_password)"?\s*[:=]\s*)("[^"]*"|\'[^\']*\'|[^\s,;&}]+)'),
      r'\1' + ENMASCARADO),
+    # Bloque 17B: credenciales SUNAT por nombre (clave_sol=…, "usuario_sol": "…", SUNAT_CERTIFICADO_PASSWORD=…)
+    (re.compile(r'(?i)("?(?:sunat_)?(?:clave_sol|usuario_sol|certificado_password|clave_certificado|pfx_password)"?\s*[:=]\s*)'
+                r'("[^"]*"|\'[^\']*\'|[^\s,;&}]+)'), r'\1' + ENMASCARADO),
+    # Bloque 17B: bloques PEM (claves privadas o certificados) pegados en un mensaje
+    (re.compile(r'-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----', re.S), ENMASCARADO),
     # Credenciales dentro de URLs: esquema://usuario:clave@host
     (re.compile(r'(\b[a-z][a-z0-9+.\-]*://[^:/\s@]*:)[^@\s/]+@'), r'\1' + ENMASCARADO + '@'),
 ]
@@ -48,9 +55,14 @@ class FiltroDatosSensibles(logging.Filter):
         if self._secretos is None:
             try:
                 from django.conf import settings
+                sunat = tuple(
+                    getattr(getattr(settings, n, None), 'revelar', lambda: '')()
+                    for n in ('SUNAT_USUARIO_SOL', 'SUNAT_CLAVE_SOL', 'SUNAT_CERTIFICADO_PASSWORD')
+                )
                 self._secretos = tuple(s for s in (
                     getattr(settings, 'SECRET_KEY', ''),
                     settings.DATABASES.get('default', {}).get('PASSWORD', ''),
+                    *sunat,
                 ) if s)
             except Exception:  # noqa: BLE001 — antes de que Django esté configurado
                 return ()

@@ -486,3 +486,37 @@ class ConfigIgvDetailView(APIView):
                 motivo=f'Modificación de configuración IGV de período {config.periodo_id}'
             )
         return Response(ConfigIgvPeriodoSerializer(config).data)
+
+
+class SunatEstadoView(APIView):
+    """
+    Bloque 17B: GET /api/configuracion/sunat/estado/ — estado de preparación SUNAT, solo lectura.
+
+    Responde únicamente información segura: ambiente, si hay credenciales y certificado, y los
+    NOMBRES de las variables que faltan. Nunca el usuario SOL, la clave SOL, la ruta o la
+    contraseña del certificado ni su contenido. Solo ADMIN de la empresa activa (o admin global).
+    Todavía no se conecta a SUNAT.
+    """
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
+
+    def get(self, request):
+        from django.conf import settings
+        from config.sunat import validar_configuracion_sunat
+        estado = validar_configuracion_sunat()
+        empresa = Empresa.objects.filter(pk=request.empresa_id).only('ruc').first()
+        usuario = getattr(settings, 'SUNAT_USUARIO_SOL', None)
+        valor = usuario.revelar().strip() if hasattr(usuario, 'revelar') else ''
+        # Multiempresa: un usuario SOL "RUC+USUARIO" pertenece a un RUC. Solo se informa si coincide.
+        corresponde = None
+        if empresa is not None and len(valor) > 11 and valor[:11].isdigit():
+            corresponde = valor[:11] == empresa.ruc
+        return Response({
+            'ambiente': estado['ambiente'],
+            'configurado': estado['configurado'],
+            'certificado_configurado': estado['certificado_configurado'],
+            'credenciales_configuradas': estado['credenciales_configuradas'],
+            'faltantes': estado['faltantes'],
+            'advertencias': estado['advertencias'],
+            'credenciales_corresponden_a_empresa': corresponde,
+            'conexion_sunat_habilitada': False,
+        })

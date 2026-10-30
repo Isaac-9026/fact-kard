@@ -11,6 +11,7 @@ import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { AlertaFormulario } from '../ui/alerta-formulario'
 import { ResultadoValidacion } from './ResultadoValidacion'
+import { PreparacionSunatCard } from './PreparacionSunatCard'
 import { mensajesDeErrorApi } from '../../utils/errores'
 import { diferirCarga } from '../../utils/efectos'
 import { errorUbigeo } from '../../utils/tributario'
@@ -109,6 +110,7 @@ export function DatosFiscalesPanel({ esAdmin }: { esAdmin: boolean }) {
           )}
         </CardContent>
       </Card>
+      <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Preparación del emisor</CardTitle>
@@ -124,6 +126,9 @@ export function DatosFiscalesPanel({ esAdmin }: { esAdmin: boolean }) {
           )}
         </CardContent>
       </Card>
+      {/* Bloque 17B: solo ADMIN (el endpoint también lo exige). */}
+      {esAdmin && <PreparacionSunatCard />}
+      </div>
     </div>
   )
 }

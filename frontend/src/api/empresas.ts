@@ -29,3 +29,16 @@ export const actualizarDatosFiscales = async (payload: DatosFiscalesPayload): Pr
 export const obtenerEstablecimientos = async (): Promise<Establecimiento[]> => (await apiClient.get<Establecimiento[]>('/empresas/establecimientos/')).data;
 export const crearEstablecimiento = async (payload: EstablecimientoPayload): Promise<Establecimiento> => (await apiClient.post<Establecimiento>('/empresas/establecimientos/', payload)).data;
 export const actualizarEstablecimiento = async (id: number, payload: Partial<EstablecimientoPayload>): Promise<Establecimiento> => (await apiClient.patch<Establecimiento>(`/empresas/establecimientos/${id}/`, payload)).data;
+
+/** Bloque 17B: estado de la preparación SUNAT (solo ADMIN). Nunca trae usuario, clave ni certificado. */
+export interface EstadoSunat {
+  ambiente: 'beta' | 'produccion' | null;
+  configurado: boolean;
+  certificado_configurado: boolean;
+  credenciales_configuradas: boolean;
+  faltantes: string[];
+  advertencias: string[];
+  credenciales_corresponden_a_empresa: boolean | null;
+  conexion_sunat_habilitada: boolean;
+}
+export const obtenerEstadoSunat = async (): Promise<EstadoSunat> => (await apiClient.get<EstadoSunat>('/configuracion/sunat/estado/')).data;
