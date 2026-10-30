@@ -9,7 +9,7 @@ from rest_framework.exceptions import ValidationError
 from apps.auditoria.services import registrar_auditoria
 from apps.catalogos.models import TipoCambio, TipoComprobante, TipoOperacion, Moneda
 from apps.documentos.models import Documento, DocumentoDetalle
-from apps.documentos import finanzas
+from apps.documentos import finanzas, reglas_tributarias
 from apps.documentos.reglas import (
     validar_cantidades_devolucion,
     validar_documento_origen,
@@ -235,6 +235,10 @@ def crear_documento(
     validar_tercero_comercial(clase=clase, tipo_comprobante=tipo_comprobante, tercero=tercero,
                               origen=datos_cabecera.get('documento_origen'))
 
+    # Bloque 17A: motivo tributario de la nota (catálogo 09/10). Opcional al registrar; la
+    # validación pre-emisión lo exige. No interviene en la lógica contable de la nota.
+    motivo_nota = reglas_tributarias.resolver_motivo_nota(datos_cabecera.get('motivo_nota'), tipo_comprobante)
+
     # 6. Normalización de Serie y Número
     serie_comprobante = None
     serie_id = datos_cabecera.get('serie_comprobante')
@@ -382,6 +386,7 @@ def crear_documento(
         total=Decimal('0.00000000'),
         documento_origen=documento_origen,
         serie_comprobante=serie_comprobante,
+        motivo_nota=motivo_nota,
         origen_captura=datos_cabecera.get('origen_captura', 'MANUAL'),
         estado='BORRADOR',
         estado_revision='PENDIENTE',
@@ -639,6 +644,7 @@ def crear_documento(
             'fecha_vencimiento': str(vencimiento) if vencimiento else None,
             'cuotas': len(cuotas),
             'serie_automatica': serie_comprobante is not None,
+            'motivo_nota': f'{motivo_nota.catalogo}-{motivo_nota.codigo}' if motivo_nota else None,
         },
         motivo="Creación de documento en borrador"
     )

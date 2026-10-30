@@ -2,6 +2,7 @@ from django.urls import path
 
 from apps.empresas.views import (
     ConfigEmpresaView,
+    DatosFiscalesEmpresaView,
     ConfigIgvDetailView,
     ConfigIgvListCreateView,
     ConfigIgvPeriodoView,
@@ -19,6 +20,7 @@ from apps.empresas.views import (
 urlpatterns = [
     path('', EmpresaListCreateView.as_view(), name='empresa-list-create'),
     path('config/', ConfigEmpresaView.as_view(), name='empresa-config'),
+    path('datos-fiscales/', DatosFiscalesEmpresaView.as_view(), name='empresa-datos-fiscales'),
     path('establecimientos/', EstablecimientoListCreateView.as_view(), name='establecimiento-list-create'),
     path('establecimientos/<int:pk>/', EstablecimientoDetailView.as_view(), name='establecimiento-detail'),
     path('periodos/', PeriodoListCreateView.as_view(), name='periodo-list-create'),

@@ -8,7 +8,13 @@ class Empresa(models.Model):
     ruc = models.CharField(max_length=11, unique=True)
     razon_social = models.CharField(max_length=200)
     nombre_comercial = models.CharField(max_length=200, null=True, blank=True)
-    direccion = models.CharField(max_length=300, null=True, blank=True)
+    direccion = models.CharField(max_length=300, null=True, blank=True)  # domicilio fiscal
+    # Bloque 17A: ubicación del domicilio fiscal del emisor electrónico.
+    ubigeo = models.CharField(max_length=6, null=True, blank=True)
+    departamento = models.CharField(max_length=100, null=True, blank=True)
+    provincia = models.CharField(max_length=100, null=True, blank=True)
+    distrito = models.CharField(max_length=100, null=True, blank=True)
+    codigo_pais = models.CharField(max_length=2, default='PE', db_default='PE')
     moneda_base_codigo = models.ForeignKey(
         'catalogos.Moneda',
         on_delete=models.RESTRICT,
@@ -26,7 +32,12 @@ class Empresa(models.Model):
             models.CheckConstraint(
                 condition=models.Q(estado__in=['ACTIVA', 'INACTIVA']),
                 name='chk_empresa_estado'
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(ubigeo__isnull=True) | models.Q(ubigeo__regex=r'^[0-9]{6}$'),
+                name='chk_empresa_ubigeo'
+            ),
+            models.CheckConstraint(condition=models.Q(codigo_pais__regex=r'^[A-Z]{2}$'), name='chk_empresa_codigo_pais'),
         ]
 
     def __str__(self):
@@ -43,6 +54,9 @@ class Establecimiento(models.Model):
     codigo_sunat = models.CharField(max_length=20)
     nombre = models.CharField(max_length=150)
     activo = models.BooleanField(default=True, db_default=True)
+    # Bloque 17A: dirección del establecimiento (el principal es ConfigEmpresa.establecimiento_principal).
+    direccion = models.CharField(max_length=300, null=True, blank=True)
+    ubigeo = models.CharField(max_length=6, null=True, blank=True)
 
     class Meta:
         db_table = 'establecimiento'
@@ -52,7 +66,11 @@ class Establecimiento(models.Model):
             models.UniqueConstraint(
                 fields=['empresa', 'codigo_sunat'],
                 name='uq_establecimiento_empresa_codigo'
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(ubigeo__isnull=True) | models.Q(ubigeo__regex=r'^[0-9]{6}$'),
+                name='chk_establecimiento_ubigeo'
+            ),
         ]
 
     def __str__(self):

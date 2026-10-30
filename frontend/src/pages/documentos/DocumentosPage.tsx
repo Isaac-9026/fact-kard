@@ -61,6 +61,10 @@ import { useAuth } from '../../context/useAuth'
 import { obtenerSeries, type SerieComprobante } from '../../api/finanzas'
 import { CondicionPagoCampos } from '../../components/finanzas/CondicionPagoCampos'
 import { PagosDocumento } from '../../components/finanzas/PagosDocumento'
+import { PreparacionElectronica } from '../../components/tributario/PreparacionElectronica'
+import { obtenerCatalogo07, obtenerMotivosNota, type CodigoAfectacionIgv, type MotivoNota } from '../../api/catalogos'
+import { CodigoAfectacionLinea } from '../../components/tributario/CodigoAfectacionLinea'
+import { catalogoMotivo } from '../../utils/tributario'
 import { CONDICION_INICIAL, errorCondicionPago, numeroComprobante, type CondicionPagoValor } from '../../utils/finanzas'
 import { fechaCalendarioLocal } from '../../utils/date'
 import { PageHeader } from '../../components/ui/page-header'
@@ -70,7 +74,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import { Badge } from '../../components/ui/badge'
 import { cantidadBase, importeLinea, totalesDocumento } from '../../utils/documentoCalculo'
 import { esMayorQueCero, formatearDecimal } from '../../utils/decimal'
-import { AFECTACIONES_IGV, TASA_IGV_POR_DEFECTO_PCT, igvEditable, igvSugerido, tasaVigente, type AfectacionIgv, type TasaIgvVigencia } from '../../utils/afectacionIgv'
+import {
+  AFECTACIONES_IGV, TASA_IGV_POR_DEFECTO_PCT, codigoAfectacionParaEnviar, codigosGratuitos, errorCodigoGratuito, igvEditable,
+  igvSugerido, reconciliarCodigoAfectacion, tasaVigente, type AfectacionIgv, type TasaIgvVigencia,
+} from '../../utils/afectacionIgv'
 import { obtenerConfigEmpresa } from '../../api/empresas'
 import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
@@ -100,6 +107,8 @@ interface LineaFormulario {
   precioUnitario: string
   igv: string
   afectacionIgv: AfectacionIgv
+  /** B17A-QA-001: código del Catálogo 07; solo en líneas gratuitas ('' = sin elegir). */
+  codigoAfectacionIgv: string
   esBonificacion: boolean
   descripcionOriginal: string
   detalleOrigenId?: number | ''
@@ -182,6 +191,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   // UI States
   const [cargando, setCargando] = useState(false)
   const [catalogosCargados, setCatalogosCargados] = useState(false)
+  // B17A-QA-001: Catálogo 07 (fuente canónica en el backend) para las líneas gratuitas.
+  const [catalogo07, setCatalogo07] = useState<CodigoAfectacionIgv[]>([])
+  const opcionesGratuitas = useMemo(() => codigosGratuitos(catalogo07), [catalogo07])
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null)
   const [exitoGlobal, setExitoGlobal] = useState<string | null>(null)
   const [errorModal, setErrorModal] = useState<ErrorModal | null>(null)
@@ -207,6 +219,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   const [formCondicion, setFormCondicion] = useState<CondicionPagoValor>(CONDICION_INICIAL)
   const [seriesDisponibles, setSeriesDisponibles] = useState<SerieComprobante[]>([])
   const [formSerieId, setFormSerieId] = useState<number | ''>('')
+  // Bloque 17A: motivo tributario de la nota (catálogo 09 NC / 10 ND).
+  const [formMotivoNota, setFormMotivoNota] = useState('')
+  const [motivosNota, setMotivosNota] = useState<MotivoNota[]>([])
   // QA-001: líneas del comprobante de origen de la nota (para elegir `detalle_origen`).
   const [origenDetalles, setOrigenDetalles] = useState<LineaOrigen[]>([])
   const [tcResuelto, setTcResuelto] = useState<TipoCambioResolverResult | null>(null)
@@ -225,8 +240,8 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
   // que produjeron el error (al corregir un campo desaparece; al reenviar se recalcula).
   const firmaNuevo = JSON.stringify([
     formClase, formPeriodo, formTipoComprobante, formTercero, formSerie, formNumero, formFechaEmision, formMoneda, formDocOrigen,
-    formSerieId, formCondicion,
-    lineas.map((l) => [l.productoId, l.productoUnidadId, l.almacenId, l.tipoOperacionId, l.cantidadOriginal, l.precioUnitario, l.igv, l.afectacionIgv, l.esBonificacion, l.detalleOrigenId]),
+    formSerieId, formCondicion, formMotivoNota,
+    lineas.map((l) => [l.productoId, l.productoUnidadId, l.almacenId, l.tipoOperacionId, l.cantidadOriginal, l.precioUnitario, l.igv, l.afectacionIgv, l.codigoAfectacionIgv, l.esBonificacion, l.detalleOrigenId]),
   ])
   const firmaRevision = JSON.stringify([modalRevisionDoc?.id, revEstadoSeleccionado, revMotivo])
   const firmaAnulacion = JSON.stringify([modalAnulacionDoc?.id, anulacionMotivo])
@@ -275,14 +290,16 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
     setCargando(true)
     setErrorGlobal(null)
     try {
-      const [pers, comps, ops, prods, alms, tercs] = await Promise.all([
+      const [pers, comps, ops, prods, alms, tercs, cat07] = await Promise.all([
         obtenerPeriodos(),
         obtenerTiposComprobante(),
         obtenerTiposOperacion(),
         getProductos(),
         getAlmacenes(),
         getTerceros(),
+        obtenerCatalogo07().catch(() => [] as CodigoAfectacionIgv[]),
       ])
+      setCatalogo07(cat07)
       setPeriodos(pers)
       setTiposComprobante(comps.filter((c) => c.activo))
       setTiposOperacion(ops.filter((o) => o.activo))
@@ -362,6 +379,20 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
 
   const serieSeleccionada = seriesDisponibles.find((x) => x.id === formSerieId)
 
+  // Bloque 17A: motivos del catálogo que corresponde a la nota elegida.
+  const catalogoMotivoForm = catalogoMotivo(tipoCompSeleccionado?.codigo_sunat)
+  useEffect(() => {
+    if (!modalNuevoAbierto || !catalogoMotivoForm) {
+      diferirCarga(() => { setMotivosNota([]); setFormMotivoNota('') })
+      return
+    }
+    let vigente = true
+    obtenerMotivosNota(catalogoMotivoForm)
+      .then((m) => { if (vigente) { setMotivosNota(m); setFormMotivoNota((actual) => (m.some((x) => x.codigo === actual) ? actual : '')) } })
+      .catch(() => { if (vigente) setMotivosNota([]) })
+    return () => { vigente = false }
+  }, [modalNuevoAbierto, catalogoMotivoForm])
+
   const rucEmisorDisplay = useMemo(() => {
     if (formClase === 'VENTA') {
       return empresaActiva?.ruc || 'RUC Empresa Activa'
@@ -383,6 +414,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
     precioUnitario: '0.00000000',
     igv: '0.00000000',
     afectacionIgv: 'GRAVADO',
+    codigoAfectacionIgv: '',
     esBonificacion: false,
     descripcionOriginal: '',
     unidadesDisponibles: [],
@@ -486,6 +518,10 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
             actualizada.igv = '0.00000000'
           }
         }
+
+        // B17A-QA-001: el código del Catálogo 07 solo se conserva si la línea sigue gratuita y es compatible.
+        actualizada.codigoAfectacionIgv = reconciliarCodigoAfectacion(
+          actualizada.afectacionIgv, actualizada.codigoAfectacionIgv, catalogo07)
 
         return actualizada
       })
@@ -591,6 +627,13 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
       }
     }
     // Bloque 12: operación compatible con la clase y el comprobante (el backend vuelve a validar).
+    // B17A-QA-001: en ventas una línea gratuita exige su código del Catálogo 07.
+    const errorGratuito = errorCodigoGratuito(
+      lineas.map((l) => ({ afectacion: l.afectacionIgv, codigo: l.codigoAfectacionIgv })), formClase)
+    if (errorGratuito) {
+      falta(errorGratuito)
+      return
+    }
     const errorOperacion = errorDeOperaciones(lineas, tiposOperacion, formClase, tipoCompSeleccionado)
     if (errorOperacion) {
       falta(errorOperacion)
@@ -625,6 +668,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
       ...(serieSeleccionada
         ? { serie_comprobante: serieSeleccionada.id }
         : { serie: formSerie.trim(), numero: formNumero.trim() }),
+      motivo_nota: esNota && formMotivoNota ? formMotivoNota : undefined,
       condicion_pago: condicion.condicion,
       fecha_vencimiento: condicion.condicion === 'CREDITO' ? condicion.fechaVencimiento : null,
       cuotas: condicion.condicion === 'CREDITO' && condicion.cuotas.length > 0 ? condicion.cuotas : undefined,
@@ -642,6 +686,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
         precio_unitario: l.precioUnitario,
         igv: l.igv,
         afectacion_igv: l.afectacionIgv,
+        codigo_afectacion_igv: codigoAfectacionParaEnviar(l.afectacionIgv, l.codigoAfectacionIgv),
         es_bonificacion: l.esBonificacion,
         descripcion_original: l.descripcionOriginal,
         detalle_origen: l.detalleOrigenId ? Number(l.detalleOrigenId) : null,
@@ -656,6 +701,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
       setFormSerie('')
       setFormNumero('')
       setFormCondicion(CONDICION_INICIAL)
+      setFormMotivoNota('')
       setLineas([])
       await cargarDocumentos()
     } catch (err: unknown) {
@@ -798,8 +844,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
           cantidadOriginal: disponibleEnUnidad(origen),
           precioUnitario: origen.precio_unitario,
           afectacionIgv: (origen.afectacion_igv as AfectacionIgv) || l.afectacionIgv,
+          codigoAfectacionIgv: origen.codigo_afectacion_igv ?? '',
         } : {}),
       }
+      actualizada.codigoAfectacionIgv = reconciliarCodigoAfectacion(
+        actualizada.afectacionIgv, actualizada.codigoAfectacionIgv, catalogo07)
       if (!actualizada.esBonificacion) {
         const sugerido = sugerirIgvLinea(actualizada, tasaVigente(tasasIgv, formFechaEmision, tasaIgvActual))
         if (sugerido !== null) actualizada.igv = sugerido
@@ -1379,6 +1428,18 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                     </Select>
                   </div>
                 )}
+
+                {esNota && catalogoMotivoForm && (
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label htmlFor="motivo-nota-select">Motivo tributario (catálogo {catalogoMotivoForm})</Label>
+                    <Select id="motivo-nota-select" value={formMotivoNota} onChange={(e) => setFormMotivoNota(e.target.value)}>
+                      <option value="">Sin motivo (se exigirá antes de la emisión electrónica)</option>
+                      {motivosNota.map((m) => (
+                        <option key={m.codigo} value={m.codigo}>{m.codigo} — {m.descripcion}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1548,6 +1609,23 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                                 <option key={a.valor} value={a.valor}>{a.etiqueta}</option>
                               ))}
                             </select>
+                            {linea.afectacionIgv === 'GRATUITO' && (
+                              <select
+                                aria-label={`Código Catálogo 07 de la línea ${idx + 1}`}
+                                data-testid="codigo-afectacion-linea"
+                                title={opcionesGratuitas.find((c) => c.codigo === linea.codigoAfectacionIgv)?.descripcion
+                                  ?? 'Código SUNAT (Catálogo 07) de la operación gratuita'}
+                                className={`mt-1 w-full h-8 rounded border bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900 ${
+                                  !linea.codigoAfectacionIgv && formClase === 'VENTA' ? 'border-amber-400' : 'border-slate-200'}`}
+                                value={linea.codigoAfectacionIgv}
+                                onChange={(e) => actualizarLinea(linea.tempId, 'codigoAfectacionIgv', e.target.value)}
+                              >
+                                <option value="">{formClase === 'VENTA' ? 'Código Cat. 07 (obligatorio)…' : 'Código Cat. 07 (opcional)…'}</option>
+                                {opcionesGratuitas.map((c) => (
+                                  <option key={c.codigo} value={c.codigo}>{c.codigo} — {c.descripcion}</option>
+                                ))}
+                              </select>
+                            )}
                           </td>
                           <td className="px-3 py-2.5">
                             <input
@@ -1683,6 +1761,17 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                         {det.afectacion_igv && det.afectacion_igv !== 'GRAVADO' && (
                           <span className="ml-1 text-[10px] text-slate-500">{det.afectacion_igv}</span>
                         )}
+                        {det.afectacion_igv === 'GRATUITO' && (
+                          <CodigoAfectacionLinea
+                            key={`${det.id}-${det.codigo_afectacion_igv ?? ''}`}
+                            documento={modalDetalleDocumento}
+                            detalle={det}
+                            opciones={opcionesGratuitas}
+                            catalogo={catalogo07}
+                            editable={esAdmin && modalDetalleDocumento.estado !== 'ANULADO'}
+                            onActualizado={setModalDetalleDocumento}
+                          />
+                        )}
                       </TableCell>
                       <TableCell numeric className="font-bold text-slate-900">
                         {formatearDecimal(importeLinea(det.cantidad_original, det.precio_unitario))}
@@ -1701,6 +1790,15 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                 await cargarDocumentos()
               }}
             />
+
+            {modalDetalleDocumento.clase === 'VENTA' && (
+              <PreparacionElectronica
+                key={`${modalDetalleDocumento.id}-${(modalDetalleDocumento.detalles ?? []).map((d) => d.codigo_afectacion_igv ?? '').join(',')}`}
+                documento={modalDetalleDocumento}
+                esAdmin={esAdmin}
+                onActualizado={setModalDetalleDocumento}
+              />
+            )}
           </div>
         </Modal>
       )}

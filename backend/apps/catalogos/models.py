@@ -137,3 +137,28 @@ class MetodoPago(models.Model):
 
     def __str__(self):
         return f"{self.codigo} - {self.descripcion}"
+
+
+class MotivoNota(models.Model):
+    """
+    Bloque 17A: motivos tributarios de las notas electrónicas (Anexo 8, R.S. 097-2012/SUNAT).
+    catalogo '09' = tipo de nota de crédito; '10' = tipo de nota de débito. Catálogo
+    controlado: se desactiva, no se borra. No decide el efecto contable (eso lo deciden las líneas).
+    """
+    CATALOGO_NC, CATALOGO_ND = '09', '10'
+
+    catalogo = models.CharField(max_length=2)
+    codigo = models.CharField(max_length=2)
+    descripcion = models.CharField(max_length=200)
+    activo = models.BooleanField(default=True, db_default=True)
+
+    class Meta:
+        db_table = 'motivo_nota'
+        ordering = ('catalogo', 'codigo')
+        constraints = [
+            models.UniqueConstraint(fields=['catalogo', 'codigo'], name='uq_motivo_nota_catalogo_codigo'),
+            models.CheckConstraint(condition=models.Q(catalogo__in=['09', '10']), name='chk_motivo_nota_catalogo'),
+        ]
+
+    def __str__(self):
+        return f'{self.catalogo}-{self.codigo} {self.descripcion}'

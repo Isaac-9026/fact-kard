@@ -67,6 +67,19 @@ CREATE TABLE metodo_pago (
     descripcion VARCHAR(100) NOT NULL,
     activo BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- Bloque 17A: motivos tributarios de las notas (Anexo 8, R.S. 097-2012/SUNAT y modificatorias).
+-- catalogo '09' = tipo de nota de crédito; '10' = tipo de nota de débito. Catálogo controlado:
+-- se desactiva, no se borra. Solo describe el motivo; el efecto contable lo deciden las líneas.
+CREATE TABLE motivo_nota (
+    id BIGSERIAL PRIMARY KEY,
+    catalogo VARCHAR(2) NOT NULL,
+    codigo VARCHAR(2) NOT NULL,
+    descripcion VARCHAR(200) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    UNIQUE (catalogo, codigo),
+    CHECK (catalogo IN ('09','10'))
+);
 ```
 
 ---
@@ -79,11 +92,19 @@ CREATE TABLE empresa (
     ruc VARCHAR(11) NOT NULL UNIQUE,
     razon_social VARCHAR(200) NOT NULL,
     nombre_comercial VARCHAR(200),
-    direccion VARCHAR(300),
+    direccion VARCHAR(300),                -- domicilio fiscal del emisor
+    -- Bloque 17A: ubicación del domicilio fiscal (emisor electrónico).
+    ubigeo VARCHAR(6),
+    departamento VARCHAR(100),
+    provincia VARCHAR(100),
+    distrito VARCHAR(100),
+    codigo_pais VARCHAR(2) NOT NULL DEFAULT 'PE',
     moneda_base_codigo CHAR(3) NOT NULL REFERENCES moneda(codigo),
     estado VARCHAR(20) NOT NULL DEFAULT 'ACTIVA',
     creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK (estado IN ('ACTIVA','INACTIVA'))
+    CHECK (estado IN ('ACTIVA','INACTIVA')),
+    CHECK (ubigeo IS NULL OR ubigeo ~ '^[0-9]{6}$'),
+    CHECK (codigo_pais ~ '^[A-Z]{2}$')
 );
 
 CREATE TABLE usuario (
@@ -125,10 +146,14 @@ CREATE INDEX ix_token_revocado_expira ON token_revocado (expira_en);
 CREATE TABLE establecimiento (
     id BIGSERIAL PRIMARY KEY,
     empresa_id BIGINT NOT NULL REFERENCES empresa(id),
-    codigo_sunat VARCHAR(20) NOT NULL,
+    codigo_sunat VARCHAR(20) NOT NULL,     -- código de establecimiento anexo SUNAT (0000 = domicilio fiscal)
     nombre VARCHAR(150) NOT NULL,
     activo BOOLEAN NOT NULL DEFAULT TRUE,
-    UNIQUE (empresa_id, codigo_sunat)
+    -- Bloque 17A: dirección del establecimiento. El principal es config_empresa.establecimiento_principal_id.
+    direccion VARCHAR(300),
+    ubigeo VARCHAR(6),
+    UNIQUE (empresa_id, codigo_sunat),
+    CHECK (ubigeo IS NULL OR ubigeo ~ '^[0-9]{6}$')
 );
 
 CREATE TABLE almacen (
@@ -326,6 +351,9 @@ CREATE TABLE documento (
     condicion_pago VARCHAR(10) NOT NULL DEFAULT 'CONTADO',
     fecha_vencimiento DATE,
     serie_comprobante_id BIGINT REFERENCES serie_comprobante(id),
+
+    -- Bloque 17A: motivo tributario de la nota (catálogo 09 para NC, 10 para ND). Solo en notas.
+    motivo_nota_id BIGINT REFERENCES motivo_nota(id),
 
     origen_captura VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
     estado VARCHAR(20) NOT NULL DEFAULT 'BORRADOR',
@@ -893,6 +921,10 @@ EXECUTE FUNCTION bloquear_modificacion_auditoria();
 - Transferencia origen y destino deben pertenecer a la misma empresa.
 - Ajuste automático puede extornarse/regenerarse.
 - Ajuste manual no se modifica automáticamente.
+- Bloque 17A: documento.motivo_nota_id solo en notas: catálogo 09 si es NC (07), 10 si es ND (08).
+- Bloque 17A: "LISTO_PARA_EMISION" / "NO_PREPARADO" es un estado DERIVADO (no se guarda): lo calcula
+  documentos/reglas_tributarias.py (emisor, establecimiento, serie, cliente, motivo, líneas y totales).
+  Aún no hay XML, firma, envío ni CDR.
 ```
 
 ---

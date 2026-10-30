@@ -40,6 +40,49 @@ CATALOGO_07 = {
 # 17 (Gravado – IVAP) usa otra tasa; no se soporta en este bloque.
 CODIGOS_NO_SOPORTADOS = {'17': 'Gravado – IVAP (tasa distinta del IGV general)'}
 
+# Bloque 17A (B17A-QA-001): descripciones oficiales del Catálogo 07 (Anexo E, R.S. 245-2017/SUNAT),
+# en esta misma fuente canónica. Las expone la API (catalogos/afectaciones-igv/) para que el
+# frontend no mantenga una copia.
+DESCRIPCIONES_CATALOGO_07 = {
+    '10': 'Gravado - Operación Onerosa',
+    '11': 'Gravado – Retiro por premio',
+    '12': 'Gravado – Retiro por donación',
+    '13': 'Gravado – Retiro',
+    '14': 'Gravado – Retiro por publicidad',
+    '15': 'Gravado – Bonificaciones',
+    '16': 'Gravado – Retiro por entrega a trabajadores',
+    '17': 'Gravado – IVAP',
+    '20': 'Exonerado - Operación Onerosa',
+    '21': 'Exonerado – Transferencia Gratuita',
+    '30': 'Inafecto - Operación Onerosa',
+    '31': 'Inafecto – Retiro por Bonificación',
+    '32': 'Inafecto – Retiro',
+    '33': 'Inafecto – Retiro por Muestras Médicas',
+    '34': 'Inafecto - Retiro por Convenio Colectivo',
+    '35': 'Inafecto – Retiro por premio',
+    '36': 'Inafecto - Retiro por publicidad',
+    '40': 'Exportación',
+}
+# Códigos de transferencia gratuita (11-16, 21, 31-36), derivados del propio CATALOGO_07.
+CODIGOS_GRATUITOS = tuple(sorted(c for c, a in CATALOGO_07.items() if a == GRATUITO))
+
+
+def catalogo_07():
+    """Catálogo 07 completo: código, descripción oficial, afectación interna y si está soportado."""
+    return [
+        {'codigo': codigo, 'descripcion': descripcion, 'afectacion': CATALOGO_07.get(codigo),
+         'soportado': codigo in CATALOGO_07}
+        for codigo, descripcion in sorted(DESCRIPCIONES_CATALOGO_07.items())
+    ]
+
+
+def validar_codigo_gratuito(codigo):
+    """Error (str) si el código no es de transferencia gratuita del Catálogo 07, o None."""
+    if codigo not in CODIGOS_GRATUITOS:
+        return (f"El código '{codigo}' no corresponde a una operación gratuita del Catálogo 07 "
+                f"(use {', '.join(CODIGOS_GRATUITOS)}).")
+    return None
+
 
 def resolver_afectacion(*, afectacion, codigo, es_bonificacion, linea_num):
     """Devuelve (afectacion, codigo) normalizados o lanza ValidationError (400)."""

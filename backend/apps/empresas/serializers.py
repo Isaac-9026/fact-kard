@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -24,11 +25,66 @@ class EmpresaSerializer(serializers.ModelSerializer):
         return getattr(obj, 'rol_usuario', None)
 
 
+def _validar_ubigeo(valor):
+    from apps.documentos.reglas_tributarias import ubigeo_valido
+    valor = (valor or '').strip() or None
+    if valor is not None and not ubigeo_valido(valor):
+        raise serializers.ValidationError(
+            'El ubigeo debe tener 6 dígitos INEI (departamento 01-25, provincia y distrito 01-99).')
+    return valor
+
+
 class EstablecimientoSerializer(serializers.ModelSerializer):
+    # Bloque 17A: el principal es ConfigEmpresa.establecimiento_principal (no se duplica).
+    es_principal = serializers.SerializerMethodField()
+
     class Meta:
         model = Establecimiento
-        fields = ('id', 'codigo_sunat', 'nombre', 'activo')
-        read_only_fields = ('id',)
+        fields = ('id', 'codigo_sunat', 'nombre', 'activo', 'direccion', 'ubigeo', 'es_principal')
+        read_only_fields = ('id', 'es_principal')
+
+    def get_es_principal(self, obj):
+        from apps.documentos.reglas_tributarias import establecimiento_es_principal
+        return establecimiento_es_principal(obj)
+
+    def validate_ubigeo(self, valor):
+        return _validar_ubigeo(valor)
+
+    def validate_direccion(self, valor):
+        return (valor or '').strip() or None
+
+
+class DatosFiscalesEmpresaSerializer(serializers.ModelSerializer):
+    """
+    Bloque 17A: datos del emisor electrónico de la empresa activa. Reutiliza ruc, razon_social,
+    nombre_comercial y direccion (= domicilio fiscal); el RUC no se edita aquí.
+    """
+    class Meta:
+        model = Empresa
+        fields = ('id', 'ruc', 'razon_social', 'nombre_comercial', 'direccion', 'ubigeo', 'departamento',
+                  'provincia', 'distrito', 'codigo_pais')
+        read_only_fields = ('id', 'ruc')
+
+    def validate_ubigeo(self, valor):
+        return _validar_ubigeo(valor)
+
+    def validate_codigo_pais(self, valor):
+        valor = (valor or '').strip().upper()
+        if not re.fullmatch(r'[A-Z]{2}', valor):
+            raise serializers.ValidationError('Código de país ISO 3166 de 2 letras (PE).')
+        return valor
+
+    def validate_razon_social(self, valor):
+        valor = (valor or '').strip()
+        if not valor:
+            raise serializers.ValidationError('La razón social es obligatoria.')
+        return valor
+
+    def validate(self, attrs):
+        for campo in ('nombre_comercial', 'direccion', 'departamento', 'provincia', 'distrito'):
+            if campo in attrs:
+                attrs[campo] = (attrs[campo] or '').strip() or None
+        return attrs
 
 
 class ConfigEmpresaSerializer(serializers.ModelSerializer):

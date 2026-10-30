@@ -89,6 +89,9 @@ export interface Documento {
   cuotas?: Cuota[];
   pagos?: Pago[];
   finanzas?: ResumenFinanciero | null;
+  /** Bloque 17A: motivo tributario de la nota (catálogo 09/10). */
+  motivo_nota_codigo?: string | null;
+  motivo_nota_descripcion?: string | null;
 }
 
 export type CondicionPago = 'CONTADO' | 'CREDITO';
@@ -133,6 +136,8 @@ export interface CrearDocumentoDetallePayload {
   precio_unitario?: string | number;
   igv?: string | number;
   afectacion_igv?: 'GRAVADO' | 'EXONERADO' | 'INAFECTO' | 'EXPORTACION' | 'GRATUITO';
+  /** B17A-QA-001: código del Catálogo 07 (en líneas gratuitas: 11-16, 21, 31-36). */
+  codigo_afectacion_igv?: string | null;
   es_bonificacion?: boolean;
   descripcion_original?: string;
   detalle_origen?: number | null;
@@ -153,6 +158,8 @@ export interface CrearDocumentoPayload {
   condicion_pago?: CondicionPago;
   fecha_vencimiento?: string | null;
   cuotas?: { fecha_vencimiento: string; monto: string }[];
+  /** Bloque 17A: código del motivo de la nota (catálogo 09 en NC, 10 en ND). */
+  motivo_nota?: string | null;
   fecha_emision: string;
   moneda_codigo: string;
   documento_origen?: number | null;
@@ -223,3 +230,27 @@ export const anularDocumento = async (id: number, motivo: string): Promise<Docum
   const { data } = await apiClient.post<Documento>(`/documentos/${id}/anular/`, { motivo });
   return data;
 };
+
+// ---- Bloque 17A: preparación tributaria (sin XML, firma ni envío) ----------------------------
+
+export type EstadoPreparacion = 'LISTO_PARA_EMISION' | 'NO_PREPARADO';
+export interface ValidacionElectronica {
+  documento_id: number;
+  tipo_comprobante: string;
+  listo: boolean;
+  estado: EstadoPreparacion;
+  errores: string[];
+  advertencias: string[];
+}
+
+export const obtenerValidacionElectronica = async (id: number): Promise<ValidacionElectronica> =>
+  (await apiClient.get<ValidacionElectronica>(`/documentos/${id}/validacion-electronica/`)).data;
+
+export const cambiarMotivoNota = async (id: number, motivo_nota: string): Promise<Documento> =>
+  (await apiClient.put<Documento>(`/documentos/${id}/motivo-nota/`, { motivo_nota })).data;
+
+/** B17A-QA-001: registra el código del Catálogo 07 de una línea gratuita ya guardada. */
+export const cambiarCodigoAfectacion = async (documentoId: number, detalleId: number, codigo: string): Promise<Documento> =>
+  (await apiClient.put<Documento>(`/documentos/${documentoId}/detalles/${detalleId}/codigo-afectacion/`, {
+    codigo_afectacion_igv: codigo,
+  })).data;

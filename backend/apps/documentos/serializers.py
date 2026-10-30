@@ -160,6 +160,9 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
     cuotas = serializers.SerializerMethodField()
     pagos = serializers.SerializerMethodField()
     finanzas = serializers.SerializerMethodField()
+    # Bloque 17A: motivo tributario de la nota (catálogo 09/10).
+    motivo_nota_codigo = serializers.ReadOnlyField(source='motivo_nota.codigo')
+    motivo_nota_descripcion = serializers.ReadOnlyField(source='motivo_nota.descripcion')
 
     def get_cuotas(self, obj):
         return DocumentoCuotaSerializer(obj.cuotas.all(), many=True).data
@@ -204,6 +207,8 @@ class DocumentoDetailSerializer(serializers.ModelSerializer):
             'total',
             'documento_origen',
             'documento_origen_comprobante',
+            'motivo_nota_codigo',
+            'motivo_nota_descripcion',
             'origen_captura',
             'estado',
             'estado_revision',
@@ -275,6 +280,8 @@ class DocumentoCreateSerializer(serializers.ModelSerializer):
     condicion_pago = serializers.ChoiceField(choices=['CONTADO', 'CREDITO'], required=False, default='CONTADO')
     fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
     cuotas = CuotaEntradaSerializer(many=True, required=False, default=list)
+    # Bloque 17A: código del motivo tributario (catálogo 09 en NC, 10 en ND).
+    motivo_nota = serializers.CharField(max_length=2, required=False, allow_blank=True, allow_null=True)
     detalles = DocumentoDetalleEntradaSerializer(many=True, write_only=True, allow_empty=False)
 
     class Meta:
@@ -296,6 +303,7 @@ class DocumentoCreateSerializer(serializers.ModelSerializer):
             'condicion_pago',
             'fecha_vencimiento',
             'cuotas',
+            'motivo_nota',
             'detalles',
         ]
         read_only_fields = ['id']

@@ -11,7 +11,9 @@ import {
   Save,
   Check,
   Hash,
+  FileBadge,
 } from 'lucide-react'
+import { DatosFiscalesPanel } from '../../components/tributario/DatosFiscalesPanel'
 import { SeriesComprobantePanel } from '../../components/finanzas/SeriesComprobantePanel'
 import {
   actualizarConfigEmpresa,
@@ -46,6 +48,9 @@ const mensajeError = (error: unknown) => {
   return 'No se pudo completar la operación.'
 }
 
+// Bloque 17A: dirección y ubigeo del establecimiento (el principal es ConfigEmpresa).
+const ESTABLECIMIENTO_INICIAL = { codigo_sunat: '', nombre: '', activo: true, direccion: '', ubigeo: '' }
+
 export const EmpresasPage: React.FC = () => {
   const {
     empresaActiva,
@@ -74,11 +79,7 @@ export const EmpresasPage: React.FC = () => {
     direccion: '',
     moneda_base_codigo: 'PEN',
   })
-  const [establecimientoForm, setEstablecimientoForm] = useState({
-    codigo_sunat: '',
-    nombre: '',
-    activo: true,
-  })
+  const [establecimientoForm, setEstablecimientoForm] = useState(ESTABLECIMIENTO_INICIAL)
   const [configForm, setConfigForm] = useState({
     tolerancia_residuo_pen: '0.05000000',
     decimales_calculo: 6,
@@ -161,9 +162,14 @@ export const EmpresasPage: React.FC = () => {
   const guardarEstablecimiento = (event: FormEvent) => {
     event.preventDefault()
     void ejecutar(async () => {
-      if (editando) await actualizarEstablecimiento(editando, establecimientoForm)
-      else await crearEstablecimiento(establecimientoForm)
-      setEstablecimientoForm({ codigo_sunat: '', nombre: '', activo: true })
+      const payload = {
+        ...establecimientoForm,
+        direccion: establecimientoForm.direccion.trim() || null,
+        ubigeo: establecimientoForm.ubigeo.trim() || null,
+      }
+      if (editando) await actualizarEstablecimiento(editando, payload)
+      else await crearEstablecimiento(payload)
+      setEstablecimientoForm(ESTABLECIMIENTO_INICIAL)
       setEditando(null)
       setEstablecimientos(await obtenerEstablecimientos())
     }, editando ? 'Establecimiento actualizado.' : 'Establecimiento creado.')
@@ -312,6 +318,9 @@ export const EmpresasPage: React.FC = () => {
           <TabsTrigger value="establecimientos" icon={<MapPin className="h-3.5 w-3.5" />}>
             Establecimientos SUNAT ({establecimientos.length})
           </TabsTrigger>
+          <TabsTrigger value="fiscal" icon={<FileBadge className="h-3.5 w-3.5" />}>
+            Datos fiscales
+          </TabsTrigger>
           <TabsTrigger value="series" icon={<Hash className="h-3.5 w-3.5" />}>
             Series de comprobantes
           </TabsTrigger>
@@ -420,6 +429,27 @@ export const EmpresasPage: React.FC = () => {
                         onChange={(e) => setEstablecimientoForm({ ...establecimientoForm, nombre: e.target.value })}
                       />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="est-direccion">Dirección</Label>
+                      <Input
+                        id="est-direccion"
+                        maxLength={300}
+                        placeholder="Dirección del establecimiento"
+                        value={establecimientoForm.direccion}
+                        onChange={(e) => setEstablecimientoForm({ ...establecimientoForm, direccion: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="est-ubigeo">Ubigeo (INEI)</Label>
+                      <Input
+                        id="est-ubigeo"
+                        maxLength={6}
+                        placeholder="150101"
+                        className="font-mono tabular-nums"
+                        value={establecimientoForm.ubigeo}
+                        onChange={(e) => setEstablecimientoForm({ ...establecimientoForm, ubigeo: e.target.value })}
+                      />
+                    </div>
                     <div className="flex items-center gap-2 pt-1">
                       <input
                         type="checkbox"
@@ -442,7 +472,7 @@ export const EmpresasPage: React.FC = () => {
                           variant="secondary"
                           onClick={() => {
                             setEditando(null)
-                            setEstablecimientoForm({ codigo_sunat: '', nombre: '', activo: true })
+                            setEstablecimientoForm(ESTABLECIMIENTO_INICIAL)
                           }}
                         >
                           Cancelar
@@ -468,6 +498,7 @@ export const EmpresasPage: React.FC = () => {
                         <TableRow>
                           <TableHead>Código SUNAT</TableHead>
                           <TableHead>Nombre</TableHead>
+                          <TableHead>Dirección / Ubigeo</TableHead>
                           <TableHead>Estado</TableHead>
                           <TableHead className="text-right">Acción</TableHead>
                         </TableRow>
@@ -476,7 +507,14 @@ export const EmpresasPage: React.FC = () => {
                         {establecimientos.map((e) => (
                           <TableRow key={e.id}>
                             <TableCell numeric className="font-semibold text-slate-900">{e.codigo_sunat}</TableCell>
-                            <TableCell className="font-medium text-slate-900">{e.nombre}</TableCell>
+                            <TableCell className="font-medium text-slate-900">
+                              {e.nombre}
+                              {e.es_principal && <Badge variant="info" size="xs" className="ml-2">PRINCIPAL</Badge>}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-600">
+                              <div>{e.direccion || '—'}</div>
+                              <div className="font-mono text-slate-400">{e.ubigeo || ''}</div>
+                            </TableCell>
                             <TableCell>
                               <Badge variant={e.activo ? 'success' : 'neutral'} dot>
                                 {e.activo ? 'ACTIVO' : 'INACTIVO'}
@@ -493,6 +531,8 @@ export const EmpresasPage: React.FC = () => {
                                     codigo_sunat: e.codigo_sunat,
                                     nombre: e.nombre,
                                     activo: e.activo,
+                                    direccion: e.direccion ?? '',
+                                    ubigeo: e.ubigeo ?? '',
                                   })
                                 }}
                               >
@@ -507,6 +547,17 @@ export const EmpresasPage: React.FC = () => {
                 </CardContent>
               </Card>
             </div>
+          )}
+        </TabsContent>
+
+        {/* Bloque 17A: datos fiscales del emisor electrónico */}
+        <TabsContent value="fiscal" className="space-y-4">
+          {!empresaActiva ? (
+            <div className="p-8 text-center text-sm text-slate-500 rounded-xl border border-slate-200 bg-white">
+              Selecciona una empresa activa para revisar sus datos fiscales.
+            </div>
+          ) : (
+            <DatosFiscalesPanel key={empresaActiva.id} esAdmin={esAdminActiva} />
           )}
         </TabsContent>
 

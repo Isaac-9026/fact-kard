@@ -25,6 +25,8 @@ export interface LineaOrigen {
   cantidad_base: string;
   precio_unitario: string;
   afectacion_igv?: string | null;
+  /** B17A-QA-001: código del Catálogo 07 de la línea de origen (la nota lo hereda si es gratuita). */
+  codigo_afectacion_igv?: string | null;
   cantidad_disponible_devolucion?: string | null;
 }
 

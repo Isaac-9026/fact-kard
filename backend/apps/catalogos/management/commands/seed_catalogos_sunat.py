@@ -5,7 +5,9 @@ from apps.catalogos.models import (
     UnidadMedida,
     TipoComprobante,
     TipoOperacion,
+    MotivoNota,
 )
+from apps.catalogos.motivos_nota import MOTIVOS_NOTA
 
 
 class Command(BaseCommand):
@@ -114,5 +116,11 @@ class Command(BaseCommand):
                     'activo': True,
                 }
             )
+
+        # 6. Bloque 17A: catálogos 09/10 (motivos de nota de crédito / débito)
+        for catalogo, filas in MOTIVOS_NOTA.items():
+            for codigo, descripcion, activo in filas:
+                MotivoNota.objects.update_or_create(
+                    catalogo=catalogo, codigo=codigo, defaults={'descripcion': descripcion, 'activo': activo})
 
         self.stdout.write(self.style.SUCCESS('Catálogos SUNAT poblados exitosamente.'))

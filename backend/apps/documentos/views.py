@@ -523,3 +523,106 @@ class CuentasPorCobrarView(CuentasView):
 
 class CuentasPorPagarView(CuentasView):
     clase = 'COMPRA'
+
+
+# ---- Bloque 17A: preparación tributaria (sin XML, firma ni envío) ---------------------------
+from django.db import transaction  # noqa: E402
+from rest_framework.exceptions import NotFound  # noqa: E402
+
+from apps.documentos import reglas_tributarias  # noqa: E402
+
+
+def documento_para_validacion(pk, empresa_id, *, bloquear=False):
+    qs = Documento.objects.filter(pk=pk, empresa_id=empresa_id).select_related(
+        'empresa__configuracion', 'tipo_comprobante', 'tercero', 'serie_comprobante__establecimiento__empresa__configuracion',
+        'documento_origen__tipo_comprobante', 'motivo_nota', 'moneda_codigo',
+    )
+    if bloquear:
+        qs = qs.select_for_update(of=('self',))
+    doc = qs.first()
+    if doc is None:
+        raise NotFound('El documento no existe o no pertenece a la empresa activa.')
+    return doc
+
+
+class DocumentoValidacionElectronicaView(APIView):
+    """
+    GET: ¿el comprobante cumple los requisitos previos a la emisión electrónica?
+    Solo lectura: {listo, estado (LISTO_PARA_EMISION / NO_PREPARADO), errores, advertencias}.
+    """
+    permission_classes = [TieneEmpresaActiva]
+
+    def get(self, request, pk):
+        doc = documento_para_validacion(pk, request.empresa_id)
+        return Response(reglas_tributarias.validar_para_emision_electronica(doc))
+
+
+class DocumentoMotivoNotaView(APIView):
+    """PUT {motivo_nota: '07'}: registra o corrige el motivo tributario de una nota (auditado)."""
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
+
+    def put(self, request, pk):
+        codigo = (request.data.get('motivo_nota') or '').strip() if isinstance(request.data, dict) else ''
+        if not codigo:
+            raise ValidationError({'motivo_nota': 'Seleccione el motivo de la nota.'})
+        with transaction.atomic():
+            doc = documento_para_validacion(pk, request.empresa_id, bloquear=True)
+            if not doc.tipo_comprobante.es_nota:
+                raise ValidationError({'motivo_nota': 'Solo las notas de crédito o débito llevan motivo.'})
+            if doc.estado == 'ANULADO':
+                raise ValidationError({'motivo_nota': 'La nota está anulada.'})
+            motivo = reglas_tributarias.resolver_motivo_nota(codigo, doc.tipo_comprobante)
+            anterior = doc.motivo_nota
+            if anterior is None or anterior.pk != motivo.pk:
+                doc.motivo_nota = motivo
+                doc.save(update_fields=['motivo_nota'])
+                registrar_auditoria(
+                    empresa_id=request.empresa_id, usuario_id=request.user.id, accion='CAMBIAR_MOTIVO_NOTA',
+                    entidad='documento', registro_id=doc.id,
+                    valor_anterior={'motivo_nota': f'{anterior.catalogo}-{anterior.codigo}' if anterior else None},
+                    valor_nuevo={'motivo_nota': f'{motivo.catalogo}-{motivo.codigo}'},
+                    motivo='Motivo tributario de la nota',
+                )
+        return Response(DocumentoDetailSerializer(Documento.objects.get(pk=doc.pk)).data)
+
+
+class DetalleCodigoAfectacionView(APIView):
+    """
+    B17A-QA-001: PUT {codigo_afectacion_igv: '15'} registra o corrige el código del Catálogo 07
+    de una línea GRATUITA ya guardada (auditado). Solo información tributaria: no cambia precio,
+    IGV, totales, costo, Kardex ni movimientos.
+    """
+    permission_classes = [TieneEmpresaActiva, EsAdminEmpresa]
+
+    def put(self, request, pk, detalle_id):
+        from apps.documentos.afectacion_igv import GRATUITO, validar_codigo_gratuito
+        from apps.documentos.models import DocumentoDetalle
+        codigo = (request.data.get('codigo_afectacion_igv') or '').strip() if isinstance(request.data, dict) else ''
+        if not codigo:
+            raise ValidationError({'codigo_afectacion_igv': 'Seleccione el código del Catálogo 07.'})
+        with transaction.atomic():
+            doc = documento_para_validacion(pk, request.empresa_id, bloquear=True)
+            if doc.estado == 'ANULADO':
+                raise ValidationError({'codigo_afectacion_igv': 'El comprobante está anulado.'})
+            linea = DocumentoDetalle.objects.select_for_update().filter(pk=detalle_id, documento_id=doc.id).first()
+            if linea is None:
+                raise NotFound('La línea no existe en este comprobante.')
+            if linea.afectacion_igv != GRATUITO:
+                raise ValidationError({'codigo_afectacion_igv': (
+                    f'La línea {linea.linea} es {linea.afectacion_igv or "GRAVADO"}: el código específico solo se '
+                    'registra en líneas gratuitas.')})
+            error = validar_codigo_gratuito(codigo)
+            if error:
+                raise ValidationError({'codigo_afectacion_igv': error})
+            anterior = linea.codigo_afectacion_igv
+            if anterior != codigo:
+                linea.codigo_afectacion_igv = codigo
+                linea.save(update_fields=['codigo_afectacion_igv'])
+                registrar_auditoria(
+                    empresa_id=request.empresa_id, usuario_id=request.user.id, accion='CAMBIAR_CODIGO_AFECTACION',
+                    entidad='documento_detalle', registro_id=linea.id,
+                    valor_anterior={'documento_id': doc.id, 'linea': linea.linea, 'codigo_afectacion_igv': anterior},
+                    valor_nuevo={'documento_id': doc.id, 'linea': linea.linea, 'codigo_afectacion_igv': codigo},
+                    motivo='Código del Catálogo 07 de una línea gratuita',
+                )
+        return Response(DocumentoDetailSerializer(Documento.objects.get(pk=doc.pk)).data)

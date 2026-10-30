@@ -105,3 +105,20 @@ export const resolverTipoCambio = async (moneda: string, fecha: string): Promise
   });
   return data;
 };
+
+/** Bloque 17A: motivo tributario de NC (catálogo 09) o ND (catálogo 10). */
+export interface MotivoNota { id: number; catalogo: '09' | '10'; codigo: string; descripcion: string; activo: boolean }
+
+export const obtenerMotivosNota = async (catalogo: '09' | '10'): Promise<MotivoNota[]> =>
+  (await apiClient.get<MotivoNota[]>('/catalogos/motivos-nota/', { params: { catalogo } })).data;
+
+/** B17A-QA-001: Catálogo 07 desde su fuente canónica (backend), con descripción oficial. */
+export interface CodigoAfectacionIgv {
+  codigo: string;
+  descripcion: string;
+  afectacion: 'GRAVADO' | 'EXONERADO' | 'INAFECTO' | 'EXPORTACION' | 'GRATUITO' | null;
+  soportado: boolean;
+}
+
+export const obtenerCatalogo07 = async (): Promise<CodigoAfectacionIgv[]> =>
+  (await apiClient.get<CodigoAfectacionIgv[]>('/catalogos/afectaciones-igv/')).data;

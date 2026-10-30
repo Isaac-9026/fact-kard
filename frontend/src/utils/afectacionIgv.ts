@@ -44,3 +44,42 @@ export function tasaVigente(tasas: TasaIgvVigencia[] | undefined, fecha: string,
 export function igvEditable(afectacion: AfectacionIgv): boolean {
   return afectacion === 'GRAVADO' || afectacion === 'GRATUITO';
 }
+
+// ---- B17A-QA-001: código del Catálogo 07 en líneas gratuitas --------------------------------
+// El catálogo (código, descripción oficial, afectación) llega del backend; aquí no se copia.
+
+export interface EntradaCatalogo07 { codigo: string; descripcion: string; afectacion: AfectacionIgv | null; soportado: boolean }
+
+/** Códigos de transferencia gratuita soportados (11-16, 21, 31-36), en el orden del catálogo. */
+export function codigosGratuitos(catalogo: readonly EntradaCatalogo07[]): EntradaCatalogo07[] {
+  return catalogo.filter((c) => c.afectacion === 'GRATUITO' && c.soportado);
+}
+
+/**
+ * Código que debe conservar la línea al cambiar su afectación: solo una línea GRATUITA guarda
+ * código y solo uno gratuito del catálogo; cualquier otro caso queda vacío (no se arrastra un
+ * dato incompatible).
+ */
+export function reconciliarCodigoAfectacion(
+  afectacion: AfectacionIgv, codigo: string, catalogo: readonly EntradaCatalogo07[],
+): string {
+  if (afectacion !== 'GRATUITO' || !codigo) return '';
+  return codigosGratuitos(catalogo).some((c) => c.codigo === codigo) ? codigo : '';
+}
+
+/** Valor que se envía a la API: el código solo en líneas gratuitas. */
+export function codigoAfectacionParaEnviar(afectacion: AfectacionIgv, codigo: string): string | null {
+  return afectacion === 'GRATUITO' && codigo ? codigo : null;
+}
+
+/**
+ * En ventas (lo que se emitirá electrónicamente) una línea gratuita exige su código del
+ * Catálogo 07. Devuelve el primer error o null.
+ */
+export function errorCodigoGratuito(
+  lineas: readonly { afectacion: AfectacionIgv; codigo: string }[], clase: 'COMPRA' | 'VENTA',
+): string | null {
+  if (clase !== 'VENTA') return null;
+  const i = lineas.findIndex((l) => l.afectacion === 'GRATUITO' && !l.codigo);
+  return i < 0 ? null : `Línea ${i + 1}: seleccione el código del Catálogo 07 de la operación gratuita (11-16, 21 o 31-36).`;
+}

@@ -11,6 +11,7 @@ from apps.empresas.models import CierrePeriodo, ConfigEmpresa, ConfigIgvPeriodo,
 from apps.empresas.serializers import (
     ConfigEmpresaSerializer,
     ConfigIgvPeriodoSerializer,
+    DatosFiscalesEmpresaSerializer,
     EmpresaSerializer,
     EstablecimientoSerializer,
     PeriodoCreateSerializer,
@@ -118,13 +119,49 @@ class ConfigEmpresaView(APIView):
         return Response(serializer.data)
 
 
+class DatosFiscalesEmpresaView(APIView):
+    """
+    Bloque 17A: datos fiscales del emisor (empresa activa) y su validación previa a la emisión.
+    GET para cualquier usuario de la empresa; PATCH solo ADMIN (auditado).
+    """
+    def _respuesta(self, empresa):
+        from apps.documentos.reglas_tributarias import validar_emisor
+        errores, advertencias = validar_emisor(empresa)
+        return {**DatosFiscalesEmpresaSerializer(empresa).data,
+                'validacion': {'listo': not errores, 'errores': errores, 'advertencias': advertencias}}
+
+    def get(self, request):
+        return Response(self._respuesta(_empresa_activa(request)))
+
+    def patch(self, request):
+        empresa = _empresa_activa(request)
+        if getattr(request, 'rol_empresa', None) != 'ADMIN' and not getattr(request.user, 'es_admin_global', False):
+            raise PermissionDenied('Se requieren privilegios de Administrador para modificar los datos fiscales.')
+        with transaction.atomic():
+            empresa = Empresa.objects.select_for_update().get(pk=empresa.pk)
+            antes = DatosFiscalesEmpresaSerializer(empresa).data
+            serializer = DatosFiscalesEmpresaSerializer(empresa, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            empresa = serializer.save()
+            despues = DatosFiscalesEmpresaSerializer(empresa).data
+            cambios = {k: despues[k] for k in despues if despues[k] != antes[k]}
+            if cambios:
+                registrar_auditoria(
+                    empresa_id=empresa.id, usuario_id=request.user.id, accion='ACTUALIZAR_DATOS_FISCALES',
+                    entidad='empresa', registro_id=empresa.id,
+                    valor_anterior={k: antes[k] for k in cambios}, valor_nuevo=cambios,
+                    motivo='Datos fiscales del emisor',
+                )
+        return Response(self._respuesta(empresa))
+
+
 class EstablecimientoListCreateView(generics.ListCreateAPIView):
     serializer_class = EstablecimientoSerializer
     permission_classes = [TieneEmpresaActiva]
 
     def get_queryset(self):
         empresa = _empresa_activa(self.request)
-        return Establecimiento.objects.filter(empresa_id=empresa.id).order_by('codigo_sunat')
+        return Establecimiento.objects.filter(empresa_id=empresa.id).select_related('empresa__configuracion').order_by('codigo_sunat')
 
     def perform_create(self, serializer):
         if getattr(self.request, 'rol_empresa', None) != 'ADMIN' and not getattr(self.request.user, 'es_admin_global', False):

@@ -9,6 +9,7 @@ from apps.catalogos.models import (
     TipoExistencia,
     UnidadMedida,
     MetodoPago,
+    MotivoNota,
 )
 
 
@@ -37,6 +38,13 @@ class TipoExistenciaSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoExistencia
         fields = ('codigo', 'descripcion')
+
+
+class MotivoNotaSerializer(serializers.ModelSerializer):
+    """Bloque 17A: motivo tributario de NC (catálogo 09) / ND (catálogo 10)."""
+    class Meta:
+        model = MotivoNota
+        fields = ('id', 'catalogo', 'codigo', 'descripcion', 'activo')
 
 
 class MetodoPagoSerializer(serializers.ModelSerializer):

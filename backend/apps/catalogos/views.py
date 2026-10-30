@@ -22,6 +22,7 @@ from apps.catalogos.models import (
     TipoExistencia,
     UnidadMedida,
     MetodoPago,
+    MotivoNota,
 )
 from apps.catalogos.serializers import (
     MonedaSerializer,
@@ -30,6 +31,7 @@ from apps.catalogos.serializers import (
     TipoExistenciaSerializer,
     UnidadMedidaSerializer,
     MetodoPagoSerializer,
+    MotivoNotaSerializer,
     TipoCambioSerializer,
     TipoCambioResolverSerializer,
 )
@@ -60,6 +62,38 @@ class MetodoPagoListView(generics.ListAPIView):
     serializer_class = MetodoPagoSerializer
     queryset = MetodoPago.objects.filter(activo=True).order_by('codigo')
     pagination_class = None
+
+
+class MotivoNotaListView(generics.ListAPIView):
+    """
+    Bloque 17A: motivos tributarios de notas. `?catalogo=09` (NC) o `10` (ND); por defecto
+    solo activos (`?todos=1` incluye los inactivos).
+    """
+    serializer_class = MotivoNotaSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = MotivoNota.objects.all().order_by('catalogo', 'codigo')
+        catalogo = self.request.query_params.get('catalogo')
+        if catalogo:
+            if catalogo not in ('09', '10'):
+                raise ValidationError({'catalogo': 'Use 09 (nota de crédito) o 10 (nota de débito).'})
+            qs = qs.filter(catalogo=catalogo)
+        if self.request.query_params.get('todos') not in ('1', 'true'):
+            qs = qs.filter(activo=True)
+        return qs
+
+
+class AfectacionIgvCatalogoView(APIView):
+    """
+    B17A-QA-001: Catálogo 07 (tipo de afectación del IGV) desde su fuente canónica
+    (documentos/afectacion_igv.py): código, descripción oficial, afectación interna y soporte.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.documentos.afectacion_igv import catalogo_07
+        return Response(catalogo_07())
 
 
 class UnidadMedidaListView(generics.ListAPIView):

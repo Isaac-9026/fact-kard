@@ -84,6 +84,15 @@ class Documento(models.Model):
         db_column='serie_comprobante_id',
         related_name='documentos'
     )
+    # Bloque 17A: motivo tributario de la nota (catálogo 09 en NC, 10 en ND). Solo en notas.
+    motivo_nota = models.ForeignKey(
+        'catalogos.MotivoNota',
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        db_column='motivo_nota_id',
+        related_name='documentos'
+    )
 
     origen_captura = models.CharField(max_length=20, default='MANUAL', db_default='MANUAL')
     estado = models.CharField(max_length=20, default='BORRADOR', db_default='BORRADOR')
