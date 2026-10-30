@@ -119,9 +119,13 @@ export interface DocumentosPageProps {
 // Bloque 10: inputs numéricos del detalle — texto completo a la derecha, sin las flechas del
 // navegador (le quitaban ~16 px), y step="any" para aceptar los decimales que el backend admite.
 const CLASE_INPUT_NUMERICO =
-  'w-full h-8 rounded border border-slate-200 bg-white px-2.5 text-right font-mono tabular-nums text-xs ' +
-  'focus:ring-1 focus:ring-slate-900 disabled:bg-slate-50 disabled:text-slate-400 ' +
-  '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+  'w-full h-8.5 rounded-md border border-slate-200 bg-white px-2.5 text-right font-mono tabular-nums text-xs ' +
+  'focus:ring-1 focus:ring-slate-900 focus:border-slate-900 disabled:bg-slate-50 disabled:text-slate-400 ' +
+  '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none transition-colors'
+
+const CLASE_SELECT_TABLA =
+  'w-full h-8.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-800 ' +
+  'focus:ring-1 focus:ring-slate-900 focus:border-slate-900 disabled:bg-slate-50 disabled:text-slate-400 transition-colors'
 
 // Bloque 10: los errores de un formulario en modal se muestran DENTRO de ese modal (antes
 // iban a `errorGlobal`, que se pinta en la página de atrás, tapada por el modal).
@@ -1029,7 +1033,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                         {doc.fecha_emision}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
+                        <div className="flex flex-col items-start gap-0.5">
                           <span className="font-semibold text-slate-900 text-xs truncate max-w-xs">
                             {contraparteDocumento(doc).nombre}
                           </span>
@@ -1039,8 +1043,8 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-mono font-bold text-xs text-slate-800">{doc.moneda_codigo}</span>
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200/60">{doc.moneda_codigo}</span>
                           {doc.moneda_codigo === 'USD' && (
                             <span className="font-mono text-[10px] text-slate-500">
                               TC: {formatearDecimal(doc.monto_tc, { min: 4, max: 4, vacio: '-' })}
@@ -1089,6 +1093,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               type="button"
                               size="icon-sm"
                               variant="ghost"
+                              className="hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
                               title="Mesa de Revisión Contable"
                               onClick={() => {
                                 setErrorModal(null)
@@ -1108,10 +1113,11 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               type="button"
                               size="icon-sm"
                               variant="ghost"
+                              className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200/90 transition-all shadow-2xs"
                               title="Confirmar e Impactar Kardex"
                               onClick={() => handleConfirmar(doc)}
                             >
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                              <CheckCircle2 className="h-3.5 w-3.5" />
                             </Button>
                           )}
 
@@ -1121,6 +1127,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               type="button"
                               size="icon-sm"
                               variant="ghost"
+                              className="hover:bg-rose-50 hover:text-rose-600 transition-colors"
                               title="Anular con Extorno"
                               onClick={() => {
                                 setErrorModal(null)
@@ -1158,6 +1165,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
           isOpen={modalNuevoAbierto}
           onClose={() => setModalNuevoAbierto(false)}
           maxWidth="7xl"
+          className="max-w-[96vw] 2xl:max-w-[1720px] max-h-[94vh] w-full"
           icon={<Receipt className="h-5 w-5" />}
           title="Registrar Comprobante Comercial"
           description="Captura manual de facturas, boletas y notas de crédito/débito con validación estricta."
@@ -1172,9 +1180,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                   <dt className="text-slate-500">IGV:</dt>
                   <dd className="font-semibold text-slate-800">{simboloMoneda} {totalesCalculados.igv}</dd>
                 </div>
-                <div className="flex items-baseline gap-2 rounded-md border border-indigo-100 bg-indigo-50/70 px-3 py-1.5">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Total:</dt>
-                  <dd className="text-base font-bold text-indigo-700">{simboloMoneda} {totalesCalculados.total}</dd>
+                <div className="flex items-baseline gap-1.5 text-xs">
+                  <dt className="font-semibold text-slate-700">Total:</dt>
+                  <dd className="text-base font-bold text-slate-950">{simboloMoneda} {totalesCalculados.total}</dd>
                 </div>
               </dl>
               <div className="flex justify-end gap-2">
@@ -1196,7 +1204,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-100 pb-1">
                 1. Cabecera del Documento
               </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
                 <div className="space-y-1">
                   <Label required>Clase de Operación</Label>
                   <Select
@@ -1340,7 +1348,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                 </div>
 
                 {formMoneda === 'USD' && (
-                  <div className="space-y-1 sm:col-span-2">
+                  <div className="space-y-1 sm:col-span-2 xl:col-span-1">
                     <Label>TC Venta SBS {cargandoTc && '⏳'}</Label>
                     <Input
                       disabled
@@ -1355,7 +1363,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                 )}
 
                 {esNota && (
-                  <div className="space-y-1 sm:col-span-3">
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-3 xl:col-span-2">
                     <Label required>Documento de Origen Referenciado (Obligatorio para NC/ND)</Label>
                     <Select
                       value={formDocOrigen}
@@ -1376,40 +1384,45 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
 
             {/* Líneas de Detalle */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-1">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  2. Líneas de Detalle del Comprobante
-                </h4>
+              <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    2. Líneas de Detalle del Comprobante
+                  </h4>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                    {lineas.length} {lineas.length === 1 ? 'línea' : 'líneas'}
+                  </span>
+                </div>
                 <Button type="button" variant="secondary" size="xs" onClick={agregarLinea}>
-                  <Plus className="h-3 w-3 mr-1" /> Agregar Línea
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar Línea
                 </Button>
               </div>
 
               {/* Bloque 10: la tabla conserva anchos legibles y se desplaza SOLO dentro de esta
                   sección (min-w-0 evita que estire el modal o la página). */}
-              <div className="min-w-0 overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full min-w-[1420px] text-xs text-left border-collapse">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="min-w-0 overflow-x-auto rounded-xl border border-slate-200/90 bg-white shadow-2xs">
+                <table className="w-full min-w-[1600px] text-xs text-left border-collapse">
+                  <thead className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
                     <tr>
-                      <th className="p-2 w-8 text-center">#</th>
-                      {esNota && <th className="p-2 min-w-[240px]">Línea de origen</th>}
-                      <th className="p-2 min-w-[210px]">Producto *</th>
-                      <th className="p-2 min-w-[140px]">Unidad presentación *</th>
-                      <th className="p-2 min-w-[140px]">Almacén *</th>
-                      <th className="p-2 min-w-[150px]">Operación *</th>
-                      <th className="p-2 min-w-[140px] text-right">Cantidad</th>
-                      <th className="p-2 min-w-[148px] text-right whitespace-nowrap">
+                      <th className="px-3 py-2.5 w-10 text-center">#</th>
+                      {esNota && <th className="px-3 py-2.5 min-w-[260px]">Línea de origen</th>}
+                      <th className="px-3 py-2.5 min-w-[300px]">Producto *</th>
+                      <th className="px-3 py-2.5 min-w-[150px]">Unidad presentación *</th>
+                      <th className="px-3 py-2.5 min-w-[160px]">Almacén *</th>
+                      <th className="px-3 py-2.5 min-w-[180px]">Operación *</th>
+                      <th className="px-3 py-2.5 min-w-[130px] text-right">Cantidad</th>
+                      <th className="px-3 py-2.5 min-w-[145px] text-right whitespace-nowrap">
                         <span className="hidden sm:inline">Precio unitario</span>
                         <span className="sm:hidden">Precio unit.</span>
                       </th>
-                      <th className="p-2 min-w-[124px]">Afectación IGV</th>
-                      <th className="p-2 min-w-[140px] text-right">IGV</th>
-                      <th className="p-2 min-w-[64px] text-center">Bonif.</th>
-                      <th className="p-2 min-w-[128px] text-right whitespace-nowrap">
+                      <th className="px-3 py-2.5 min-w-[185px]">Afectación IGV</th>
+                      <th className="px-3 py-2.5 min-w-[130px] text-right">IGV</th>
+                      <th className="px-3 py-2.5 min-w-[70px] text-center">Bonif.</th>
+                      <th className="px-3 py-2.5 min-w-[130px] text-right whitespace-nowrap">
                         <span className="hidden sm:inline">Cantidad base</span>
                         <span className="sm:hidden">Cant. base</span>
                       </th>
-                      <th className="p-2 w-8"><span className="sr-only">Eliminar</span></th>
+                      <th className="px-2 py-2.5 w-10 text-center"><span className="sr-only">Eliminar</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1417,13 +1430,13 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                       const cantBase = formatearDecimal(cantidadBase(linea.cantidadOriginal, linea.factorConversion), { min: 2, max: 6 })
 
                       return (
-                        <tr key={linea.tempId} className="hover:bg-slate-50/50">
-                          <td className="p-2 text-center font-mono text-slate-400">{idx + 1}</td>
+                        <tr key={linea.tempId} className="hover:bg-slate-50/80 focus-within:bg-slate-50/60 transition-colors">
+                          <td className="px-3 py-2.5 text-center font-mono text-slate-400 font-semibold">{idx + 1}</td>
                           {esNota && (
-                            <td className="p-2">
+                            <td className="px-3 py-2.5">
                               <select
                                 aria-label={`Línea de origen de la línea ${idx + 1}`}
-                                className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                                className={CLASE_SELECT_TABLA}
                                 value={linea.detalleOrigenId ?? ''}
                                 onChange={(e) => elegirLineaOrigen(linea.tempId, e.target.value)}
                                 disabled={!formDocOrigen}
@@ -1439,9 +1452,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               </select>
                             </td>
                           )}
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <select
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              className={CLASE_SELECT_TABLA}
                               value={linea.productoId}
                               onChange={(e) => actualizarLinea(linea.tempId, 'productoId', e.target.value)}
                               required
@@ -1454,9 +1467,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <select
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              className={CLASE_SELECT_TABLA}
                               value={linea.productoUnidadId}
                               onChange={(e) => actualizarLinea(linea.tempId, 'productoUnidadId', e.target.value)}
                               required
@@ -1469,9 +1482,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <select
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              className={CLASE_SELECT_TABLA}
                               value={linea.almacenId}
                               onChange={(e) => actualizarLinea(linea.tempId, 'almacenId', e.target.value)}
                               required
@@ -1483,9 +1496,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <select
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              className={CLASE_SELECT_TABLA}
                               value={linea.tipoOperacionId}
                               onChange={(e) => actualizarLinea(linea.tempId, 'tipoOperacionId', e.target.value ? Number(e.target.value) : '')}
                               required
@@ -1497,7 +1510,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <input
                               type="number"
                               inputMode="decimal"
@@ -1510,7 +1523,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               required
                             />
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <input
                               type="number"
                               inputMode="decimal"
@@ -1524,9 +1537,9 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               required
                             />
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <select
-                              className="w-full h-8 rounded border border-slate-200 bg-white px-2 text-xs focus:ring-1 focus:ring-slate-900"
+                              className={CLASE_SELECT_TABLA}
                               value={linea.afectacionIgv}
                               disabled={linea.esBonificacion}
                               onChange={(e) => actualizarLinea(linea.tempId, 'afectacionIgv', e.target.value)}
@@ -1536,7 +1549,7 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               ))}
                             </select>
                           </td>
-                          <td className="p-2">
+                          <td className="px-3 py-2.5">
                             <input
                               type="number"
                               inputMode="decimal"
@@ -1549,22 +1562,24 @@ export const DocumentosPage: React.FC<DocumentosPageProps> = ({ vista = 'COMPROB
                               onChange={(e) => actualizarLinea(linea.tempId, 'igv', e.target.value)}
                             />
                           </td>
-                          <td className="p-2 text-center">
+                          <td className="px-3 py-2.5 text-center">
                             <input
                               type="checkbox"
                               checked={linea.esBonificacion}
                               onChange={(e) => actualizarLinea(linea.tempId, 'esBonificacion', e.target.checked)}
-                              className="rounded text-indigo-600 cursor-pointer"
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                           </td>
-                          <td className="p-2 text-right font-mono tabular-nums text-slate-500 font-semibold whitespace-nowrap">
-                            {cantBase}
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                            <span className="inline-block bg-slate-100/70 border border-slate-200/60 rounded px-2 py-0.5 text-slate-700 font-mono tabular-nums font-semibold text-xs">
+                              {cantBase}
+                            </span>
                           </td>
-                          <td className="p-2 text-center">
+                          <td className="px-3 py-2.5 text-center">
                             <button
                               type="button"
                               onClick={() => eliminarLinea(linea.tempId)}
-                              className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+                              className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded p-1.5 transition-colors cursor-pointer"
                               title="Eliminar fila"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
