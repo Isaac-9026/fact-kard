@@ -8,13 +8,20 @@ import {
   AlertCircle,
   User,
   Scale,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
 import { getAuditoriaPaginadaApi, type AuditoriaItem } from '../../api/auditoria'
 import { diferirCarga } from '../../utils/efectos'
 import { Paginacion } from '../../components/ui/paginacion'
 import {
-  PAGE_SIZE_DEFECTO, claveConsulta, irAPagina, paginaVigente, paramsPaginacion, type EstadoPagina,
+  PAGE_SIZE_DEFECTO,
+  claveConsulta,
+  irAPagina,
+  paginaVigente,
+  paramsPaginacion,
+  type EstadoPagina,
 } from '../../utils/paginacion'
 import type { AxiosError } from 'axios'
 import { PageHeader } from '../../components/ui/page-header'
@@ -24,6 +31,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import { Badge } from '../../components/ui/badge'
 import { Input } from '../../components/ui/input'
 import { Modal } from '../../components/ui/modal'
+
+const ENTIDADES_COMUNES = ['DOCUMENTO', 'MOVIMIENTO', 'CIERRE', 'PERIODO', 'NOTA_INTERNA', 'SALDO_INICIAL']
+const ACCIONES_COMUNES = ['CREAR', 'MODIFICAR', 'ELIMINAR', 'EXTORNO']
 
 export const AuditoriaPage: React.FC = () => {
   const { empresaActiva } = useAuth()
@@ -35,8 +45,9 @@ export const AuditoriaPage: React.FC = () => {
   const [filtroEntidad, setFiltroEntidad] = useState<string>('')
   const [filtroAccion, setFiltroAccion] = useState<string>('')
 
-  // Modal de Detalle JSON
+  // Modal de Detalle JSON y copiado
   const [selectedLog, setSelectedLog] = useState<AuditoriaItem | null>(null)
+  const [copiedSide, setCopiedSide] = useState<'before' | 'after' | null>(null)
 
   // Bloque 7: paginación en el servidor. Cambiar de empresa o de filtro vuelve a la página 1.
   const [total, setTotal] = useState(0)
@@ -80,18 +91,21 @@ export const AuditoriaPage: React.FC = () => {
     setFiltroAccion('')
   }
 
-  const formatFecha = (isoString: string): string => {
+  const formatFecha = (isoString?: string | null): string => {
+    if (!isoString) return '—'
     try {
-      const date = new Date(isoString)
-      return date.toLocaleString('es-PE', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      })
+      const d = new Date(isoString)
+      if (isNaN(d.getTime())) return isoString
+      const dia = String(d.getDate()).padStart(2, '0')
+      const mes = String(d.getMonth() + 1).padStart(2, '0')
+      const anio = d.getFullYear()
+      let horas = d.getHours()
+      const minutos = String(d.getMinutes()).padStart(2, '0')
+      const segundos = String(d.getSeconds()).padStart(2, '0')
+      const ampm = horas >= 12 ? 'pm.' : 'am.'
+      horas = horas % 12 || 12
+      const horasStr = String(horas).padStart(2, '0')
+      return `${dia}/${mes}/${anio}, ${horasStr}:${minutos}:${segundos} ${ampm}`
     } catch {
       return isoString
     }
@@ -117,6 +131,13 @@ export const AuditoriaPage: React.FC = () => {
       return JSON.stringify(data, null, 2)
     }
   }, [])
+
+  const handleCopyJson = (side: 'before' | 'after', data: Record<string, unknown> | null | undefined) => {
+    if (!data) return
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+    setCopiedSide(side)
+    setTimeout(() => setCopiedSide(null), 2000)
+  }
 
   return (
     <div className="space-y-6">
@@ -155,7 +176,7 @@ export const AuditoriaPage: React.FC = () => {
 
       {/* Barra de Filtros */}
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 flex-1 flex-wrap">
               <div className="w-full sm:w-64">
@@ -193,6 +214,47 @@ export const AuditoriaPage: React.FC = () => {
               </Badge>
             </div>
           </div>
+
+          {/* Pastillas de filtro rápido */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs">
+            <span className="text-[11px] font-medium text-slate-400">Entidad:</span>
+            {ENTIDADES_COMUNES.map((ent) => {
+              const activa = filtroEntidad.toUpperCase() === ent
+              return (
+                <button
+                  key={ent}
+                  type="button"
+                  onClick={() => setFiltroEntidad(activa ? '' : ent)}
+                  className={`inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                    activa
+                      ? 'bg-indigo-600 text-white font-medium shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                  }`}
+                >
+                  {ent}
+                </button>
+              )
+            })}
+            <span className="mx-1 text-slate-300">|</span>
+            <span className="text-[11px] font-medium text-slate-400">Acción:</span>
+            {ACCIONES_COMUNES.map((acc) => {
+              const activa = filtroAccion.toUpperCase() === acc
+              return (
+                <button
+                  key={acc}
+                  type="button"
+                  onClick={() => setFiltroAccion(activa ? '' : acc)}
+                  className={`inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                    activa
+                      ? 'bg-slate-800 text-white font-medium shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                  }`}
+                >
+                  {acc}
+                </button>
+              )
+            })}
+          </div>
         </CardContent>
       </Card>
 
@@ -225,16 +287,16 @@ export const AuditoriaPage: React.FC = () => {
               </p>
             </div>
           ) : (
-            <Table>
+            <Table containerClassName="border-0 shadow-none rounded-none max-h-[580px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-16">ID</TableHead>
-                  <TableHead className="w-40">Fecha y Hora</TableHead>
+                  <TableHead className="w-20">ID</TableHead>
+                  <TableHead className="w-48 whitespace-nowrap">Fecha y Hora</TableHead>
                   <TableHead className="w-36">Usuario</TableHead>
-                  <TableHead className="w-40">Acción</TableHead>
-                  <TableHead className="w-40">Entidad</TableHead>
-                  <TableHead numeric className="w-24">Reg. ID</TableHead>
-                  <TableHead>Motivo / Descripción</TableHead>
+                  <TableHead className="w-32 text-center">Acción</TableHead>
+                  <TableHead className="w-36 text-center">Entidad</TableHead>
+                  <TableHead className="w-24 text-center">Reg. ID</TableHead>
+                  <TableHead className="min-w-[200px]">Motivo / Descripción</TableHead>
                   <TableHead className="w-24 text-center">Diff JSON</TableHead>
                 </TableRow>
               </TableHeader>
@@ -243,35 +305,35 @@ export const AuditoriaPage: React.FC = () => {
                   const hasJsonDiff = !!(log.valor_anterior || log.valor_nuevo)
                   return (
                     <TableRow key={log.id}>
-                      <TableCell numeric className="font-semibold text-slate-900">
+                      <TableCell className="w-20 font-mono font-semibold text-slate-900 text-xs">
                         #{log.id}
                       </TableCell>
-                      <TableCell numeric className="text-slate-600 whitespace-nowrap">
+                      <TableCell className="w-48 text-slate-600 text-xs whitespace-nowrap font-mono tabular-nums">
                         {formatFecha(log.fecha)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-36">
                         <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 font-medium">
-                          <User className="h-3 w-3 text-slate-400" />
-                          {log.usuario_username || `ID ${log.usuario_id || 'Sistema'}`}
+                          <User className="h-3 w-3 text-slate-400 shrink-0" />
+                          <span className="truncate">{log.usuario_username || `ID ${log.usuario_id || 'Sistema'}`}</span>
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant={getActionBadgeVariant(log.accion)} size="sm">
+                      <TableCell className="w-32 text-center">
+                        <Badge variant={getActionBadgeVariant(log.accion)} size="sm" className="font-mono text-[10px]">
                           {log.accion}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-800 font-medium">
+                      <TableCell className="w-36 text-center">
+                        <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-800 font-medium border border-slate-200/60">
                           {log.entidad}
                         </code>
                       </TableCell>
-                      <TableCell numeric className="font-semibold text-slate-700">
-                        {log.registro_id !== null && log.registro_id !== undefined ? log.registro_id : '—'}
+                      <TableCell className="w-24 text-center font-mono font-medium text-xs text-slate-600">
+                        {log.registro_id !== null && log.registro_id !== undefined ? `#${log.registro_id}` : '—'}
                       </TableCell>
-                      <TableCell className="max-w-xs truncate text-slate-600">
+                      <TableCell className="min-w-[200px] max-w-xs truncate text-slate-600 text-xs" title={log.motivo || undefined}>
                         {log.motivo || <span className="text-slate-400 italic">Sin motivo especificado</span>}
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="w-24 text-center">
                         {hasJsonDiff ? (
                           <Button
                             type="button"
@@ -279,12 +341,12 @@ export const AuditoriaPage: React.FC = () => {
                             variant="outline"
                             onClick={() => setSelectedLog(log)}
                             title="Ver diferencias JSON"
-                            className="font-mono text-[11px] gap-1"
+                            className="font-mono text-[11px] gap-1 shadow-2xs hover:bg-slate-100"
                           >
-                            <Code2 className="h-3 w-3" /> Ver
+                            <Code2 className="h-3 w-3 text-indigo-600" /> Ver
                           </Button>
                         ) : (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-slate-300 select-none">—</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -330,8 +392,20 @@ export const AuditoriaPage: React.FC = () => {
                     <span className="h-2 w-2 rounded-full bg-rose-500" />
                     Valor Anterior (Before)
                   </span>
+                  {selectedLog.valor_anterior && Object.keys(selectedLog.valor_anterior).length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => handleCopyJson('before', selectedLog.valor_anterior)}
+                      className="h-6 text-[11px] text-rose-700 hover:bg-rose-100 gap-1"
+                    >
+                      {copiedSide === 'before' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                      {copiedSide === 'before' ? 'Copiado' : 'Copiar JSON'}
+                    </Button>
+                  )}
                 </div>
-                <pre className="rounded-lg border border-rose-200 bg-rose-50/40 p-3.5 font-mono text-[11px] text-slate-800 overflow-x-auto max-h-80 leading-relaxed">
+                <pre className="rounded-xl border border-rose-200 bg-rose-50/40 p-3.5 font-mono text-[11px] text-slate-800 overflow-x-auto max-h-80 leading-relaxed overscroll-contain shadow-2xs">
                   {formatJson(selectedLog.valor_anterior)}
                 </pre>
               </div>
@@ -343,15 +417,27 @@ export const AuditoriaPage: React.FC = () => {
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
                     Valor Nuevo (After)
                   </span>
+                  {selectedLog.valor_nuevo && Object.keys(selectedLog.valor_nuevo).length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => handleCopyJson('after', selectedLog.valor_nuevo)}
+                      className="h-6 text-[11px] text-emerald-700 hover:bg-emerald-100 gap-1"
+                    >
+                      {copiedSide === 'after' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                      {copiedSide === 'after' ? 'Copiado' : 'Copiar JSON'}
+                    </Button>
+                  )}
                 </div>
-                <pre className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3.5 font-mono text-[11px] text-slate-800 overflow-x-auto max-h-80 leading-relaxed">
+                <pre className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 font-mono text-[11px] text-slate-800 overflow-x-auto max-h-80 leading-relaxed overscroll-contain shadow-2xs">
                   {formatJson(selectedLog.valor_nuevo)}
                 </pre>
               </div>
             </div>
 
             {selectedLog.motivo && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
                 <strong className="text-slate-900">Motivo registrado:</strong> {selectedLog.motivo}
               </div>
             )}
