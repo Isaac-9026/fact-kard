@@ -28,7 +28,6 @@ import {
   Info,
   Clock,
   Zap,
-  Sparkles,
   Check,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
@@ -385,24 +384,23 @@ export const Formato131Page: React.FC = () => {
                   {/* Sello de Auditoría Criptográfica o Estado Preliminar */}
                   <div className="shrink-0 flex items-center gap-2">
                     {reporte.fuente_cierre ? (
-                      <div className="inline-flex items-center gap-2 text-xs bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-2xs">
+                      <div className="inline-flex items-center gap-2 text-xs bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200/80">
                         <div className="flex items-center gap-1.5 font-medium text-slate-800">
-                          <ShieldCheck className="h-3.5 w-3.5 text-slate-600 shrink-0" />
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                           <span>Cierre v{reporte.fuente_cierre.version}</span>
                         </div>
                         <span className="text-slate-200">|</span>
                         <div className="flex items-center gap-1">
                           <span className="font-mono text-[11px] text-slate-400">SHA-256:</span>
-                          <code className="font-mono text-[11px] font-semibold text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/80">
+                          <code className="font-mono text-[11px] font-semibold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200/80">
                             {reporte.fuente_cierre.hash.slice(0, 16)}…
                           </code>
                         </div>
                       </div>
                     ) : (
-                      <div className="inline-flex items-center gap-1.5 text-xs text-slate-600 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-2xs">
-                        <Sparkles className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        <span>Cálculo Preliminar</span>
-                      </div>
+                      <Badge variant="neutral" size="sm" className="font-medium text-slate-600 bg-slate-100 border border-slate-200/80">
+                        Cálculo Preliminar
+                      </Badge>
                     )}
                   </div>
                 </div>
@@ -411,58 +409,76 @@ export const Formato131Page: React.FC = () => {
               {/* ============================================================ */}
               {/* TABLA OFICIAL DE MOVIMIENTOS SUNAT                           */}
               {/* ============================================================ */}
-              <div className="overflow-x-auto bg-white">
+              <div className="overflow-x-auto bg-white overscroll-contain">
                 <table className="w-full text-xs text-left border-collapse">
                   <thead>
-                    <tr className="bg-slate-100 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-center border-b border-slate-200">
+                    <tr className="bg-slate-100 text-[11px] font-bold text-slate-800 uppercase tracking-wider text-center border-b border-slate-300">
                       <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 w-24">Fecha</th>
-                      <th colSpan={3} className="py-1.5 px-3 border-r border-slate-200 bg-slate-50">
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-slate-200 bg-slate-100/90 text-slate-700">
                         Documento de Traslado / Comprobante
                       </th>
-                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 w-20">Tipo Op.</th>
-                      <th colSpan={3} className="py-1.5 px-3 border-r border-emerald-200 bg-emerald-50/70 text-emerald-900 font-bold">
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-300 w-20">Tipo Op.</th>
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-slate-300 bg-slate-100 text-slate-800 font-bold">
                         Entradas
                       </th>
-                      <th colSpan={3} className="py-1.5 px-3 border-r border-amber-200 bg-amber-50/70 text-amber-900 font-bold">
+                      <th colSpan={3} className="py-1.5 px-3 border-r border-slate-300 bg-slate-100 text-slate-800 font-bold">
                         Salidas
                       </th>
-                      <th colSpan={3} className="py-1.5 px-3 bg-slate-100/90 text-slate-900 font-bold">
+                      <th colSpan={3} className="py-1.5 px-3 bg-slate-100 text-slate-900 font-extrabold">
                         Saldo Final
                       </th>
                     </tr>
-                    <tr className="bg-slate-50 text-[10px] font-semibold text-slate-600 border-b border-slate-200">
+                    <tr className="bg-slate-50 text-[10px] font-semibold text-slate-600 border-b border-slate-300">
                       {/* Documento */}
                       <th className="py-1.5 px-2 text-center">Tipo</th>
                       <th className="py-1.5 px-2 text-center">Serie</th>
                       <th className="py-1.5 px-2 text-center border-r border-slate-200">Número</th>
 
                       {/* Entradas */}
-                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/40">Cantidad</th>
-                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/40">Costo Unit.</th>
-                      <th className="py-1.5 px-2.5 text-right bg-emerald-50/40 border-r border-emerald-200">Costo Total</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono border-r border-slate-300 font-bold">Costo Total</th>
 
                       {/* Salidas */}
-                      <th className="py-1.5 px-2.5 text-right bg-amber-50/40">Cantidad</th>
-                      <th className="py-1.5 px-2.5 text-right bg-amber-50/40">Costo Unit.</th>
-                      <th className="py-1.5 px-2.5 text-right bg-amber-50/40 border-r border-amber-200">Costo Total</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono border-r border-slate-300 font-bold">Costo Total</th>
 
                       {/* Saldo Final */}
-                      <th className="py-1.5 px-2.5 text-right bg-slate-50/60">Cantidad</th>
-                      <th className="py-1.5 px-2.5 text-right bg-slate-50/60">Costo Unit.</th>
-                      <th className="py-1.5 px-2.5 text-right bg-slate-50/60 font-bold text-slate-900">Costo Total</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Cantidad</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono">Costo Unit.</th>
+                      <th className="py-1.5 px-2.5 text-right font-mono font-bold text-slate-900">Costo Total</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono tabular-nums text-[11px]">
                     {(() => {
+                      // Si ya existe un movimiento de Saldo Inicial en la lista (Op. 16 o serie SI),
+                      // o si el arrastre previo es cero, no mostramos fila fantasma adicional.
+                      const tieneMovSaldoInicial = r.movimientos.some(
+                        (m) => m.tipo_operacion === '16' || m.documento?.serie === 'SI'
+                      );
                       const ini = filaSaldoInicial(r);
+                      const tieneArrastre =
+                        ini.cantidad !== '—' &&
+                        ini.cantidad !== '0.00000000' &&
+                        ini.cantidad !== '0' &&
+                        (ini.costoTotal !== '—' && ini.costoTotal !== '0.00000000' && ini.costoTotal !== '0');
+
+                      if (tieneMovSaldoInicial || !tieneArrastre) return null;
+
                       return (
-                        <tr className="bg-slate-50/90 font-semibold text-slate-800">
-                          <td colSpan={11} className="py-2.5 px-3 text-right font-sans text-[11px] uppercase tracking-wide text-slate-600">
+                        <tr className="bg-slate-50/80 font-semibold text-slate-900 border-b border-slate-200">
+                          <td colSpan={5} className="py-2.5 px-3 text-left font-sans text-xs uppercase tracking-wide text-slate-800 font-bold border-r border-slate-300">
                             Saldo Inicial del Período
                           </td>
-                          <td className="py-2.5 px-2.5 text-right bg-slate-50/50 text-slate-900 font-medium">{ini.cantidad}</td>
-                          <td className="py-2.5 px-2.5 text-right bg-slate-50/50 text-slate-700">{ini.costoUnitario}</td>
-                          <td className="py-2.5 px-2.5 text-right bg-slate-50/50 font-bold text-slate-950">{ini.costoTotal}</td>
+                          {/* Entradas del saldo inicial: completamente vacío */}
+                          <td colSpan={3} className="border-r border-slate-300" />
+                          {/* Salidas del saldo inicial: completamente vacío */}
+                          <td colSpan={3} className="border-r border-slate-300" />
+                          {/* Saldo Final Valorizado: de frente muestra los valores */}
+                          <td className="py-2.5 px-2.5 text-right font-mono tabular-nums text-slate-900 font-bold">{ini.cantidad}</td>
+                          <td className="py-2.5 px-2.5 text-right font-mono tabular-nums text-slate-700">{ini.costoUnitario}</td>
+                          <td className="py-2.5 px-2.5 text-right font-mono tabular-nums font-extrabold text-slate-950">{ini.costoTotal}</td>
                         </tr>
                       );
                     })()}
@@ -473,45 +489,62 @@ export const Formato131Page: React.FC = () => {
                         </td>
                       </tr>
                     )}
-                    {r.movimientos.map((m) => (
-                      <tr key={m.movimiento_id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-2 px-3 text-center text-slate-700 whitespace-nowrap font-mono tabular-nums">{m.fecha_emision}</td>
-                        <td className="py-2 px-2 text-center font-mono tabular-nums">{m.documento.tipo_documento}</td>
-                        <td className="py-2 px-2 text-center text-slate-600 font-mono tabular-nums">{m.documento.serie || '—'}</td>
-                        <td className="py-2 px-2 text-center border-r border-slate-200 text-slate-800 font-mono tabular-nums">{m.documento.numero || '—'}</td>
-                        <td className="py-2 px-3 text-center border-r border-slate-200 font-sans font-medium text-slate-700">
-                          {m.tipo_operacion || '—'}
-                        </td>
+                    {r.movimientos.map((m) => {
+                      const esSaldoInicial = m.tipo_operacion === '16' || m.documento?.serie === 'SI';
 
-                        {/* Entradas */}
-                        <td className="py-2 px-2.5 text-right bg-emerald-50/15 text-emerald-800 font-medium font-mono tabular-nums">{n(m.entrada?.cantidad)}</td>
-                        <td className="py-2 px-2.5 text-right bg-emerald-50/15 text-slate-600 font-mono tabular-nums">{n(m.entrada?.costo_unitario)}</td>
-                        <td className="py-2 px-2.5 text-right bg-emerald-50/15 border-r border-emerald-100 font-semibold text-emerald-800 font-mono tabular-nums">
-                          {n(m.entrada?.costo_total)}
-                        </td>
+                      return (
+                        <tr key={m.movimiento_id} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100">
+                          <td className="py-2 px-3 text-center text-slate-700 whitespace-nowrap font-mono tabular-nums border-r border-slate-100">{m.fecha_emision}</td>
+                          <td className="py-2 px-2 text-center font-mono tabular-nums text-slate-700">{m.documento.tipo_documento}</td>
+                          <td className="py-2 px-2 text-center text-slate-600 font-mono tabular-nums">{m.documento.serie || '—'}</td>
+                          <td className="py-2 px-2 text-center border-r border-slate-200 text-slate-800 font-mono tabular-nums">{m.documento.numero || '—'}</td>
+                          <td className="py-2 px-3 text-center border-r border-slate-300 font-mono font-medium text-slate-700">
+                            {m.tipo_operacion || '—'}
+                          </td>
 
-                        {/* Salidas */}
-                        <td className="py-2 px-2.5 text-right bg-amber-50/15 text-rose-800 font-medium font-mono tabular-nums">{n(m.salida?.cantidad)}</td>
-                        <td className="py-2 px-2.5 text-right bg-amber-50/15 text-slate-600 font-mono tabular-nums">{n(m.salida?.costo_unitario)}</td>
-                        <td className="py-2 px-2.5 text-right bg-amber-50/15 border-r border-amber-100 font-semibold text-rose-800 font-mono tabular-nums">
-                          {n(m.salida?.costo_total)}
-                        </td>
+                          {/* Entradas (En Saldo Inicial va vacío para reflejarse directamente en Saldo Final) */}
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-900">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.entrada?.cantidad)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-600">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.entrada?.costo_unitario)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums border-r border-slate-300 font-semibold text-slate-900">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.entrada?.costo_total)}
+                          </td>
 
-                        {/* Saldo Final */}
-                        <td className="py-2 px-2.5 text-right bg-slate-50/30 font-medium text-slate-900 font-mono tabular-nums">{n(m.saldo_final.cantidad)}</td>
-                        <td className="py-2 px-2.5 text-right bg-slate-50/30 text-slate-700 font-mono tabular-nums">{n(m.saldo_final.costo_unitario)}</td>
-                        <td className="py-2 px-2.5 text-right bg-slate-50/30 font-bold text-slate-950 font-mono tabular-nums">
-                          {n(m.saldo_final.costo_total)}
-                        </td>
-                      </tr>
-                    ))}
+                          {/* Salidas */}
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-900">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.salida?.cantidad)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-600">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.salida?.costo_unitario)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums border-r border-slate-300 font-semibold text-slate-900">
+                            {esSaldoInicial ? <span className="text-slate-300 select-none font-mono">—</span> : n(m.salida?.costo_total)}
+                          </td>
+
+                          {/* Saldo Final (Refleja directamente el saldo inicial o acumulado) */}
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums font-bold text-slate-900">{n(m.saldo_final.cantidad)}</td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-700">{n(m.saldo_final.costo_unitario)}</td>
+                          <td className="py-2 px-2.5 text-right font-mono tabular-nums font-bold text-slate-950">
+                            {n(m.saldo_final.costo_total)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {(() => {
                       const fin = filaSaldoFinal(r);
                       return (
-                        <tr className="bg-slate-100/70 font-semibold text-slate-900 border-t-2 border-slate-300">
-                          <td colSpan={11} className="py-2.5 px-3 text-right font-sans text-[11px] uppercase tracking-wide text-slate-900 font-bold">
+                        <tr className="bg-slate-100/90 font-semibold text-slate-900 border-t-2 border-slate-800">
+                          <td colSpan={5} className="py-2.5 px-3 text-left font-sans text-xs uppercase tracking-wide text-slate-900 font-bold border-r border-slate-300">
                             Saldo Final del Período
                           </td>
+                          {/* Entradas: vacío */}
+                          <td colSpan={3} className="border-r border-slate-300" />
+                          {/* Salidas: vacío */}
+                          <td colSpan={3} className="border-r border-slate-300" />
+                          {/* Saldo Final */}
                           <td className="py-2.5 px-2.5 text-right text-slate-950 font-bold font-mono tabular-nums">{fin.cantidad}</td>
                           <td className="py-2.5 px-2.5 text-right text-slate-900 font-mono tabular-nums">{fin.costoUnitario}</td>
                           <td className="py-2.5 px-2.5 text-right font-black text-slate-950 text-xs font-mono tabular-nums">{fin.costoTotal}</td>
