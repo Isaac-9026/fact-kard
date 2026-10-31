@@ -269,3 +269,102 @@ def confirmar_transferencia(*, transferencia_id, empresa_id, usuario):
         transferencia.id, {'estado': 'BORRADOR'}, {'estado': 'CONFIRMADO'},
     )
     return transferencia
+
+
+@transaction.atomic
+def anular_nota_interna_servicio(*, nota_id, empresa_id, usuario, motivo=''):
+    nota = NotaInterna.objects.select_for_update().select_related(
+        'periodo', 'tipo_operacion',
+    ).filter(empresa_id=empresa_id, pk=nota_id).first()
+    if nota is None:
+        raise ValidationError({'detail': 'Nota interna no encontrada.'})
+    if nota.estado == 'ANULADO':
+        raise ValidationError({'estado': 'La nota interna ya se encuentra ANULADA.'})
+
+    from apps.empresas.models import Periodo
+    periodo = Periodo.objects.select_for_update().get(id=nota.periodo_id, empresa_id=empresa_id)
+    if periodo.estado != 'ABIERTO':
+        raise ValidationError({'periodo': 'No se puede anular directamente en un período CERRADO. Requiere reapertura previa.'})
+
+    motivo_limpio = (motivo or '').strip()
+    if nota.estado == 'CONFIRMADO' and not motivo_limpio:
+        raise ValidationError({'motivo': 'El motivo de anulación es obligatorio para notas confirmadas.'})
+
+    if nota.estado == 'CONFIRMADO':
+        from apps.kardex.services import tipo_operacion_extorno, aplicar_movimiento
+        movimientos_originales = list(
+            Movimiento.objects.filter(
+                empresa_id=empresa_id,
+                nota_interna_detalle__nota_interna_id=nota.id,
+                es_extorno=False,
+            ).select_related('tipo_operacion', 'valorizacion', 'producto').order_by('id')
+        )
+        for original in movimientos_originales:
+            if original.naturaleza == 'AJUSTE_VALOR':
+                tipo = tipo_operacion_extorno('AJUSTE_VALOR')
+                monto_ajuste_original = original.valor_ajuste_pen
+                if monto_ajuste_original is None and hasattr(original, 'valorizacion'):
+                    monto_ajuste_original = original.valorizacion.valor_movimiento_pen
+                aplicar_movimiento(
+                    empresa_id=empresa_id,
+                    producto_id=original.producto_id,
+                    almacen_id=original.almacen_id,
+                    periodo=periodo,
+                    tipo_operacion=tipo,
+                    fecha=nota.fecha,
+                    cantidad=CERO,
+                    usuario_id=usuario.id,
+                    costo_unitario=CERO,
+                    valor_ajuste=-(monto_ajuste_original or CERO),
+                    es_extorno=True,
+                    movimiento_extornado=original,
+                )
+            else:
+                tipo = tipo_operacion_extorno('SALIDA' if original.naturaleza == 'ENTRADA' else 'ENTRADA')
+                # Validación preventiva de stock en caso de extorno de ENTRADA (que genera SALIDA)
+                if tipo.naturaleza == 'SALIDA':
+                    stock_actual = _bloquear_stock(empresa_id, original.almacen_id, original.producto_id)
+                    saldo_actual = _bloquear_saldo(empresa_id, original.producto_id)
+                    if stock_actual.cantidad_actual < original.cantidad_base or saldo_actual.cantidad_total < original.cantidad_base:
+                        cod = getattr(original.producto, 'codigo_interno', str(original.producto_id))
+                        raise ValidationError({
+                            'stock': f'Stock insuficiente para extornar la operación del producto {cod}: las existencias ya fueron consumidas por movimientos posteriores.'
+                        })
+
+                costo_orig = original.valorizacion.costo_unitario_pen if hasattr(original, 'valorizacion') else CERO
+                aplicar_movimiento(
+                    empresa_id=empresa_id,
+                    producto_id=original.producto_id,
+                    almacen_id=original.almacen_id,
+                    periodo=periodo,
+                    tipo_operacion=tipo,
+                    fecha=nota.fecha,
+                    cantidad=original.cantidad_base,
+                    usuario_id=usuario.id,
+                    costo_unitario=costo_orig,
+                    valor_ajuste=None,
+                    es_extorno=True,
+                    movimiento_extornado=original,
+                )
+        anterior = {'estado': 'CONFIRMADO'}
+    else:
+        anterior = {'estado': 'BORRADOR'}
+
+    nota.estado = 'ANULADO'
+    if motivo_limpio:
+        nota.observacion = f"{nota.observacion}\n[Anulación]: {motivo_limpio}".strip() if nota.observacion else f"[Anulación]: {motivo_limpio}"
+    nota.save(update_fields=['estado', 'observacion'])
+
+    registrar_auditoria(
+        empresa_id,
+        usuario.id,
+        'ANULAR_NOTA_INTERNA',
+        'NOTA_INTERNA',
+        nota.id,
+        anterior,
+        {'estado': 'ANULADO'},
+        motivo_limpio or None,
+    )
+    return nota
+
+

@@ -1118,6 +1118,155 @@ class OperacionesInternasApiTest(TestCase):
         self.assertEqual(anulacion.valor_nuevo['estado'], 'ANULADO')
 
 
+
+    def test_nota_borrador_puede_eliminarse_fisicamente(self):
+        nota = self.crear_nota_modelo()
+        response = self.client.delete(
+            reverse('nota-interna-detail', args=[nota.id]),
+            **self.headers(),
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(NotaInterna.objects.filter(pk=nota.id).exists())
+
+    def test_nota_confirmada_no_puede_eliminarse_fisicamente(self):
+        nota = self.crear_nota_modelo(tipo='AJUSTE_INGRESO', costo=Decimal('10.00000000'))
+        from apps.inventario.services import confirmar_nota_interna
+        confirmar_nota_interna(nota_id=nota.id, empresa_id=self.empresa_a.id, usuario=self.admin)
+        response = self.client.delete(
+            reverse('nota-interna-detail', args=[nota.id]),
+            **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No se puede eliminar físicamente', response.data.get('estado', ''))
+
+    def test_nota_confirmada_anular_con_extorno_exitoso(self):
+        nota = self.crear_nota_modelo(tipo='AJUSTE_INGRESO', costo=Decimal('10.00000000'))
+        from apps.inventario.services import confirmar_nota_interna
+        confirmar_nota_interna(nota_id=nota.id, empresa_id=self.empresa_a.id, usuario=self.admin)
+
+        response = self.client.post(
+            reverse('nota-interna-anular', args=[nota.id]),
+            {'motivo': 'Error de digitación en ajuste de ingreso'},
+            format='json', **self.headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        nota.refresh_from_db()
+        self.assertEqual(nota.estado, 'ANULADO')
+
+        # Verificar que se generó un extorno en Movimiento
+        from apps.kardex.models import Movimiento
+        extornos = Movimiento.objects.filter(
+            empresa_id=self.empresa_a.id,
+            es_extorno=True,
+            movimiento_extornado__nota_interna_detalle__nota_interna_id=nota.id,
+        )
+        self.assertTrue(extornos.exists())
+
+    def test_confirmar_nota_interna_endpoint(self):
+        nota = self.crear_nota_modelo(tipo='AJUSTE_INGRESO', costo=Decimal('15.00000000'))
+        response = self.client.post(
+            reverse('nota-interna-confirmar', args=[nota.id]),
+            **self.headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        nota.refresh_from_db()
+        self.assertEqual(nota.estado, 'CONFIRMADO')
+
+    def test_saldo_inicial_borrador_puede_eliminarse_fisicamente(self):
+        saldo = SaldoInicial.objects.create(
+            empresa=self.empresa_a,
+            periodo=self.periodo_a,
+            almacen=self.almacen_a,
+            producto=self.producto_a,
+            cantidad=Decimal('10.00000000'),
+            valor_pen=Decimal('100.00000000'),
+            cpp_inicial=Decimal('10.000000'),
+            estado='BORRADOR',
+        )
+        response = self.client.delete(
+            reverse('saldo-inicial-detail', args=[saldo.id]),
+            **self.headers(),
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(SaldoInicial.objects.filter(pk=saldo.id).exists())
+
+    def test_saldo_inicial_confirmado_no_puede_eliminarse_fisicamente(self):
+        saldo = SaldoInicial.objects.create(
+            empresa=self.empresa_a,
+            periodo=self.periodo_a,
+            almacen=self.almacen_a,
+            producto=self.producto_a,
+            cantidad=Decimal('10.00000000'),
+            valor_pen=Decimal('100.00000000'),
+            cpp_inicial=Decimal('10.000000'),
+            estado='CONFIRMADO',
+        )
+        response = self.client.delete(
+            reverse('saldo-inicial-detail', args=[saldo.id]),
+            **self.headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No se puede eliminar físicamente', response.data.get('estado', ''))
+
+    def test_filtro_estado_activos_y_todos_notas(self):
+        # Crear una en borrador
+        nota_borrador = self.crear_nota_modelo(estado='BORRADOR')
+        # Crear una y anularla
+        nota_anulada = self.crear_nota_modelo(estado='BORRADOR')
+        self.client.post(
+            reverse('nota-interna-anular', args=[nota_anulada.id]), {},
+            format='json', **self.headers(),
+        )
+
+        # Filtro ACTIVOS debe retornar borrador pero NO anulada
+        resp_activos = self.client.get(
+            reverse('nota-interna-list-create') + '?estado=ACTIVOS',
+            **self.headers(),
+        )
+        self.assertEqual(resp_activos.status_code, 200)
+        ids_activos = [n['id'] for n in resp_activos.data]
+        self.assertIn(nota_borrador.id, ids_activos)
+        self.assertNotIn(nota_anulada.id, ids_activos)
+
+        # Filtro TODOS debe retornar ambas
+        resp_todos = self.client.get(
+            reverse('nota-interna-list-create') + '?estado=TODOS',
+            **self.headers(),
+        )
+        self.assertEqual(resp_todos.status_code, 200)
+        ids_todos = [n['id'] for n in resp_todos.data]
+        self.assertIn(nota_borrador.id, ids_todos)
+        self.assertIn(nota_anulada.id, ids_todos)
+
+    def test_filtro_estado_activos_y_todos_saldos(self):
+        saldo_borrador = SaldoInicial.objects.create(
+            empresa=self.empresa_a,
+            periodo=self.periodo_a,
+            almacen=self.almacen_a,
+            producto=self.producto_a,
+            cantidad=Decimal('5.00000000'),
+            valor_pen=Decimal('50.00000000'),
+            cpp_inicial=Decimal('10.000000'),
+            estado='BORRADOR',
+        )
+        resp_activos = self.client.get(
+            reverse('saldo-inicial-list-create') + '?estado=ACTIVOS',
+            **self.headers(),
+        )
+        self.assertEqual(resp_activos.status_code, 200)
+        ids = [s['id'] for s in resp_activos.data]
+        self.assertIn(saldo_borrador.id, ids)
+
+        resp_todos = self.client.get(
+            reverse('saldo-inicial-list-create') + '?estado=TODOS',
+            **self.headers(),
+        )
+        self.assertEqual(resp_todos.status_code, 200)
+        ids = [s['id'] for s in resp_todos.data]
+        self.assertIn(saldo_borrador.id, ids)
+
+
+
 class ProductoEquivalenciaApiTest(TestCase):
     def setUp(self):
         self.moneda = Moneda.objects.create(codigo='PEN', nombre='Soles')

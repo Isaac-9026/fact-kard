@@ -42,12 +42,12 @@ from apps.usuarios.permissions import EsAdminEmpresa, TieneEmpresaActiva
 class EmpresaActivaMixin:
     authentication_classes = (UsuarioTokenAuthentication,)
     permission_classes = (TieneEmpresaActiva,)
-    http_method_names = ('get', 'post', 'patch', 'head', 'options')
+    http_method_names = ('get', 'post', 'patch', 'delete', 'head', 'options')
     admin_write_required = True
 
     def get_permissions(self):
         permisos = [TieneEmpresaActiva()]
-        if self.admin_write_required and self.request.method in ('POST', 'PATCH'):
+        if self.admin_write_required and self.request.method in ('POST', 'PATCH', 'DELETE'):
             permisos.append(EsAdminEmpresa())
         return permisos
 
@@ -289,7 +289,11 @@ class SaldoInicialListCreateView(
         queryset = _filtrar_id(queryset, self.request, 'producto_id', 'producto_id')
         estado = self.request.query_params.get('estado')
         if estado:
-            queryset = queryset.filter(estado=estado)
+            estado_normalizado = estado.strip().upper()
+            if estado_normalizado in ('ACTIVO', 'ACTIVOS'):
+                queryset = queryset.filter(estado__in=['BORRADOR', 'CONFIRMADO'])
+            elif estado_normalizado not in ('TODOS', 'ALL'):
+                queryset = queryset.filter(estado=estado_normalizado)
         return queryset.order_by('-periodo__orden', 'almacen__codigo', 'producto__codigo_interno')
 
     def perform_create(self, serializer):
@@ -300,7 +304,7 @@ class SaldoInicialListCreateView(
 
 
 class SaldoInicialDetailView(
-    AuditoriaMixin, EmpresaActivaMixin, generics.RetrieveUpdateAPIView,
+    AuditoriaMixin, EmpresaActivaMixin, generics.RetrieveUpdateDestroyAPIView,
 ):
     serializer_class = SaldoInicialSerializer
     entidad_auditoria = 'SALDO_INICIAL'
@@ -311,6 +315,19 @@ class SaldoInicialDetailView(
             .select_related('periodo', 'almacen', 'producto')
             .prefetch_related('producto__unidades')
         )
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.estado != 'BORRADOR':
+            raise ValidationError({
+                'estado': 'No se puede eliminar físicamente un saldo inicial confirmado.'
+            })
+        anterior = dict(self.get_serializer(instance).data)
+        with transaction.atomic():
+            instance_id = instance.id
+            instance.delete()
+            self._registrar('ELIMINAR_SALDO_INICIAL', type('Obj', (), {'id': instance_id})(), anterior, None)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class NotaInternaMixin(AuditoriaMixin, EmpresaActivaMixin):
@@ -340,7 +357,11 @@ class NotaInternaListCreateView(NotaInternaMixin, generics.ListCreateAPIView):
             queryset = queryset.filter(tipo_operacion__codigo_interno=tipo_operacion)
         estado = self.request.query_params.get('estado')
         if estado:
-            queryset = queryset.filter(estado=estado)
+            estado_normalizado = estado.strip().upper()
+            if estado_normalizado in ('ACTIVO', 'ACTIVOS'):
+                queryset = queryset.filter(estado__in=['BORRADOR', 'CONFIRMADO'])
+            elif estado_normalizado not in ('TODOS', 'ALL'):
+                queryset = queryset.filter(estado=estado_normalizado)
         search = self.request.query_params.get('search', '').strip()
         if search:
             queryset = queryset.filter(
@@ -363,7 +384,7 @@ class NotaInternaListCreateView(NotaInternaMixin, generics.ListCreateAPIView):
         return Response(nuevo, status=status.HTTP_201_CREATED)
 
 
-class NotaInternaDetailView(NotaInternaMixin, generics.RetrieveUpdateAPIView):
+class NotaInternaDetailView(NotaInternaMixin, generics.RetrieveUpdateDestroyAPIView):
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         anterior = dict(self.get_serializer(instance).data)
@@ -377,31 +398,40 @@ class NotaInternaDetailView(NotaInternaMixin, generics.RetrieveUpdateAPIView):
             self._registrar('ACTUALIZAR_NOTA_INTERNA', nota, anterior, nuevo)
         return Response(nuevo)
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.estado != 'BORRADOR':
+            raise ValidationError({
+                'estado': 'No se puede eliminar físicamente una operación confirmada o anulada; utilice la anulación con extorno.'
+            })
+        serializer_permiso = self.get_serializer(instance)
+        self.exigir_admin_si_corresponde(serializer_permiso)
+        anterior = dict(self.get_serializer(instance).data)
+        with transaction.atomic():
+            instance_id = instance.id
+            instance.delete()
+            self._registrar('ELIMINAR_NOTA_INTERNA', type('Obj', (), {'id': instance_id})(), anterior, None)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class NotaInternaAnularView(NotaInternaMixin, generics.GenericAPIView):
     def post(self, request, *args, **kwargs):
+        motivo = request.data.get('motivo') or request.data.get('observacion') or ''
         with transaction.atomic():
             nota = get_object_or_404(
                 self.get_queryset().select_for_update(),
                 pk=self.kwargs['pk'],
             )
-            if nota.estado != 'BORRADOR':
-                raise ValidationError({
-                    'estado': 'Solo una nota BORRADOR puede anularse en este bloque.'
-                })
             serializer_permiso = self.get_serializer(nota)
             self.exigir_admin_si_corresponde(serializer_permiso)
-            anterior = dict(self.get_serializer(nota).data)
-            nota.estado = 'ANULADO'
-            nota.save(update_fields=['estado'])
-            nuevo = dict(self.get_serializer(nota).data)
-            self._registrar(
-                'ANULAR_NOTA_INTERNA',
-                nota,
-                anterior,
-                nuevo,
+            from apps.inventario.services import anular_nota_interna_servicio
+            nota = anular_nota_interna_servicio(
+                nota_id=nota.pk,
+                empresa_id=request.empresa_id,
+                usuario=request.user,
+                motivo=motivo,
             )
-        return Response(nuevo)
+            return Response(self.get_serializer(nota).data)
 
 
 class SaldoInicialConfirmarView(EmpresaActivaMixin, generics.GenericAPIView):

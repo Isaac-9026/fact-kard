@@ -34,7 +34,7 @@ export interface SaldoInicialFiltros {
   periodo_id?: number;
   almacen_id?: number;
   producto_id?: number;
-  estado?: EstadoSaldoInicial;
+  estado?: EstadoSaldoInicial | 'ACTIVOS' | 'TODOS';
 }
 
 export interface NotaInternaDetalle {
@@ -93,7 +93,7 @@ export interface NotaInternaFiltros {
   periodo_id?: number;
   almacen_id?: number;
   tipo_operacion?: string;
-  estado?: EstadoNotaInterna;
+  estado?: EstadoNotaInterna | 'ACTIVOS' | 'TODOS';
   search?: string;
 }
 
@@ -119,6 +119,10 @@ export const updateSaldoInicial = async (
 export const confirmarSaldoInicial = async (id: number): Promise<SaldoInicial> =>
   (await apiClient.post<SaldoInicial>(`/inventario/saldos-iniciales/${id}/confirmar/`)).data;
 
+export const eliminarSaldoInicialBorrador = async (id: number): Promise<void> => {
+  await apiClient.delete(`/inventario/saldos-iniciales/${id}/`);
+};
+
 export const getNotasInternas = async (
   filtros?: NotaInternaFiltros,
 ): Promise<NotaInterna[]> =>
@@ -138,8 +142,17 @@ export const updateNotaInterna = async (
 ): Promise<NotaInterna> =>
   (await apiClient.patch<NotaInterna>(`/inventario/notas-internas/${id}/`, payload)).data;
 
-export const anularNotaInterna = async (id: number): Promise<NotaInterna> =>
-  (await apiClient.post<NotaInterna>(`/inventario/notas-internas/${id}/anular/`)).data;
+export const anularNotaInterna = async (
+  id: number,
+  payload?: { motivo?: string } | string,
+): Promise<NotaInterna> => {
+  const data = typeof payload === 'string' ? { motivo: payload } : (payload ?? {});
+  return (await apiClient.post<NotaInterna>(`/inventario/notas-internas/${id}/anular/`, data)).data;
+};
 
 export const confirmarNotaInterna = async (id: number): Promise<NotaInterna> =>
   (await apiClient.post<NotaInterna>(`/inventario/notas-internas/${id}/confirmar/`)).data;
+
+export const eliminarNotaInternaBorrador = async (id: number): Promise<void> => {
+  await apiClient.delete(`/inventario/notas-internas/${id}/`);
+};
